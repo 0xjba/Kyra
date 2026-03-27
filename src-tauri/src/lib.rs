@@ -1,6 +1,7 @@
 mod commands;
 
-use commands::monitor::SystemMonitor;
+use commands::monitor::{StatsStreamActive, SystemMonitor};
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use sysinfo::System;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -10,6 +11,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .manage(SystemMonitor(Mutex::new(System::new_all())))
+        .manage(StatsStreamActive(AtomicBool::new(false)))
         .setup(|app| {
             let show_item = MenuItemBuilder::with_id("show", "Show Kyra").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;

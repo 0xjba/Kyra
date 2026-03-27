@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use sysinfo::{Networks, System};
 use tauri::{Emitter, State};
@@ -13,11 +14,7 @@ pub struct SystemStats {
     pub disk_free: u64,
 }
 
-#[derive(Clone, Serialize)]
-pub struct NetworkStats {
-    pub bytes_sent: u64,
-    pub bytes_recv: u64,
-}
+pub struct StatsStreamActive(pub AtomicBool);
 
 #[derive(Clone, Serialize)]
 pub struct DetailedStats {
@@ -73,12 +70,22 @@ pub fn get_system_stats(monitor: State<'_, SystemMonitor>) -> SystemStats {
 }
 
 #[tauri::command]
-pub async fn start_stats_stream(app: tauri::AppHandle) {
+pub async fn start_stats_stream(
+    app: tauri::AppHandle,
+    active: State<'_, StatsStreamActive>,
+) -> Result<(), ()> {
+    // Prevent spawning multiple background loops
+    if active.0.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+
     tauri::async_runtime::spawn(async move {
         let mut sys = System::new_all();
         let mut networks = Networks::new_with_refreshed_list();
+        let mut disks = sysinfo::Disks::new_with_refreshed_list();
         let mut prev_sent: u64 = networks.iter().map(|(_, n)| n.total_transmitted()).sum();
         let mut prev_recv: u64 = networks.iter().map(|(_, n)| n.total_received()).sum();
+        let mut tick_count: u32 = 0;
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -98,9 +105,15 @@ pub async fn start_stats_stream(app: tauri::AppHandle) {
                 0.0
             };
 
+            // Refresh disk info every 30 seconds instead of every tick
+            tick_count += 1;
+            if tick_count % 30 == 0 {
+                disks.refresh();
+            }
+
             let mut disk_total: u64 = 0;
             let mut disk_free: u64 = 0;
-            for disk in sysinfo::Disks::new_with_refreshed_list().iter() {
+            for disk in disks.iter() {
                 if disk.mount_point() == std::path::Path::new("/") {
                     disk_total = disk.total_space();
                     disk_free = disk.available_space();
@@ -147,4 +160,6 @@ pub async fn start_stats_stream(app: tauri::AppHandle) {
             }
         }
     });
+
+    Ok(())
 }

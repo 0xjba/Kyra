@@ -59,7 +59,7 @@ export default function Status() {
           max={100}
           label="CPU"
           detail={stats ? `${stats.cpu_cores.length} cores` : "—"}
-          color="var(--cyan)"
+          color="#5ef5e2"
         />
         <ArcGauge
           value={stats?.memory_used ?? 0}
@@ -70,7 +70,7 @@ export default function Status() {
               ? `${formatSize(stats.memory_used)} / ${formatSize(stats.memory_total)}`
               : "—"
           }
-          color="var(--green)"
+          color="#4ade80"
         />
         <ArcGauge
           value={stats?.disk_used ?? 0}
@@ -81,7 +81,7 @@ export default function Status() {
               ? `${formatSize(stats.disk_free)} free`
               : "—"
           }
-          color="var(--yellow)"
+          color="#facc15"
         />
       </div>
 
