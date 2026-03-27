@@ -9,6 +9,8 @@ pub fn run() {
         .manage(SystemMonitor(Mutex::new(System::new_all())))
         .invoke_handler(tauri::generate_handler![
             commands::monitor::get_system_stats,
+            commands::cleaner::scan_for_cleanables,
+            commands::cleaner::execute_clean,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");

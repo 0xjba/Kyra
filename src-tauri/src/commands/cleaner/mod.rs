@@ -77,3 +77,40 @@ pub fn is_safe_path(path: &str) -> bool {
     }
     true
 }
+
+use tauri::Emitter;
+
+#[tauri::command]
+pub fn scan_for_cleanables() -> Vec<ScanItem> {
+    let rules = rules::all_rules();
+    scanner::scan_rules(&rules)
+}
+
+#[tauri::command]
+pub fn execute_clean(
+    app: tauri::AppHandle,
+    rule_ids: Vec<String>,
+    dry_run: bool,
+) -> Result<CleanResult, String> {
+    // First scan to get current state of selected items
+    let rules = rules::all_rules();
+    let all_items = scanner::scan_rules(&rules);
+    let selected_items: Vec<ScanItem> = all_items
+        .into_iter()
+        .filter(|item| rule_ids.contains(&item.rule_id))
+        .collect();
+
+    if selected_items.is_empty() {
+        return Ok(CleanResult {
+            items_cleaned: 0,
+            bytes_freed: 0,
+            errors: vec![],
+        });
+    }
+
+    let result = executor::execute_clean_items(&selected_items, dry_run, |progress| {
+        let _ = app.emit("clean-progress", progress);
+    });
+
+    Ok(result)
+}
