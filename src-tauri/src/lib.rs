@@ -13,6 +13,9 @@ pub fn run() {
             commands::cleaner::execute_clean,
             commands::optimizer::get_optimize_tasks,
             commands::optimizer::run_optimize_tasks,
+            commands::uninstaller::scan_installed_apps,
+            commands::uninstaller::get_associated_files,
+            commands::uninstaller::execute_uninstall,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");
