@@ -3,8 +3,21 @@ use std::process::Command;
 use super::{OptResult, OptTask, OptTaskStatus};
 
 /// Runs a shell command and returns (success, output_message).
-fn run_shell(command: &str) -> (bool, String) {
-    match Command::new("sh").arg("-c").arg(command).output() {
+fn run_shell(command: &str, needs_admin: bool) -> (bool, String) {
+    let result = if needs_admin {
+        // Use osascript to show native macOS password dialog for admin tasks.
+        // Escape backslashes and double-quotes for AppleScript string.
+        let escaped = command.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            "do shell script \"{}\" with administrator privileges",
+            escaped
+        );
+        Command::new("osascript").arg("-e").arg(&script).output()
+    } else {
+        Command::new("sh").arg("-c").arg(command).output()
+    };
+
+    match result {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -36,7 +49,7 @@ where
             message: None,
         });
 
-        let (success, message) = run_shell(&task.command);
+        let (success, message) = run_shell(&task.command, task.needs_admin);
 
         if success {
             succeeded += 1;

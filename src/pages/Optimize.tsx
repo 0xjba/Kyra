@@ -94,7 +94,7 @@ export default function Optimize() {
     }
   }, [tasks.length, loadTasks]);
 
-  const allEnabled = enabledIds.size === tasks.length;
+  const allEnabled = tasks.length > 0 && enabledIds.size === tasks.length;
 
   return (
     <div className="optimize-container">
