@@ -1701,6 +1701,8 @@ dependencies = [
 name = "kyra"
 version = "0.1.0"
 dependencies = [
+ "dirs",
+ "plist",
  "serde",
  "serde_json",
  "sysinfo",
