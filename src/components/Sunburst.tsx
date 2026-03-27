@@ -121,6 +121,11 @@ export default function Sunburst({ node, onDrillIn, onReveal, width, height }: S
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
+
       ctx.clearRect(0, 0, width, height);
 
       // Draw center circle
@@ -243,13 +248,11 @@ export default function Sunburst({ node, onDrillIn, onReveal, width, height }: S
     <div style={{ position: "relative", width, height }}>
       <canvas
         ref={canvasRef}
-        width={width}
-        height={height}
         onMouseMove={handleMouseMove}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         onMouseLeave={handleMouseLeave}
-        style={{ cursor: "pointer" }}
+        style={{ cursor: "pointer", width, height }}
       />
       <div
         ref={tooltipRef}

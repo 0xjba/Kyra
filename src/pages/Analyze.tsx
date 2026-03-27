@@ -64,7 +64,7 @@ function Breadcrumb() {
   const breadcrumb = useAnalyzeStore((s) => s.breadcrumb);
   const current = useAnalyzeStore((s) => s.current);
   const drillToRoot = useAnalyzeStore((s) => s.drillToRoot);
-  const drillUp = useAnalyzeStore((s) => s.drillUp);
+  const drillToIndex = useAnalyzeStore((s) => s.drillToIndex);
 
   if (breadcrumb.length === 0) return null;
 
@@ -78,11 +78,7 @@ function Breadcrumb() {
           <span className="analyze-breadcrumb-sep">/</span>
           <button
             className="analyze-breadcrumb-item"
-            onClick={() => {
-              for (let j = breadcrumb.length - 1; j > i + 1; j--) {
-                drillUp();
-              }
-            }}
+            onClick={() => drillToIndex(i + 1)}
           >
             {node.name}
           </button>

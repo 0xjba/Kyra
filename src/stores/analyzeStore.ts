@@ -24,6 +24,7 @@ interface AnalyzeStore {
   scan: () => Promise<void>;
   drillInto: (node: DirNode) => void;
   drillUp: () => void;
+  drillToIndex: (index: number) => void;
   drillToRoot: () => void;
   setViewMode: (mode: "sunburst" | "list") => void;
   reveal: (path: string) => void;
@@ -76,6 +77,12 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
     if (breadcrumb.length === 0) return;
     const parent = breadcrumb[breadcrumb.length - 1];
     set({ current: parent, breadcrumb: breadcrumb.slice(0, -1) });
+  },
+
+  drillToIndex: (index: number) => {
+    const { breadcrumb } = get();
+    if (index >= breadcrumb.length) return;
+    set({ current: breadcrumb[index], breadcrumb: breadcrumb.slice(0, index) });
   },
 
   drillToRoot: () => {

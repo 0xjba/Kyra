@@ -15,6 +15,7 @@ where
     F: FnMut(&ScanProgress),
 {
     let mut files_scanned: usize = 0;
+    let mut total_size_acc: u64 = 0;
     let path = Path::new(root_path);
 
     let name = path
@@ -23,7 +24,7 @@ where
         .unwrap_or(root_path)
         .to_string();
 
-    let mut root = build_tree(path, 0, max_depth, &mut files_scanned, &mut on_progress);
+    let mut root = build_tree(path, 0, max_depth, &mut files_scanned, &mut total_size_acc, &mut on_progress);
     root.name = name;
     root.path = root_path.to_string();
     root
@@ -34,6 +35,7 @@ fn build_tree<F>(
     current_depth: usize,
     max_depth: usize,
     files_scanned: &mut usize,
+    running_total: &mut u64,
     on_progress: &mut F,
 ) -> DirNode
 where
@@ -59,12 +61,13 @@ where
     if path.is_file() {
         let size = path.metadata().map(|m| m.len()).unwrap_or(0);
         *files_scanned += 1;
+        *running_total += size;
 
         if *files_scanned % 500 == 0 {
             on_progress(&ScanProgress {
                 current_path: path.to_string_lossy().to_string(),
                 files_scanned: *files_scanned,
-                total_size: 0,
+                total_size: *running_total,
             });
         }
 
@@ -100,7 +103,7 @@ where
             if child_path.is_symlink() {
                 continue;
             }
-            let child = build_tree(&child_path, current_depth + 1, max_depth, files_scanned, on_progress);
+            let child = build_tree(&child_path, current_depth + 1, max_depth, files_scanned, running_total, on_progress);
             total_size += child.size;
             children.push(child);
         }
@@ -114,7 +117,7 @@ where
             if child_path.is_symlink() {
                 continue;
             }
-            total_size += flat_size(&child_path, files_scanned, on_progress);
+            total_size += flat_size(&child_path, files_scanned, running_total, on_progress);
         }
     }
 
@@ -128,7 +131,7 @@ where
 }
 
 /// Calculates size without building child nodes (used at max depth).
-fn flat_size<F>(path: &Path, files_scanned: &mut usize, on_progress: &mut F) -> u64
+fn flat_size<F>(path: &Path, files_scanned: &mut usize, running_total: &mut u64, on_progress: &mut F) -> u64
 where
     F: FnMut(&ScanProgress),
 {
@@ -137,14 +140,16 @@ where
     }
     if path.is_file() {
         *files_scanned += 1;
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        *running_total += size;
         if *files_scanned % 500 == 0 {
             on_progress(&ScanProgress {
                 current_path: path.to_string_lossy().to_string(),
                 files_scanned: *files_scanned,
-                total_size: 0,
+                total_size: *running_total,
             });
         }
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
+        return size;
     }
     let entries = match fs::read_dir(path) {
         Ok(e) => e,
@@ -157,7 +162,7 @@ where
             if p.is_symlink() {
                 0
             } else {
-                flat_size(&p, files_scanned, on_progress)
+                flat_size(&p, files_scanned, running_total, on_progress)
             }
         })
         .sum()
