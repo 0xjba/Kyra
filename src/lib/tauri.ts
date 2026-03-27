@@ -241,3 +241,60 @@ export async function listenAnalyzeProgress(
     callback(event.payload);
   });
 }
+
+// ── Purge Module Types ──────────────────────────────────
+
+export interface ArtifactEntry {
+  project_name: string;
+  project_path: string;
+  artifact_type: string;
+  artifact_path: string;
+  size: number;
+}
+
+export interface PurgeScanProgress {
+  current_path: string;
+  artifacts_found: number;
+}
+
+export interface PurgeProgress {
+  current_item: string;
+  items_done: number;
+  items_total: number;
+  bytes_freed: number;
+}
+
+export interface PurgeResult {
+  items_removed: number;
+  bytes_freed: number;
+  errors: string[];
+}
+
+// ── Purge Module Commands ───────────────────────────────
+
+export async function scanArtifacts(rootPath: string): Promise<ArtifactEntry[]> {
+  return invoke<ArtifactEntry[]>("scan_artifacts", { rootPath });
+}
+
+export async function executePurge(
+  artifactPaths: string[],
+  dryRun: boolean
+): Promise<PurgeResult> {
+  return invoke<PurgeResult>("execute_purge", { artifactPaths, dryRun });
+}
+
+export async function listenPurgeScanProgress(
+  callback: (progress: PurgeScanProgress) => void
+): Promise<UnlistenFn> {
+  return listen<PurgeScanProgress>("purge-scan-progress", (event) => {
+    callback(event.payload);
+  });
+}
+
+export async function listenPurgeProgress(
+  callback: (progress: PurgeProgress) => void
+): Promise<UnlistenFn> {
+  return listen<PurgeProgress>("purge-progress", (event) => {
+    callback(event.payload);
+  });
+}
