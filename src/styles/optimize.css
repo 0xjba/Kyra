@@ -1,0 +1,234 @@
+.optimize-container {
+  padding: 18px;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.optimize-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.optimize-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.optimize-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.optimize-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+
+.optimize-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.optimize-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.optimize-btn-primary {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.optimize-btn-primary:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.optimize-task-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.optimize-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.optimize-task:last-child {
+  border-bottom: none;
+}
+
+.optimize-toggle {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.optimize-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.optimize-toggle-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.optimize-toggle input:checked + .optimize-toggle-track {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.optimize-toggle-track::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  background: var(--text-tertiary);
+  border-radius: 50%;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.optimize-toggle input:checked + .optimize-toggle-track::after {
+  transform: translateX(14px);
+  background: var(--text-primary);
+}
+
+.optimize-task-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.optimize-task-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.optimize-task-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.optimize-task-warning {
+  font-size: 10px;
+  color: var(--yellow);
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+.optimize-admin-badge {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.optimize-status {
+  font-size: 11px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.optimize-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.optimize-status-ready .optimize-status-dot {
+  background: var(--text-tertiary);
+}
+
+.optimize-status-running .optimize-status-dot {
+  background: var(--cyan);
+  animation: pulse 1s infinite;
+}
+
+.optimize-status-done .optimize-status-dot {
+  background: var(--green);
+}
+
+.optimize-status-error .optimize-status-dot {
+  background: var(--red);
+}
+
+.optimize-status-skipped .optimize-status-dot {
+  background: var(--yellow);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.optimize-run-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+
+.optimize-run-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+.optimize-run-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.optimize-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.optimize-summary-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
