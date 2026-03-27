@@ -178,3 +178,40 @@ export async function listenUninstallProgress(
     callback(event.payload);
   });
 }
+
+// ── Analyze Module Types ──────────────────────────────────
+
+export interface DirNode {
+  name: string;
+  path: string;
+  size: number;
+  is_dir: boolean;
+  children: DirNode[];
+}
+
+export interface AnalyzeScanProgress {
+  current_path: string;
+  files_scanned: number;
+  total_size: number;
+}
+
+// ── Analyze Module Commands ───────────────────────────────
+
+export async function analyzePath(
+  path: string,
+  depth: number
+): Promise<DirNode> {
+  return invoke<DirNode>("analyze_path", { path, depth });
+}
+
+export async function revealInFinder(path: string): Promise<void> {
+  return invoke<void>("reveal_in_finder", { path });
+}
+
+export async function listenAnalyzeProgress(
+  callback: (progress: AnalyzeScanProgress) => void
+): Promise<UnlistenFn> {
+  return listen<AnalyzeScanProgress>("analyze-progress", (event) => {
+    callback(event.payload);
+  });
+}

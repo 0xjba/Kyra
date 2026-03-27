@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import Clean from "./pages/Clean";
 import Optimize from "./pages/Optimize";
 import Uninstall from "./pages/Uninstall";
+import Analyze from "./pages/Analyze";
 import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/clean" element={<Clean />} />
             <Route path="/optimize" element={<Optimize />} />
             <Route path="/uninstall" element={<Uninstall />} />
+            <Route path="/analyze" element={<Analyze />} />
             <Route path="/:module" element={<ModulePlaceholder />} />
           </Routes>
         </div>
