@@ -66,3 +66,47 @@ export async function listenCleanProgress(
     callback(event.payload);
   });
 }
+
+// ── Optimize Module Types ───────────────────────────────
+
+export interface OptTask {
+  id: string;
+  name: string;
+  description: string;
+  command: string;
+  needs_admin: boolean;
+  warning: string | null;
+}
+
+export interface OptTaskStatus {
+  task_id: string;
+  status: "running" | "done" | "error" | "skipped";
+  message: string | null;
+}
+
+export interface OptResult {
+  tasks_run: number;
+  tasks_succeeded: number;
+  tasks_failed: number;
+  tasks_skipped: number;
+}
+
+// ── Optimize Module Commands ────────────────────────────
+
+export async function getOptimizeTasks(): Promise<OptTask[]> {
+  return invoke<OptTask[]>("get_optimize_tasks");
+}
+
+export async function runOptimizeTasks(
+  taskIds: string[]
+): Promise<OptResult> {
+  return invoke<OptResult>("run_optimize_tasks", { taskIds });
+}
+
+export async function listenOptimizeStatus(
+  callback: (status: OptTaskStatus) => void
+): Promise<UnlistenFn> {
+  return listen<OptTaskStatus>("optimize-status", (event) => {
+    callback(event.payload);
+  });
+}
