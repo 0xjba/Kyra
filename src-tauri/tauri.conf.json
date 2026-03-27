@@ -1,0 +1,24 @@
+{
+  "productName": "Kyra",
+  "version": "0.1.0",
+  "identifier": "com.kyra.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Kyra",
+        "width": 800,
+        "height": 620,
+        "resizable": true,
+        "decorations": true,
+        "minWidth": 700,
+        "minHeight": 500
+      }
+    ]
+  }
+}
