@@ -1,5 +1,7 @@
 use serde::Serialize;
+use std::sync::Mutex;
 use sysinfo::System;
+use tauri::State;
 
 #[derive(Serialize)]
 pub struct SystemStats {
@@ -11,10 +13,13 @@ pub struct SystemStats {
     pub disk_free: u64,
 }
 
+pub struct SystemMonitor(pub Mutex<System>);
+
 #[tauri::command]
-pub fn get_system_stats() -> SystemStats {
-    let mut sys = System::new_all();
-    sys.refresh_all();
+pub fn get_system_stats(monitor: State<'_, SystemMonitor>) -> SystemStats {
+    let mut sys = monitor.0.lock().unwrap();
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
 
     let cpu_usage = sys.global_cpu_usage();
 

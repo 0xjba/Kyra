@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import AccentBar from "./components/AccentBar";
 import TitleBar from "./components/TitleBar";
 import Home from "./pages/Home";
@@ -6,7 +6,7 @@ import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
         <AccentBar />
         <TitleBar />
@@ -17,6 +17,6 @@ export default function App() {
           </Routes>
         </div>
       </div>
-    </BrowserRouter>
+    </HashRouter>
   );
 }

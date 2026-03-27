@@ -1,7 +1,12 @@
 mod commands;
 
+use commands::monitor::SystemMonitor;
+use std::sync::Mutex;
+use sysinfo::System;
+
 pub fn run() {
     tauri::Builder::default()
+        .manage(SystemMonitor(Mutex::new(System::new_all())))
         .invoke_handler(tauri::generate_handler![
             commands::monitor::get_system_stats,
         ])

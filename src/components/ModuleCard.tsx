@@ -11,7 +11,6 @@ interface ModuleCardProps {
   stat?: string;
   statLabel?: string;
   children?: ReactNode;
-  className?: string;
   style?: React.CSSProperties;
 }
 
