@@ -14,6 +14,32 @@ export async function getSystemStats(): Promise<SystemStats> {
   return invoke<SystemStats>("get_system_stats");
 }
 
+export interface DetailedStats {
+  cpu_usage: number;
+  cpu_cores: number[];
+  memory_total: number;
+  memory_used: number;
+  memory_percent: number;
+  disk_total: number;
+  disk_used: number;
+  disk_free: number;
+  disk_percent: number;
+  net_upload: number;
+  net_download: number;
+}
+
+export async function startStatsStream(): Promise<void> {
+  return invoke<void>("start_stats_stream");
+}
+
+export async function listenStatsTick(
+  callback: (stats: DetailedStats) => void
+): Promise<UnlistenFn> {
+  return listen<DetailedStats>("system-stats-tick", (event) => {
+    callback(event.payload);
+  });
+}
+
 // ── Clean Module Types ──────────────────────────────────
 
 export interface PathInfo {
