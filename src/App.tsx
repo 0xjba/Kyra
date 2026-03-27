@@ -3,6 +3,7 @@ import AccentBar from "./components/AccentBar";
 import TitleBar from "./components/TitleBar";
 import Home from "./pages/Home";
 import Clean from "./pages/Clean";
+import Optimize from "./pages/Optimize";
 import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/clean" element={<Clean />} />
+            <Route path="/optimize" element={<Optimize />} />
             <Route path="/:module" element={<ModulePlaceholder />} />
           </Routes>
         </div>
