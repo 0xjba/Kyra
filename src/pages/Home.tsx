@@ -12,6 +12,7 @@ import SystemStrip from "../components/SystemStrip";
 import ModuleCard from "../components/ModuleCard";
 import { useSystemStore } from "../stores/systemStore";
 import { useCleanStore } from "../stores/cleanStore";
+import { useUninstallStore } from "../stores/uninstallStore";
 import "../styles/dashboard.css";
 
 function formatSize(bytes: number): string {
@@ -30,12 +31,21 @@ export default function Home() {
   const fetchStats = useSystemStore((s) => s.fetchStats);
   const cleanItems = useCleanStore((s) => s.items);
   const reclaimable = cleanItems.reduce((sum, item) => sum + item.total_size, 0);
+  const uninstallApps = useUninstallStore((s) => s.apps);
+  const uninstallPhase = useUninstallStore((s) => s.phase);
+  const scanApps = useUninstallStore((s) => s.scanApps);
 
   useEffect(() => {
     fetchStats();
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
   }, [fetchStats]);
+
+  useEffect(() => {
+    if (uninstallPhase === "idle") {
+      scanApps();
+    }
+  }, [uninstallPhase, scanApps]);
 
   return (
     <div style={{ padding: 18, overflowY: "auto", height: "100%" }}>
@@ -79,7 +89,7 @@ export default function Home() {
           description="Remove apps completely with all associated files"
           icon={Grid2x2Plus}
           route="/uninstall"
-          meta="127 apps installed"
+          meta={uninstallApps.length > 0 ? `${uninstallApps.length} apps installed` : "Scan apps"}
           style={{ gridColumn: "span 2", gridRow: "span 1" }}
         />
 

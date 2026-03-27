@@ -63,7 +63,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
   },
 
   selectApp: async (app: AppInfo) => {
-    set({ selectedApp: app, associatedFiles: [], loadingFiles: true, selectedFilePaths: new Set() });
+    set({ selectedApp: app, associatedFiles: [], loadingFiles: true, selectedFilePaths: new Set(), error: null });
     try {
       const files = await getAssociatedFiles(app.bundle_id, app.name, app.path);
       const allPaths = new Set(files.map((f) => f.path));
@@ -74,7 +74,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
   },
 
   deselectApp: () => {
-    set({ selectedApp: null, associatedFiles: [], selectedFilePaths: new Set() });
+    set({ selectedApp: null, associatedFiles: [], selectedFilePaths: new Set(), error: null });
   },
 
   toggleFile: (path: string) => {

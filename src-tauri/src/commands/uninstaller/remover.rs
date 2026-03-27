@@ -4,9 +4,6 @@ use std::path::Path;
 use super::{UninstallProgress, UninstallResult};
 
 /// Paths that must never be deleted.
-/// Note: `/Applications` is intentionally excluded so that individual `.app`
-/// bundles inside it (e.g. `/Applications/SomeApp.app`) can be deleted.
-/// Only truly dangerous system roots are protected here.
 const PROTECTED_PATHS: &[&str] = &[
     "/System",
     "/bin",
@@ -16,15 +13,61 @@ const PROTECTED_PATHS: &[&str] = &[
     "/etc",
     "/var/db",
     "/Library/Frameworks",
+    "/Applications",
+];
+
+/// User-relative directories that must not be deleted as a whole.
+const PROTECTED_HOME_DIRS: &[&str] = &[
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Library",
+    "Pictures",
+    "Music",
+    "Movies",
 ];
 
 /// Returns true if a path is safe to delete.
+/// Allows deleting individual .app bundles inside /Applications (e.g. /Applications/Foo.app)
+/// but blocks deleting /Applications itself or its non-.app contents.
 fn is_safe_path(path: &str) -> bool {
+    // Block exact protected system paths and their children
     for protected in PROTECTED_PATHS {
-        if path == *protected || path.starts_with(&format!("{}/", protected)) {
+        if path == *protected {
+            return false;
+        }
+        // Special case: allow /Applications/*.app but block /Applications itself
+        if *protected == "/Applications" && path.starts_with("/Applications/") {
+            // Only allow .app bundles directly in /Applications
+            let remainder = &path["/Applications/".len()..];
+            if remainder.contains('/') {
+                // It's a path inside an app bundle — allow
+                continue;
+            }
+            if !remainder.ends_with(".app") {
+                return false;
+            }
+            continue;
+        }
+        if path.starts_with(&format!("{}/", protected)) {
             return false;
         }
     }
+
+    // Block home directory itself and key user directories
+    if let Some(home) = dirs::home_dir() {
+        let home_str = home.to_string_lossy();
+        if path == home_str.as_ref() {
+            return false;
+        }
+        for dir in PROTECTED_HOME_DIRS {
+            let protected = format!("{}/{}", home_str, dir);
+            if path == protected {
+                return false;
+            }
+        }
+    }
+
     true
 }
 
@@ -35,7 +78,7 @@ pub fn remove_app_and_files<F>(
     file_paths: &[String],
     dry_run: bool,
     mut on_progress: F,
-) -> Result<UninstallResult, String>
+) -> UninstallResult
 where
     F: FnMut(&UninstallProgress),
 {
@@ -109,11 +152,11 @@ where
         });
     }
 
-    Ok(UninstallResult {
+    UninstallResult {
         items_removed,
         bytes_freed,
         errors,
-    })
+    }
 }
 
 /// Recursively calculates directory size.

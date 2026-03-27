@@ -178,7 +178,11 @@ function DetailView() {
         </span>
         <button
           className="uninstall-btn uninstall-btn-danger"
-          onClick={uninstall}
+          onClick={() => {
+            if (window.confirm(`Remove ${selectedApp.name} and ${selectedFilePaths.size} associated files? This cannot be undone.`)) {
+              uninstall();
+            }
+          }}
         >
           Remove {selectedApp.name}
         </button>

@@ -110,3 +110,71 @@ export async function listenOptimizeStatus(
     callback(event.payload);
   });
 }
+
+// ── Uninstall Module Types ────────────────────────────────
+
+export interface AppInfo {
+  bundle_id: string;
+  name: string;
+  version: string;
+  path: string;
+  size: number;
+}
+
+export interface AssociatedFile {
+  path: string;
+  category: string;
+  size: number;
+  is_dir: boolean;
+}
+
+export interface UninstallProgress {
+  current_item: string;
+  items_done: number;
+  items_total: number;
+  bytes_freed: number;
+}
+
+export interface UninstallResult {
+  items_removed: number;
+  bytes_freed: number;
+  errors: string[];
+}
+
+// ── Uninstall Module Commands ─────────────────────────────
+
+export async function scanInstalledApps(): Promise<AppInfo[]> {
+  return invoke<AppInfo[]>("scan_installed_apps");
+}
+
+export async function getAssociatedFiles(
+  bundleId: string,
+  appName: string,
+  appPath: string
+): Promise<AssociatedFile[]> {
+  return invoke<AssociatedFile[]>("get_associated_files", {
+    bundleId,
+    appName,
+    appPath,
+  });
+}
+
+export async function executeUninstall(
+  appPath: string,
+  filePaths: string[],
+  dryRun: boolean
+): Promise<UninstallResult> {
+  return invoke<UninstallResult>("execute_uninstall", {
+    appPath,
+    filePaths,
+    dryRun,
+  });
+}
+
+export async function listenUninstallProgress(
+  callback: (progress: UninstallProgress) => void
+): Promise<UnlistenFn> {
+  return listen<UninstallProgress>("uninstall-progress", (event) => {
+    callback(event.payload);
+  });
+}

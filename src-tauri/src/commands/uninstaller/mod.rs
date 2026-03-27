@@ -65,7 +65,7 @@ pub fn execute_uninstall(
 ) -> Result<UninstallResult, String> {
     let result = remover::remove_app_and_files(&app_path, &file_paths, dry_run, |progress| {
         let _ = app.emit("uninstall-progress", progress);
-    })?;
+    });
 
     Ok(result)
 }
