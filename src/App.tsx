@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route } from "react-router-dom";
 import AccentBar from "./components/AccentBar";
 import TitleBar from "./components/TitleBar";
 import Home from "./pages/Home";
+import Clean from "./pages/Clean";
 import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
         <div style={{ flex: 1, overflow: "hidden" }}>
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/clean" element={<Clean />} />
             <Route path="/:module" element={<ModulePlaceholder />} />
           </Routes>
         </div>

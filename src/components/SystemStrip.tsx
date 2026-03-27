@@ -1,6 +1,10 @@
 import { useSystemStore } from "../stores/systemStore";
+import { useCleanStore } from "../stores/cleanStore";
 
 function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
   const gb = bytes / (1024 * 1024 * 1024);
   return `${Math.round(gb)} GB`;
 }
@@ -41,6 +45,9 @@ function Stat({ color, label, value }: StatProps) {
 
 export default function SystemStrip() {
   const stats = useSystemStore((s) => s.stats);
+  const cleanItems = useCleanStore((s) => s.items);
+
+  const reclaimable = cleanItems.reduce((sum, item) => sum + item.total_size, 0);
 
   return (
     <div
@@ -72,7 +79,7 @@ export default function SystemStrip() {
       <Stat
         color="red"
         label="Reclaimable"
-        value="—"
+        value={reclaimable > 0 ? formatBytes(reclaimable) : "—"}
       />
     </div>
   );
