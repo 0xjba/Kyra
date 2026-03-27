@@ -2,7 +2,7 @@ pub mod executor;
 pub mod rules;
 pub mod scanner;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// A cleaning rule definition — pure data describing what to scan.
 #[derive(Clone, Serialize)]
@@ -29,13 +29,6 @@ pub struct ScanItem {
     pub label: String,
     pub paths: Vec<PathInfo>,
     pub total_size: u64,
-}
-
-/// Request to clean specific items.
-#[derive(Deserialize)]
-pub struct CleanRequest {
-    pub rule_ids: Vec<String>,
-    pub dry_run: bool,
 }
 
 /// Progress event emitted during cleaning.

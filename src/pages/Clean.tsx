@@ -240,6 +240,7 @@ function DoneView() {
 export default function Clean() {
   const phase = useCleanStore((s) => s.phase);
   const error = useCleanStore((s) => s.error);
+  const scan = useCleanStore((s) => s.scan);
 
   return (
     <div className="clean-container">
@@ -258,7 +259,7 @@ export default function Clean() {
         </div>
       )}
 
-      {phase === "idle" && <IdleView onScan={useCleanStore.getState().scan} />}
+      {phase === "idle" && <IdleView onScan={scan} />}
       {phase === "scanning" && <ScanningView />}
       {phase === "results" && <ResultsView />}
       {phase === "cleaning" && <CleaningView />}
