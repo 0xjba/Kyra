@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::{PurgeProgress, PurgeResult};
+use super::{dir_size, PurgeProgress, PurgeResult};
 
 /// Paths that must never be deleted.
 const PROTECTED_PATHS: &[&str] = &[
@@ -16,10 +16,24 @@ const PROTECTED_PATHS: &[&str] = &[
     "/Applications",
 ];
 
+/// Known artifact directory names that are valid purge targets.
+const VALID_ARTIFACT_NAMES: &[&str] = &[
+    "node_modules", "target", "dist", "build", ".next", ".nuxt",
+    "__pycache__", ".pytest_cache", "Pods", ".gradle", ".build",
+];
+
 /// Returns true if a path is safe to delete for purge operations.
-fn is_safe_path(path: &str) -> bool {
+/// Canonicalizes the path to prevent traversal attacks.
+fn is_safe_path(path_str: &str) -> bool {
+    // Canonicalize to resolve any .. or symlinks
+    let canonical = match fs::canonicalize(path_str) {
+        Ok(p) => p,
+        Err(_) => return false, // Can't resolve = don't delete
+    };
+    let path = canonical.to_string_lossy();
+
     for protected in PROTECTED_PATHS {
-        if path == *protected || path.starts_with(&format!("{}/", protected)) {
+        if path.as_ref() == *protected || path.starts_with(&format!("{}/", protected)) {
             return false;
         }
     }
@@ -27,9 +41,20 @@ fn is_safe_path(path: &str) -> bool {
     // Block home directory itself
     if let Some(home) = dirs::home_dir() {
         let home_str = home.to_string_lossy();
-        if path == home_str.as_ref() {
+        if path.as_ref() == home_str.as_ref() {
             return false;
         }
+    }
+
+    // Verify the directory name is a known artifact type
+    if let Some(name) = canonical.file_name().and_then(|n| n.to_str()) {
+        if !VALID_ARTIFACT_NAMES.contains(&name)
+            && !name.ends_with(".egg-info")
+        {
+            return false;
+        }
+    } else {
+        return false;
     }
 
     true
@@ -105,29 +130,3 @@ where
     }
 }
 
-/// Recursively calculates directory size.
-fn dir_size(path: &Path) -> u64 {
-    if path.is_symlink() {
-        return 0;
-    }
-    if path.is_file() {
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => return 0,
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| {
-            let p = e.path();
-            if p.is_symlink() {
-                0
-            } else if p.is_dir() {
-                dir_size(&p)
-            } else {
-                p.metadata().map(|m| m.len()).unwrap_or(0)
-            }
-        })
-        .sum()
-}

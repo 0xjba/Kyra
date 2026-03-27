@@ -1,7 +1,6 @@
 use std::fs;
-use std::path::Path;
 
-use super::{ArtifactEntry, ScanProgress};
+use super::{dir_size, ArtifactEntry, ScanProgress};
 
 /// Known build artifact directory names and their human-readable type labels.
 const ARTIFACT_DIRS: &[(&str, &str)] = &[
@@ -28,7 +27,20 @@ pub fn scan_for_artifacts<F>(root: &str, mut on_progress: F) -> Vec<ArtifactEntr
 where
     F: FnMut(&ScanProgress),
 {
-    let root_path = Path::new(root);
+    // Expand ~ to home directory
+    let expanded = if root.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&root[2..])
+        } else {
+            std::path::PathBuf::from(root)
+        }
+    } else if root == "~" {
+        dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(root))
+    } else {
+        std::path::PathBuf::from(root)
+    };
+
+    let root_path = expanded.as_path();
     if !root_path.is_dir() {
         return Vec::new();
     }
@@ -81,7 +93,7 @@ where
                         .unwrap_or("unknown")
                         .to_string();
 
-                    // Validate: for "target", only match if it looks like a Rust project
+                    // Validate context: only match if parent has relevant project files
                     if name == "target" && !dir.join("Cargo.toml").exists() {
                         continue;
                     }
@@ -90,6 +102,9 @@ where
                         && !dir.join("build.gradle").exists()
                         && !dir.join("build.gradle.kts").exists()
                     {
+                        continue;
+                    }
+                    if name == "dist" && !dir.join("package.json").exists() {
                         continue;
                     }
 
@@ -162,29 +177,3 @@ where
     results
 }
 
-/// Recursively calculates directory size.
-fn dir_size(path: &Path) -> u64 {
-    if path.is_symlink() {
-        return 0;
-    }
-    if path.is_file() {
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => return 0,
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| {
-            let p = e.path();
-            if p.is_symlink() {
-                0
-            } else if p.is_dir() {
-                dir_size(&p)
-            } else {
-                p.metadata().map(|m| m.len()).unwrap_or(0)
-            }
-        })
-        .sum()
-}

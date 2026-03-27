@@ -2,6 +2,8 @@ pub mod remover;
 pub mod scanner;
 
 use serde::Serialize;
+use std::fs;
+use std::path::Path;
 use tauri::Emitter;
 
 #[derive(Clone, Serialize)]
@@ -50,4 +52,31 @@ pub fn execute_purge(
     remover::remove_artifacts(&artifact_paths, dry_run, |progress| {
         let _ = app.emit("purge-progress", progress);
     })
+}
+
+/// Recursively calculates directory size. Shared by scanner and remover.
+pub fn dir_size(path: &Path) -> u64 {
+    if path.is_symlink() {
+        return 0;
+    }
+    if path.is_file() {
+        return path.metadata().map(|m| m.len()).unwrap_or(0);
+    }
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => return 0,
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .map(|e| {
+            let p = e.path();
+            if p.is_symlink() {
+                0
+            } else if p.is_dir() {
+                dir_size(&p)
+            } else {
+                p.metadata().map(|m| m.len()).unwrap_or(0)
+            }
+        })
+        .sum()
 }
