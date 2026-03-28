@@ -9,6 +9,7 @@ import {
   type UninstallProgress,
   type UninstallResult,
 } from "../lib/tauri";
+import { useSettingsStore } from "./settingsStore";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 type UninstallPhase = "idle" | "scanning" | "list" | "removing" | "done";
@@ -110,7 +111,8 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       });
 
       const filePaths = Array.from(selectedFilePaths);
-      const result = await executeUninstall(selectedApp.path, filePaths, false);
+      const dryRun = useSettingsStore.getState().settings.dry_run;
+      const result = await executeUninstall(selectedApp.path, filePaths, dryRun);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });

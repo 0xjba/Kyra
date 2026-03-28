@@ -7,6 +7,7 @@ import {
   type InstallerProgress,
   type InstallerResult,
 } from "../lib/tauri";
+import { useSettingsStore } from "./settingsStore";
 
 type InstallersPhase = "idle" | "scanning" | "list" | "deleting" | "done";
 
@@ -74,7 +75,8 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
     });
 
     try {
-      const result = await deleteInstallers([...selected], false);
+      const dryRun = useSettingsStore.getState().settings.dry_run;
+      const result = await deleteInstallers([...selected], dryRun);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });

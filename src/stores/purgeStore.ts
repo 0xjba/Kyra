@@ -7,6 +7,7 @@ import {
   type PurgeProgress,
   type PurgeResult,
 } from "../lib/tauri";
+import { useSettingsStore } from "./settingsStore";
 
 type PurgePhase = "idle" | "scanning" | "list" | "purging" | "done";
 
@@ -87,7 +88,8 @@ export const usePurgeStore = create<PurgeStore>((set, get) => ({
     });
 
     try {
-      const result = await executePurge(Array.from(selectedPaths), false);
+      const dryRun = useSettingsStore.getState().settings.dry_run;
+      const result = await executePurge(Array.from(selectedPaths), dryRun);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });

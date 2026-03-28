@@ -7,6 +7,7 @@ import {
   type CleanProgress,
   type CleanResult,
 } from "../lib/tauri";
+import { useSettingsStore } from "./settingsStore";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 type CleanPhase = "idle" | "scanning" | "results" | "cleaning" | "done";
@@ -79,7 +80,8 @@ export const useCleanStore = create<CleanStore>((set, get) => ({
         set({ progress });
       });
 
-      const result = await executeClean(ruleIds, false);
+      const dryRun = useSettingsStore.getState().settings.dry_run;
+      const result = await executeClean(ruleIds, dryRun);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "results", error: String(e) });
