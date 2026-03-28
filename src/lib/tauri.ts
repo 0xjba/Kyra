@@ -342,3 +342,36 @@ export async function listenInstallerProgress(
     callback(event.payload);
   });
 }
+
+// ── Settings ─────────────────────────────────────────────
+
+export interface AppSettings {
+  dry_run: boolean;
+}
+
+export async function loadSettings(): Promise<AppSettings> {
+  return invoke<AppSettings>("load_settings");
+}
+
+export async function saveSettings(settings: AppSettings): Promise<void> {
+  return invoke<void>("save_settings", { settings });
+}
+
+// ── Shared Utilities ─────────────────────────────────────
+
+export async function checkFullDiskAccess(): Promise<boolean> {
+  return invoke<boolean>("check_full_disk_access");
+}
+
+// ── Process Detection ────────────────────────────────────
+
+export interface RunningApp {
+  name: string;
+  rule_ids: string[];
+}
+
+export async function checkRunningProcesses(
+  ruleIds: string[]
+): Promise<RunningApp[]> {
+  return invoke<RunningApp[]>("check_running_processes", { ruleIds });
+}
