@@ -2,20 +2,8 @@ import { useEffect } from "react";
 import { useStatusStore } from "../stores/statusStore";
 import ArcGauge from "../components/ArcGauge";
 import NetworkGraph from "../components/NetworkGraph";
+import { formatSize } from "../utils/format";
 import "../styles/status.css";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-  return `${bytes} B`;
-}
 
 function CpuCores() {
   const cores = useStatusStore((s) => s.stats?.cpu_cores ?? []);
@@ -88,7 +76,6 @@ export default function Status() {
       <div className="status-network">
         <NetworkGraph
           history={networkHistory}
-          width={460}
           height={120}
         />
       </div>

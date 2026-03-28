@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 
 interface NetworkPoint {
   upload: number;
@@ -7,8 +7,7 @@ interface NetworkPoint {
 
 interface NetworkGraphProps {
   history: NetworkPoint[];
-  width: number;
-  height: number;
+  height?: number;
 }
 
 function formatRate(bytesPerSec: number): string {
@@ -21,8 +20,22 @@ function formatRate(bytesPerSec: number): string {
   return `${bytesPerSec} B/s`;
 }
 
-export default function NetworkGraph({ history, width, height }: NetworkGraphProps) {
+export default function NetworkGraph({ history, height = 120 }: NetworkGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(460);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const latest = history.length > 0 ? history[history.length - 1] : null;
 
@@ -90,6 +103,7 @@ export default function NetworkGraph({ history, width, height }: NetworkGraphPro
         </div>
       </div>
       <div
+        ref={containerRef}
         style={{
           background: "var(--bg-card)",
           border: "1px solid var(--border)",

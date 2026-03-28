@@ -1,12 +1,11 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import type { DirNode } from "../lib/tauri";
+import { formatSize } from "../utils/format";
 
 interface SunburstProps {
   node: DirNode;
   onDrillIn: (node: DirNode) => void;
   onReveal: (path: string) => void;
-  width: number;
-  height: number;
 }
 
 interface ArcSegment {
@@ -92,25 +91,29 @@ function hitTest(
   return null;
 }
 
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-  return `${bytes} B`;
-}
-
-export default function Sunburst({ node, onDrillIn, onReveal, width, height }: SunburstProps) {
+export default function Sunburst({ node, onDrillIn, onReveal }: SunburstProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const segmentsRef = useRef<ArcSegment[]>([]);
   const hoveredRef = useRef<ArcSegment | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(380);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const s = Math.min(entry.contentRect.width, entry.contentRect.height);
+        setSize(s);
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const width = size;
+  const height = size;
   const cx = width / 2;
   const cy = height / 2;
 
@@ -245,7 +248,7 @@ export default function Sunburst({ node, onDrillIn, onReveal, width, height }: S
   }, [draw]);
 
   return (
-    <div style={{ position: "relative", width, height }}>
+    <div ref={containerRef} style={{ position: "relative", width: "100%", aspectRatio: "1 / 1" }}>
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}

@@ -1,19 +1,7 @@
 import { useAnalyzeStore } from "../stores/analyzeStore";
 import Sunburst from "../components/Sunburst";
+import { formatSize } from "../utils/format";
 import "../styles/analyze.css";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-  return `${bytes} B`;
-}
 
 function IdleView() {
   const scanPath = useAnalyzeStore((s) => s.scanPath);
@@ -188,8 +176,6 @@ function ReadyView() {
               node={current}
               onDrillIn={drillInto}
               onReveal={reveal}
-              width={380}
-              height={380}
             />
           </div>
         ) : (
