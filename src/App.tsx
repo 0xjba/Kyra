@@ -8,6 +8,7 @@ import Uninstall from "./pages/Uninstall";
 import Analyze from "./pages/Analyze";
 import Status from "./pages/Status";
 import Purge from "./pages/Purge";
+import Installers from "./pages/Installers";
 import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/analyze" element={<Analyze />} />
             <Route path="/status" element={<Status />} />
             <Route path="/purge" element={<Purge />} />
+            <Route path="/installers" element={<Installers />} />
             <Route path="/:module" element={<ModulePlaceholder />} />
           </Routes>
         </div>
