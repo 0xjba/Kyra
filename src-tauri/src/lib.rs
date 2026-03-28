@@ -62,6 +62,8 @@ pub fn run() {
             commands::analyzer::reveal_in_finder,
             commands::purger::scan_artifacts,
             commands::purger::execute_purge,
+            commands::installers::scan_installers,
+            commands::installers::delete_installers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");
