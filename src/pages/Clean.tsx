@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useCleanStore } from "../stores/cleanStore";
+import { checkRunningProcesses, type RunningApp } from "../lib/tauri";
 import "../styles/clean.css";
 
 function formatSize(bytes: number): string {
@@ -86,6 +87,12 @@ function CategorySection({
 
 function ResultsView() {
   const items = useCleanStore((s) => s.items);
+  const [runningApps, setRunningApps] = useState<RunningApp[]>([]);
+
+  useEffect(() => {
+    const ruleIds = items.map((item) => item.rule_id);
+    checkRunningProcesses(ruleIds).then(setRunningApps).catch(() => {});
+  }, [items]);
   const selectedIds = useCleanStore((s) => s.selectedIds);
   const toggleItem = useCleanStore((s) => s.toggleItem);
   const selectAll = useCleanStore((s) => s.selectAll);
@@ -125,6 +132,23 @@ function ResultsView() {
           {allSelected ? "Deselect All" : "Select All"}
         </button>
       </div>
+
+      {runningApps.length > 0 && (
+        <div style={{
+          padding: "10px 14px",
+          background: "rgba(250, 204, 21, 0.06)",
+          border: "1px solid rgba(250, 204, 21, 0.15)",
+          borderRadius: 8,
+          marginBottom: 12,
+        }}>
+          <div style={{ fontSize: 12, color: "#facc15", fontWeight: 500, marginBottom: 4 }}>
+            Running Applications Detected
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", lineHeight: 1.5 }}>
+            {runningApps.map((app) => app.name).join(", ")} — cleaning their caches while running may cause issues. Consider closing them first or deselecting their items.
+          </div>
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: "auto" }}>
         {Array.from(categories.entries()).map(([category, categoryItems]) => (
