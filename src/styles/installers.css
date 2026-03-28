@@ -1,0 +1,244 @@
+.inst-container {
+  padding: 18px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.inst-centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 14px;
+}
+
+.inst-idle-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.inst-scan-btn {
+  padding: 8px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.inst-scan-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-hover);
+}
+
+.inst-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-secondary);
+  border-radius: 50%;
+  animation: inst-spin 0.8s linear infinite;
+}
+
+@keyframes inst-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.inst-scanning-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.inst-list-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.inst-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inst-list-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.inst-list-sep {
+  margin: 0 6px;
+  color: var(--text-tertiary);
+}
+
+.inst-list-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inst-text-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.inst-text-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+.inst-delete-btn {
+  padding: 5px 14px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: 6px;
+  color: #f87171;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.inst-delete-btn:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.18);
+}
+
+.inst-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.inst-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.inst-group {
+  margin-bottom: 12px;
+}
+
+.inst-group-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 0;
+}
+
+.inst-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.inst-row:hover {
+  background: var(--bg-card);
+}
+
+.inst-row input[type="checkbox"] {
+  flex-shrink: 0;
+}
+
+.inst-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.inst-row-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inst-row-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.inst-row-size {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.inst-progress-bar {
+  width: 220px;
+  height: 4px;
+  background: var(--bg-card);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.inst-progress-fill {
+  height: 100%;
+  background: var(--text-secondary);
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+.inst-progress-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.inst-success-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #4ade80;
+}
+
+.inst-done-stat {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.inst-done-freed {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.inst-errors {
+  width: 100%;
+  max-width: 400px;
+  margin-top: 8px;
+}
+
+.inst-error-row {
+  font-size: 11px;
+  color: #f87171;
+  padding: 3px 0;
+}
