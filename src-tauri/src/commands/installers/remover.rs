@@ -24,7 +24,9 @@ fn is_safe_path(path: &Path) -> bool {
     let path_str = canonical.to_string_lossy();
 
     for protected in PROTECTED_PATHS {
-        if *protected == path_str.as_ref() {
+        if *protected == path_str.as_ref()
+            || path_str.starts_with(&format!("{}/", protected))
+        {
             return false;
         }
     }
