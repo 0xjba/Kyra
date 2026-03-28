@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{is_safe_path, CleanProgress, CleanResult, ScanItem};
+use crate::commands::shared;
 
 /// Deletes all paths for the given scan items.
 /// Calls `on_progress` after each item is processed.
@@ -41,8 +42,10 @@ where
             match result {
                 Ok(()) => {
                     bytes_freed += path_info.size;
+                    shared::log_operation("CLEAN", &path_info.path, "OK");
                 }
                 Err(e) => {
+                    shared::log_operation("CLEAN", &path_info.path, &format!("ERROR: {}", e));
                     errors.push(format!("{}: {}", path_info.path, e));
                 }
             }
