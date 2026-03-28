@@ -1,20 +1,8 @@
 import { useEffect } from "react";
 import { ChevronLeft } from "lucide-react";
 import { useUninstallStore } from "../stores/uninstallStore";
+import { formatSize } from "../utils/format";
 import "../styles/uninstall.css";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-  return `${bytes} B`;
-}
 
 function shortenPath(fullPath: string): string {
   const home = fullPath.indexOf("/Library/");

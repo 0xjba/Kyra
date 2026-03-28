@@ -1,19 +1,7 @@
 import { useEffect } from "react";
 import { useInstallersStore } from "../stores/installersStore";
+import { formatSize } from "../utils/format";
 import "../styles/installers.css";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-  return `${bytes} B`;
-}
 
 function formatDate(secs: number): string {
   if (secs === 0) return "\u2014";

@@ -14,17 +14,8 @@ import ModuleCard from "../components/ModuleCard";
 import { useSystemStore } from "../stores/systemStore";
 import { useCleanStore } from "../stores/cleanStore";
 import { useUninstallStore } from "../stores/uninstallStore";
+import { formatSize } from "../utils/format";
 import "../styles/dashboard.css";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / 1024).toFixed(0)} KB`;
-}
 
 const BAR_HEIGHTS = [45, 60, 35, 80, 55, 70, 40, 65];
 
