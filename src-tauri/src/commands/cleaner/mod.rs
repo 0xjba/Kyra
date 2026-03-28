@@ -71,6 +71,12 @@ pub fn is_safe_path(path: &str) -> bool {
     true
 }
 
+#[derive(Clone, Serialize)]
+pub struct RunningApp {
+    pub name: String,
+    pub rule_ids: Vec<String>,
+}
+
 use tauri::Emitter;
 
 #[tauri::command]
@@ -106,4 +112,59 @@ pub fn execute_clean(
     });
 
     Ok(result)
+}
+
+#[tauri::command]
+pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
+    use sysinfo::System;
+
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    let app_rules: Vec<(&str, &[&str])> = vec![
+        ("Safari", &["browser_safari"]),
+        ("Google Chrome", &["browser_chrome"]),
+        ("Firefox", &["browser_firefox"]),
+        ("Microsoft Edge", &["browser_edge"]),
+        ("Brave Browser", &["browser_brave"]),
+        ("Arc", &["browser_arc"]),
+        ("Discord", &["app_discord"]),
+        ("Slack", &["app_slack"]),
+        ("Spotify", &["app_spotify"]),
+        ("zoom.us", &["app_zoom"]),
+        ("Microsoft Teams", &["app_teams"]),
+        ("Code Helper", &["dev_vscode"]),
+        ("Electron", &["dev_vscode"]),
+    ];
+
+    let process_names: Vec<String> = sys
+        .processes()
+        .values()
+        .map(|p| p.name().to_string_lossy().to_string())
+        .collect();
+
+    let mut running: Vec<RunningApp> = Vec::new();
+
+    for (app_name, rules) in &app_rules {
+        let matching_rules: Vec<String> = rules
+            .iter()
+            .filter(|r| rule_ids.contains(&r.to_string()))
+            .map(|r| r.to_string())
+            .collect();
+
+        if matching_rules.is_empty() {
+            continue;
+        }
+
+        let is_running = process_names.iter().any(|pn| pn.contains(app_name));
+
+        if is_running {
+            running.push(RunningApp {
+                name: app_name.to_string(),
+                rule_ids: matching_rules,
+            });
+        }
+    }
+
+    running
 }
