@@ -298,3 +298,47 @@ export async function listenPurgeProgress(
     callback(event.payload);
   });
 }
+
+// ── Installers Module Types ──────────────────────────────
+
+export interface InstallerFile {
+  name: string;
+  path: string;
+  extension: string;
+  size: number;
+  modified_secs: number;
+}
+
+export interface InstallerProgress {
+  current_item: string;
+  items_done: number;
+  items_total: number;
+  bytes_freed: number;
+}
+
+export interface InstallerResult {
+  items_removed: number;
+  bytes_freed: number;
+  errors: string[];
+}
+
+// ── Installers Module Commands ───────────────────────────
+
+export async function scanInstallers(): Promise<InstallerFile[]> {
+  return invoke<InstallerFile[]>("scan_installers");
+}
+
+export async function deleteInstallers(
+  filePaths: string[],
+  dryRun: boolean
+): Promise<InstallerResult> {
+  return invoke<InstallerResult>("delete_installers", { filePaths, dryRun });
+}
+
+export async function listenInstallerProgress(
+  callback: (progress: InstallerProgress) => void
+): Promise<UnlistenFn> {
+  return listen<InstallerProgress>("installer-progress", (event) => {
+    callback(event.payload);
+  });
+}
