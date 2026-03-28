@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { checkFullDiskAccess } from "../lib/tauri";
+import { invoke } from "@tauri-apps/api/core";
 
 export default function FdaPrompt() {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
@@ -63,11 +64,7 @@ export default function FdaPrompt() {
           </button>
           <button
             onClick={() => {
-              import("@tauri-apps/api/core").then(({ invoke }) => {
-                invoke("reveal_in_finder", {
-                  path: "/System/Library/PreferencePanes/Security.prefPane",
-                });
-              });
+              invoke("open_fda_settings");
             }}
             style={{
               padding: "6px 16px",

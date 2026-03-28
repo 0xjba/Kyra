@@ -3,6 +3,13 @@ use std::io::Write;
 use std::path::PathBuf;
 
 #[tauri::command]
+pub fn open_fda_settings() {
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .spawn();
+}
+
+#[tauri::command]
 pub fn check_full_disk_access() -> bool {
     if let Some(home) = dirs::home_dir() {
         let test_path = home.join("Library/Mail");

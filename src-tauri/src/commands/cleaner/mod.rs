@@ -134,7 +134,6 @@ pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
         ("zoom.us", &["app_zoom"]),
         ("Microsoft Teams", &["app_teams"]),
         ("Code Helper", &["dev_vscode"]),
-        ("Electron", &["dev_vscode"]),
     ];
 
     let process_names: Vec<String> = sys

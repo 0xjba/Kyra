@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { HashRouter, Routes, Route } from "react-router-dom";
+import { useSettingsStore } from "./stores/settingsStore";
 import AccentBar from "./components/AccentBar";
 import TitleBar from "./components/TitleBar";
 import Home from "./pages/Home";
@@ -14,6 +16,13 @@ import FdaPrompt from "./components/FdaPrompt";
 import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
+  const loadSettings = useSettingsStore((s) => s.load);
+  const settingsLoaded = useSettingsStore((s) => s.loaded);
+
+  useEffect(() => {
+    if (!settingsLoaded) loadSettings();
+  }, [settingsLoaded, loadSettings]);
+
   return (
     <HashRouter>
       <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>

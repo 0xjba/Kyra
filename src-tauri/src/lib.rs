@@ -67,6 +67,7 @@ pub fn run() {
             commands::settings::load_settings,
             commands::settings::save_settings,
             commands::shared::check_full_disk_access,
+            commands::shared::open_fda_settings,
             commands::cleaner::check_running_processes,
         ])
         .run(tauri::generate_context!())
