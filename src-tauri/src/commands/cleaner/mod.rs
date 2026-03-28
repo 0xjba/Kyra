@@ -80,13 +80,13 @@ pub struct RunningApp {
 use tauri::Emitter;
 
 #[tauri::command]
-pub fn scan_for_cleanables() -> Vec<ScanItem> {
+pub async fn scan_for_cleanables() -> Vec<ScanItem> {
     let rules = rules::all_rules();
     scanner::scan_rules(&rules)
 }
 
 #[tauri::command]
-pub fn execute_clean(
+pub async fn execute_clean(
     app: tauri::AppHandle,
     rule_ids: Vec<String>,
     dry_run: bool,

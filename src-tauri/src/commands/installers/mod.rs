@@ -29,12 +29,12 @@ pub struct InstallerResult {
 }
 
 #[tauri::command]
-pub fn scan_installers() -> Vec<InstallerFile> {
+pub async fn scan_installers() -> Vec<InstallerFile> {
     scanner::scan_for_installers()
 }
 
 #[tauri::command]
-pub fn delete_installers(
+pub async fn delete_installers(
     app: tauri::AppHandle,
     file_paths: Vec<String>,
     dry_run: bool,

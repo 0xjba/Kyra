@@ -43,7 +43,7 @@ pub struct UninstallResult {
 use tauri::Emitter;
 
 #[tauri::command]
-pub fn scan_installed_apps() -> Vec<AppInfo> {
+pub async fn scan_installed_apps() -> Vec<AppInfo> {
     discovery::scan_apps()
 }
 
@@ -57,7 +57,7 @@ pub fn get_associated_files(
 }
 
 #[tauri::command]
-pub fn execute_uninstall(
+pub async fn execute_uninstall(
     app: tauri::AppHandle,
     app_path: String,
     file_paths: Vec<String>,
