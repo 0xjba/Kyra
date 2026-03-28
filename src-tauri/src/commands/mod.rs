@@ -7,3 +7,4 @@ pub mod purger;
 pub mod settings;
 pub mod shared;
 pub mod uninstaller;
+pub mod utils;

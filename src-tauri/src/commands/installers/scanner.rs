@@ -1,4 +1,5 @@
 use super::InstallerFile;
+use crate::commands::utils::dir_size;
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -73,27 +74,6 @@ fn scan_directory(dir: &Path, check_app_bundles: bool) -> Vec<InstallerFile> {
     }
 
     results
-}
-
-fn dir_size(path: &Path) -> u64 {
-    let mut total: u64 = 0;
-    let mut stack = vec![path.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_symlink() {
-                    continue;
-                }
-                if p.is_dir() {
-                    stack.push(p);
-                } else {
-                    total += fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                }
-            }
-        }
-    }
-    total
 }
 
 pub fn scan_for_installers() -> Vec<InstallerFile> {

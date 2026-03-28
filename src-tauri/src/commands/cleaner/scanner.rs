@@ -1,7 +1,7 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::{CleanRule, PathInfo, ScanItem};
+use crate::commands::utils::dir_size;
 
 /// Expands `~` at the start of a path to the user's home directory.
 fn expand_home(path: &str) -> Option<PathBuf> {
@@ -12,34 +12,6 @@ fn expand_home(path: &str) -> Option<PathBuf> {
     } else {
         Some(PathBuf::from(path))
     }
-}
-
-/// Calculates the total size of a directory recursively.
-/// Does not follow symlinks. Silently skips files/dirs it can't read.
-fn dir_size(path: &Path) -> u64 {
-    if path.is_symlink() {
-        return 0;
-    }
-    if path.is_file() {
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => return 0,
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| {
-            let p = e.path();
-            if p.is_symlink() {
-                0
-            } else if p.is_dir() {
-                dir_size(&p)
-            } else {
-                p.metadata().map(|m| m.len()).unwrap_or(0)
-            }
-        })
-        .sum()
 }
 
 /// Scans the filesystem for items matching the given rules.

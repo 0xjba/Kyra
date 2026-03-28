@@ -2,33 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use super::AppInfo;
-
-/// Recursively calculates the total size of a path.
-fn path_size(path: &Path) -> u64 {
-    if path.is_symlink() {
-        return 0;
-    }
-    if path.is_file() {
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => return 0,
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| {
-            let p = e.path();
-            if p.is_symlink() {
-                0
-            } else if p.is_dir() {
-                path_size(&p)
-            } else {
-                p.metadata().map(|m| m.len()).unwrap_or(0)
-            }
-        })
-        .sum()
-}
+use crate::commands::utils::path_size;
 
 /// Reads an app bundle's Info.plist and extracts metadata.
 fn read_app_info(app_path: &Path) -> Option<AppInfo> {

@@ -1,6 +1,7 @@
 use std::fs;
 
-use super::{dir_size, ArtifactEntry, ScanProgress};
+use super::{ArtifactEntry, ScanProgress};
+use crate::commands::utils::dir_size;
 
 /// Known build artifact directory names and their human-readable type labels.
 const ARTIFACT_DIRS: &[(&str, &str)] = &[

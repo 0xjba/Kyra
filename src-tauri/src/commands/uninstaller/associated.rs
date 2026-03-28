@@ -1,7 +1,7 @@
 use std::fs;
-use std::path::Path;
 
 use super::AssociatedFile;
+use crate::commands::utils::path_size;
 
 /// Directories under ~/Library to search, with human-readable category names.
 const SEARCH_LOCATIONS: &[(&str, &str)] = &[
@@ -15,33 +15,6 @@ const SEARCH_LOCATIONS: &[(&str, &str)] = &[
     ("WebKit", "WebKit Data"),
     ("HTTPStorages", "HTTP Storage"),
 ];
-
-/// Recursively calculates the total size of a path.
-fn path_size(path: &Path) -> u64 {
-    if path.is_symlink() {
-        return 0;
-    }
-    if path.is_file() {
-        return path.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => return 0,
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| {
-            let p = e.path();
-            if p.is_symlink() {
-                0
-            } else if p.is_dir() {
-                path_size(&p)
-            } else {
-                p.metadata().map(|m| m.len()).unwrap_or(0)
-            }
-        })
-        .sum()
-}
 
 /// Checks if a directory entry name matches the bundle ID or app name.
 fn matches_app(entry_name: &str, bundle_id: &str, app_name: &str) -> bool {

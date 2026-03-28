@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use super::{dir_size, PurgeProgress, PurgeResult};
+use super::{PurgeProgress, PurgeResult};
 use crate::commands::shared;
+use crate::commands::utils::dir_size;
 
 /// Paths that must never be deleted.
 const PROTECTED_PATHS: &[&str] = &[
