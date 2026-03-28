@@ -9,6 +9,8 @@ import Analyze from "./pages/Analyze";
 import Status from "./pages/Status";
 import Purge from "./pages/Purge";
 import Installers from "./pages/Installers";
+import Settings from "./pages/Settings";
+import FdaPrompt from "./components/FdaPrompt";
 import ModulePlaceholder from "./pages/ModulePlaceholder";
 
 export default function App() {
@@ -17,6 +19,7 @@ export default function App() {
       <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
         <AccentBar />
         <TitleBar />
+        <FdaPrompt />
         <div style={{ flex: 1, overflow: "hidden" }}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -27,6 +30,7 @@ export default function App() {
             <Route path="/status" element={<Status />} />
             <Route path="/purge" element={<Purge />} />
             <Route path="/installers" element={<Installers />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/:module" element={<ModulePlaceholder />} />
           </Routes>
         </div>

@@ -7,6 +7,7 @@ import {
   Activity,
   Package,
   Disc,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import SystemStrip from "../components/SystemStrip";
 import ModuleCard from "../components/ModuleCard";
@@ -151,6 +152,15 @@ export default function Home() {
           icon={Disc}
           route="/installers"
           meta="Find .dmg, .pkg"
+          style={{ gridColumn: "span 1", gridRow: "span 1" }}
+        />
+
+        <ModuleCard
+          title="Settings"
+          description="Dry-run mode, preferences"
+          icon={SettingsIcon}
+          route="/settings"
+          meta="Configure"
           style={{ gridColumn: "span 1", gridRow: "span 1" }}
         />
       </div>
