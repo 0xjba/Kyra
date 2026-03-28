@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{UninstallProgress, UninstallResult};
+use crate::commands::shared;
 
 /// Paths that must never be deleted.
 const PROTECTED_PATHS: &[&str] = &[
@@ -137,8 +138,10 @@ where
                 Ok(()) => {
                     bytes_freed += size;
                     items_removed += 1;
+                    shared::log_operation("UNINSTALL", path_str, "OK");
                 }
                 Err(e) => {
+                    shared::log_operation("UNINSTALL", path_str, &format!("ERROR: {}", e));
                     errors.push(format!("{}: {}", path_str, e));
                 }
             }

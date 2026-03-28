@@ -1,4 +1,5 @@
 use super::{InstallerProgress, InstallerResult};
+use crate::commands::shared;
 use std::fs;
 use std::path::Path;
 
@@ -110,8 +111,10 @@ pub fn remove_installer_files(
             Ok(()) => {
                 bytes_freed += size;
                 items_removed += 1;
+                shared::log_operation("DELETE_INSTALLER", path_str, "OK");
             }
             Err(e) => {
+                shared::log_operation("DELETE_INSTALLER", path_str, &format!("ERROR: {}", e));
                 errors.push(format!("{}: {}", path_str, e));
             }
         }
