@@ -46,8 +46,9 @@ pub async fn execute_purge(
     app: tauri::AppHandle,
     artifact_paths: Vec<String>,
     dry_run: bool,
+    permanent: bool,
 ) -> PurgeResult {
-    remover::remove_artifacts(&artifact_paths, dry_run, |progress| {
+    remover::remove_artifacts(&artifact_paths, dry_run, permanent, |progress| {
         let _ = app.emit("purge-progress", progress);
     })
 }

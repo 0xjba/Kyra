@@ -16,7 +16,7 @@ const PROTECTED_PATHS: &[&str] = &[
     "/Applications",
 ];
 
-const VALID_EXTENSIONS: &[&str] = &["dmg", "pkg", "iso", "xip", "app"];
+const VALID_EXTENSIONS: &[&str] = &["dmg", "pkg", "iso", "xip", "mpkg", "app"];
 
 fn is_safe_path(path: &Path) -> bool {
     let canonical = match path.canonicalize() {
@@ -34,17 +34,22 @@ fn is_safe_path(path: &Path) -> bool {
     }
 
     let home = dirs::home_dir();
-    let in_downloads = home
+    let in_allowed_home_dir = home
         .as_ref()
-        .map(|h| canonical.starts_with(h.join("Downloads")))
-        .unwrap_or(false);
-    let in_desktop = home
-        .as_ref()
-        .map(|h| canonical.starts_with(h.join("Desktop")))
+        .map(|h| {
+            canonical.starts_with(h.join("Downloads"))
+                || canonical.starts_with(h.join("Desktop"))
+                || canonical.starts_with(h.join("Documents"))
+                || canonical.starts_with(h.join("Public"))
+                || canonical.starts_with(h.join("Library/Caches/Homebrew/downloads"))
+                || canonical.starts_with(h.join("Library/Mail Downloads"))
+        })
         .unwrap_or(false);
     let in_tmp = canonical.starts_with("/tmp") || canonical.starts_with("/private/tmp");
+    let in_users_shared =
+        canonical.starts_with("/Users/Shared") || canonical.starts_with("/private/Users/Shared");
 
-    if !in_downloads && !in_desktop && !in_tmp {
+    if !in_allowed_home_dir && !in_tmp && !in_users_shared {
         return false;
     }
 
@@ -65,6 +70,7 @@ fn is_safe_path(path: &Path) -> bool {
 pub fn remove_installer_files(
     file_paths: &[String],
     dry_run: bool,
+    permanent: bool,
     on_progress: impl Fn(InstallerProgress),
 ) -> InstallerResult {
     let total = file_paths.len();
@@ -102,17 +108,21 @@ pub fn remove_installer_files(
             continue;
         }
 
-        let result = if path.is_dir() {
-            fs::remove_dir_all(path)
+        let delete_result = if permanent {
+            if path.is_dir() {
+                fs::remove_dir_all(path)
+            } else {
+                fs::remove_file(path)
+            }
         } else {
-            fs::remove_file(path)
+            trash::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         };
-
-        match result {
+        match delete_result {
             Ok(()) => {
                 bytes_freed += size;
                 items_removed += 1;
-                shared::log_operation("DELETE_INSTALLER", path_str, "OK");
+                let action = if permanent { "DELETED" } else { "TRASHED" };
+                shared::log_operation("DELETE_INSTALLER", path_str, action);
             }
             Err(e) => {
                 shared::log_operation("DELETE_INSTALLER", path_str, &format!("ERROR: {}", e));

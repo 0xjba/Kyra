@@ -5,17 +5,60 @@ use crate::commands::utils::dir_size;
 
 /// Known build artifact directory names and their human-readable type labels.
 const ARTIFACT_DIRS: &[(&str, &str)] = &[
+    // JavaScript / Node.js
     ("node_modules", "Node.js"),
-    ("target", "Rust"),
-    ("dist", "Build output"),
-    ("build", "Build output"),
+    ("dist", "Build Output"),
+    ("build", "Build Output"),
     (".next", "Next.js"),
     (".nuxt", "Nuxt.js"),
+    (".output", "Nitro/Nuxt Output"),
+    (".turbo", "Turbo Cache"),
+    (".parcel-cache", "Parcel Cache"),
+    (".angular", "Angular Cache"),
+    (".svelte-kit", "SvelteKit"),
+    (".astro", "Astro Cache"),
+    ("coverage", "Test Coverage"),
+    (".bun", "Bun Cache"),
+    // Rust
+    ("target", "Rust"),
+    // Python
     ("__pycache__", "Python"),
-    (".pytest_cache", "Python"),
+    (".pytest_cache", "Pytest Cache"),
+    ("venv", "Python Virtual Env"),
+    (".venv", "Python Virtual Env"),
+    (".mypy_cache", "Mypy Cache"),
+    (".tox", "Tox Env"),
+    (".nox", "Nox Env"),
+    (".ruff_cache", "Ruff Cache"),
+    // iOS / macOS
     ("Pods", "CocoaPods"),
-    (".gradle", "Gradle"),
     (".build", "Swift"),
+    ("DerivedData", "Xcode Build"),
+    // Android / JVM
+    (".gradle", "Gradle"),
+    // PHP / Go / Ruby
+    ("vendor", "Vendor Deps"),
+    (".bundle", "Ruby Bundler"),
+    // C# / .NET
+    ("obj", "C#/.NET Build"),
+    // C++ (CMake)
+    (".cxx", "C++ Build"),
+    ("CMakeFiles", "CMake Build"),
+    // React Native
+    (".expo", "Expo Cache"),
+    // Flutter / Dart
+    (".dart_tool", "Dart Tool"),
+    // Zig
+    (".zig-cache", "Zig Cache"),
+    ("zig-out", "Zig Output"),
+    // Elixir
+    ("_build", "Elixir"),
+    ("deps", "Elixir Deps"),
+    // Haskell
+    ("dist-newstyle", "Haskell"),
+    (".stack-work", "Haskell"),
+    // OCaml
+    ("_opam", "OCaml"),
 ];
 
 /// File patterns for egg-info directories (matched by suffix).
@@ -72,11 +115,33 @@ where
                 None => continue,
             };
 
-            // Skip hidden directories (except our known ones starting with .)
+            // Skip hidden directories (except our known artifact dirs starting with .)
             if name.starts_with('.')
                 && !matches!(
                     name.as_str(),
-                    ".next" | ".nuxt" | ".pytest_cache" | ".gradle" | ".build"
+                    ".next"
+                        | ".nuxt"
+                        | ".output"
+                        | ".turbo"
+                        | ".parcel-cache"
+                        | ".angular"
+                        | ".svelte-kit"
+                        | ".astro"
+                        | ".pytest_cache"
+                        | ".venv"
+                        | ".mypy_cache"
+                        | ".tox"
+                        | ".nox"
+                        | ".ruff_cache"
+                        | ".gradle"
+                        | ".build"
+                        | ".cxx"
+                        | ".expo"
+                        | ".dart_tool"
+                        | ".zig-cache"
+                        | ".bun"
+                        | ".bundle"
+                        | ".stack-work"
                 )
             {
                 continue;
@@ -95,8 +160,29 @@ where
                         .to_string();
 
                     // Validate context: only match if parent has relevant project files
-                    if name == "target" && !dir.join("Cargo.toml").exists() {
-                        continue;
+                    // target — could be Rust (Cargo.toml) or Maven (pom.xml)
+                    if name == "target" {
+                        if dir.join("pom.xml").exists() {
+                            // Maven project — override the artifact_type
+                            let size = dir_size(&path);
+                            results.push(ArtifactEntry {
+                                project_name: project_name.clone(),
+                                project_path: project_path.clone(),
+                                artifact_type: "Maven".to_string(),
+                                artifact_path: path.to_string_lossy().to_string(),
+                                size,
+                            });
+                            is_artifact = true;
+                            if results.len() % 50 == 0 {
+                                on_progress(&ScanProgress {
+                                    current_path: dir.to_string_lossy().to_string(),
+                                    artifacts_found: results.len(),
+                                });
+                            }
+                            break;
+                        } else if !dir.join("Cargo.toml").exists() {
+                            continue;
+                        }
                     }
                     if name == "build"
                         && !dir.join("package.json").exists()
@@ -107,6 +193,114 @@ where
                     }
                     if name == "dist" && !dir.join("package.json").exists() {
                         continue;
+                    }
+                    // Frontend framework caches — validate with package.json
+                    if matches!(
+                        name.as_str(),
+                        ".output"
+                            | ".turbo"
+                            | ".parcel-cache"
+                            | ".angular"
+                            | ".svelte-kit"
+                            | ".astro"
+                            | "coverage"
+                    ) && !dir.join("package.json").exists()
+                    {
+                        continue;
+                    }
+                    // vendor — validate with composer.json, go.mod, or Gemfile
+                    if name == "vendor"
+                        && !dir.join("composer.json").exists()
+                        && !dir.join("go.mod").exists()
+                        && !dir.join("Gemfile").exists()
+                    {
+                        continue;
+                    }
+                    // obj — validate with .csproj, .sln, or .fsproj
+                    if name == "obj" {
+                        let has_dotnet = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    let n = e.file_name();
+                                    let n = n.to_string_lossy();
+                                    n.ends_with(".csproj")
+                                        || n.ends_with(".sln")
+                                        || n.ends_with(".fsproj")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_dotnet {
+                            continue;
+                        }
+                    }
+                    // .bundle — validate with Gemfile
+                    if name == ".bundle" && !dir.join("Gemfile").exists() {
+                        continue;
+                    }
+                    // CMakeFiles — validate with CMakeLists.txt
+                    if name == "CMakeFiles" && !dir.join("CMakeLists.txt").exists() {
+                        continue;
+                    }
+                    // _build — validate with mix.exs (Elixir)
+                    if name == "_build" && !dir.join("mix.exs").exists() {
+                        continue;
+                    }
+                    // deps — validate with mix.exs (Elixir) to avoid false positives
+                    if name == "deps" && !dir.join("mix.exs").exists() {
+                        continue;
+                    }
+                    // dist-newstyle — validate with cabal file (Haskell)
+                    if name == "dist-newstyle" {
+                        let has_cabal = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    let n = e.file_name();
+                                    let n = n.to_string_lossy();
+                                    n.ends_with(".cabal")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_cabal && !dir.join("cabal.project").exists() {
+                            continue;
+                        }
+                    }
+                    // .stack-work — validate with stack.yaml (Haskell)
+                    if name == ".stack-work" && !dir.join("stack.yaml").exists() {
+                        continue;
+                    }
+                    // _opam — validate with dune-project or *.opam (OCaml)
+                    if name == "_opam" {
+                        let has_ocaml = dir.join("dune-project").exists()
+                            || fs::read_dir(&dir)
+                                .map(|entries| {
+                                    entries.filter_map(|e| e.ok()).any(|e| {
+                                        e.file_name().to_string_lossy().ends_with(".opam")
+                                    })
+                                })
+                                .unwrap_or(false);
+                        if !has_ocaml {
+                            continue;
+                        }
+                    }
+                    // .bun — validate with package.json or bun.lockb
+                    if name == ".bun" && !dir.join("package.json").exists() && !dir.join("bun.lockb").exists() {
+                        continue;
+                    }
+                    // DerivedData — validate with .xcodeproj or .xcworkspace
+                    if name == "DerivedData" {
+                        let has_xcode = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    let n = e.file_name();
+                                    let n = n.to_string_lossy();
+                                    n.ends_with(".xcodeproj")
+                                        || n.ends_with(".xcworkspace")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_xcode {
+                            continue;
+                        }
                     }
 
                     let size = dir_size(&path);

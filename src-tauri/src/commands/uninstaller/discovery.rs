@@ -4,6 +4,22 @@ use std::path::Path;
 use super::AppInfo;
 use crate::commands::utils::path_size;
 
+/// Patterns that indicate a data-sensitive app (password managers, VPNs, crypto tools).
+const DATA_SENSITIVE_PATTERNS: &[&str] = &[
+    "1password", "bitwarden", "lastpass", "keepass", "dashlane", "enpass",
+    "keychain", "nordvpn", "expressvpn", "tunnelblick", "wireguard",
+    "pgp", "gpg", "ssh",
+];
+
+/// Returns true if the bundle_id or app name suggests a data-sensitive app.
+fn check_data_sensitive(bundle_id: &str, name: &str) -> bool {
+    let bid = bundle_id.to_lowercase();
+    let n = name.to_lowercase();
+    DATA_SENSITIVE_PATTERNS
+        .iter()
+        .any(|pat| bid.contains(pat) || n.contains(pat))
+}
+
 /// Reads an app bundle's Info.plist and extracts metadata.
 fn read_app_info(app_path: &Path) -> Option<AppInfo> {
     let plist_path = app_path.join("Contents/Info.plist");
@@ -36,12 +52,18 @@ fn read_app_info(app_path: &Path) -> Option<AppInfo> {
 
     let size = path_size(app_path);
 
+    let path_str = app_path.to_string_lossy().to_string();
+    let is_system = path_str.starts_with("/System/Applications/");
+    let is_data_sensitive = check_data_sensitive(&bundle_id, &name);
+
     Some(AppInfo {
         bundle_id,
         name,
         version,
-        path: app_path.to_string_lossy().to_string(),
+        path: path_str,
         size,
+        is_system,
+        is_data_sensitive,
     })
 }
 
@@ -64,7 +86,36 @@ fn scan_dir(dir: &Path) -> Vec<AppInfo> {
         .collect()
 }
 
-/// Scans /Applications and ~/Applications for installed apps.
+/// Scans a Homebrew Caskroom directory for .app bundles inside version subdirectories.
+fn scan_caskroom(caskroom: &Path) -> Vec<AppInfo> {
+    let entries = match fs::read_dir(caskroom) {
+        Ok(entries) => entries,
+        Err(_) => return vec![],
+    };
+
+    let mut apps = Vec::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let cask_dir = entry.path();
+        if !cask_dir.is_dir() {
+            continue;
+        }
+        // Each cask has version subdirectories, scan each for .app bundles
+        let versions = match fs::read_dir(&cask_dir) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        for version_entry in versions.filter_map(|e| e.ok()) {
+            let version_dir = version_entry.path();
+            if !version_dir.is_dir() {
+                continue;
+            }
+            apps.extend(scan_dir(&version_dir));
+        }
+    }
+    apps
+}
+
+/// Scans /Applications, ~/Applications, Homebrew Caskrooms, and Setapp for installed apps.
 pub fn scan_apps() -> Vec<AppInfo> {
     let mut apps = Vec::new();
 
@@ -74,6 +125,20 @@ pub fn scan_apps() -> Vec<AppInfo> {
     // User applications
     if let Some(home) = dirs::home_dir() {
         apps.extend(scan_dir(&home.join("Applications")));
+
+        // Setapp applications
+        let setapp_dir = home.join("Applications/Setapp");
+        if setapp_dir.exists() {
+            apps.extend(scan_dir(&setapp_dir));
+        }
+    }
+
+    // Homebrew Caskroom locations
+    for caskroom_path in &["/opt/homebrew/Caskroom", "/usr/local/Caskroom"] {
+        let caskroom = Path::new(caskroom_path);
+        if caskroom.exists() {
+            apps.extend(scan_caskroom(caskroom));
+        }
     }
 
     // Sort by name case-insensitively

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   Trash2,
   Zap,
@@ -9,57 +9,44 @@ import {
   Disc,
   Settings as SettingsIcon,
 } from "lucide-react";
-import SystemStrip from "../components/SystemStrip";
 import ModuleCard from "../components/ModuleCard";
-import { useSystemStore } from "../stores/systemStore";
 import { useCleanStore } from "../stores/cleanStore";
 import { useUninstallStore } from "../stores/uninstallStore";
 import { formatSize } from "../utils/format";
 import "../styles/dashboard.css";
 
-const BAR_HEIGHTS = [45, 60, 35, 80, 55, 70, 40, 65];
-
 export default function Home() {
-  const fetchStats = useSystemStore((s) => s.fetchStats);
   const cleanItems = useCleanStore((s) => s.items);
   const reclaimable = cleanItems.reduce((sum, item) => sum + item.total_size, 0);
   const uninstallApps = useUninstallStore((s) => s.apps);
   const uninstallPhase = useUninstallStore((s) => s.phase);
   const scanApps = useUninstallStore((s) => s.scanApps);
 
+  // Scan apps lazily — only once, not on every dashboard visit
+  const hasScannedRef = useRef(false);
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 5000);
-    return () => clearInterval(interval);
-  }, [fetchStats]);
-
-  useEffect(() => {
-    if (uninstallPhase === "idle") {
+    if (uninstallPhase === "idle" && !hasScannedRef.current) {
+      hasScannedRef.current = true;
       scanApps();
     }
   }, [uninstallPhase, scanApps]);
 
+  /* 4-col × 3-row bento (12 cells total)
+   * ┌──────────┬──────┬──────┐
+   * │  Clean   │Optim.│Uninst│
+   * │  (2×2)   ├──────┼──────┤
+   * │          │Status│Settn.│
+   * ├────┬─────┼──────┴──────┤
+   * │Purg│Inst.│  Analyze    │
+   * └────┴─────┴─────────────┘
+   */
+
   return (
-    <div style={{ padding: 18, overflowY: "auto", height: "100%" }}>
-      <SystemStrip />
-
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-tertiary)",
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-          margin: "18px 0 10px",
-        }}
-      >
-        Modules
-      </div>
-
+    <div className="home-container">
       <div className="bento-grid">
         <ModuleCard
           title="Clean"
-          description="Remove caches, logs, browser data and dev artifacts"
+          description="System caches, logs, and temporary files"
           icon={Trash2}
           route="/clean"
           stat={reclaimable > 0 ? formatSize(reclaimable) : "—"}
@@ -73,16 +60,14 @@ export default function Home() {
           icon={Zap}
           route="/optimize"
           meta="14 tasks available"
-          style={{ gridColumn: "span 2", gridRow: "span 1" }}
         />
 
         <ModuleCard
           title="Uninstall"
-          description="Remove apps completely with all associated files"
+          description="Remove apps with all associated files"
           icon={Grid2x2Plus}
           route="/uninstall"
           meta={uninstallApps.length > 0 ? `${uninstallApps.length} apps installed` : "Scan apps"}
-          style={{ gridColumn: "span 2", gridRow: "span 1" }}
         />
 
         <ModuleCard
@@ -90,69 +75,40 @@ export default function Home() {
           description=""
           icon={Activity}
           route="/status"
-          style={{ gridColumn: "span 1", gridRow: "span 2" }}
-        >
-          <div className="mini-chart">
-            {BAR_HEIGHTS.map((h, i) => (
-              <div key={i} className="mini-bar" style={{ height: `${h}%` }} />
-            ))}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              marginTop: 8,
-            }}
-          >
-            Live monitoring
-          </div>
-        </ModuleCard>
-
-        <ModuleCard
-          title="Analyze"
-          description=""
-          icon={PieChart}
-          route="/analyze"
-          style={{ gridColumn: "span 2", gridRow: "span 2" }}
-        >
-          <div className="mini-sunburst" />
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              marginTop: 8,
-              textAlign: "center",
-            }}
-          >
-            Scan to explore disk usage
-          </div>
-        </ModuleCard>
-
-        <ModuleCard
-          title="Purge"
-          description="Find and remove build artifacts — node_modules, target, dist"
-          icon={Package}
-          route="/purge"
-          meta="Scan projects"
-          style={{ gridColumn: "span 1", gridRow: "span 1" }}
-        />
-
-        <ModuleCard
-          title="Installers"
-          description="Find and remove installer files — .dmg, .pkg, .iso"
-          icon={Disc}
-          route="/installers"
-          meta="Find .dmg, .pkg"
-          style={{ gridColumn: "span 1", gridRow: "span 1" }}
+          meta="Live monitoring"
         />
 
         <ModuleCard
           title="Settings"
-          description="Dry-run mode, preferences"
+          description="Preferences"
           icon={SettingsIcon}
           route="/settings"
           meta="Configure"
-          style={{ gridColumn: "span 1", gridRow: "span 1" }}
+        />
+
+        <ModuleCard
+          title="Purge"
+          description="Project build artifacts"
+          icon={Package}
+          route="/purge"
+          meta="node_modules, dist, target"
+        />
+
+        <ModuleCard
+          title="Installers"
+          description="Find .dmg, .pkg, .iso"
+          icon={Disc}
+          route="/installers"
+          meta="Scan downloads"
+        />
+
+        <ModuleCard
+          title="Analyze"
+          description="Explore disk usage"
+          icon={PieChart}
+          route="/analyze"
+          meta="Scan to explore"
+          style={{ gridColumn: "span 2" }}
         />
       </div>
     </div>

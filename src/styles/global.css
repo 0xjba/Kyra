@@ -1,17 +1,70 @@
 :root {
-  --bg-base: #191919;
-  --bg-card: rgba(255, 255, 255, 0.04);
-  --bg-card-hover: rgba(255, 255, 255, 0.07);
-  --border: rgba(255, 255, 255, 0.06);
-  --border-hover: rgba(255, 255, 255, 0.1);
+  --bg-base: transparent;
+  --bg-card: rgba(255, 255, 255, 0.06);
+  --bg-card-hover: rgba(255, 255, 255, 0.09);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.14);
   --text-primary: rgba(255, 255, 255, 0.88);
   --text-secondary: rgba(255, 255, 255, 0.5);
   --text-tertiary: rgba(255, 255, 255, 0.25);
 
-  --cyan: #5ef5e2;
-  --green: #4ade80;
-  --yellow: #facc15;
-  --red: #f87171;
+  /* ── macOS Color Palette ─────────────────────────────── */
+  --red: #FD4841;
+  --orange: #FD8C34;
+  --yellow: #FDD225;
+  --green: #2AC852;
+  --teal: #13D1BB;
+  --blue: #3A7BFF;
+  --indigo: #5A67F2;
+  --purple: #8E5CF6;
+  --pink: #FF5DA2;
+  --cyan: #22B8F0;
+  --brown: #A2845E;
+
+  /* ── macOS Neutrals ──────────────────────────────────── */
+  --neutral-50: #F2F2F7;
+  --neutral-100: #E5E5EA;
+  --neutral-200: #D1D1D6;
+  --neutral-300: #C7C7CC;
+  --neutral-400: #AEAEB2;
+  --neutral-500: #8E8E93;
+  --neutral-600: #747474;
+  --neutral-700: #3A3A3C;
+  --neutral-800: #2C2C2E;
+  --neutral-900: #1C1C1E;
+  --neutral-950: #0F0F0F;
+
+  /* ── Typography Scale (Apple HIG-aligned) ────────────── */
+  /* Based on macOS system font styles with +1px readability bump */
+  --font-xs: 10px;           /* Caption / Footnote — minimum size */
+  --font-sm: 11px;           /* Subheadline — secondary metadata */
+  --font-base: 12px;         /* Callout — body secondary, labels */
+  --font-md: 13px;           /* Body / Headline — primary content */
+  --font-lg: 14px;           /* Card titles — custom (locked) */
+  --font-xl: 15px;           /* Title 3 — module page headings */
+  --font-2xl: 17px;          /* Title 2 — section headings */
+  --font-3xl: 20px;          /* Large stats */
+  --font-4xl: 26px;          /* Large Title — dashboard hero stat */
+
+  /* ── Font Weights ────────────────────────────────────── */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* ── Line Heights ────────────────────────────────────── */
+  --leading-none: 1;
+  --leading-tight: 1.3;
+  --leading-normal: 1.4;
+  --leading-relaxed: 1.5;
+  --leading-loose: 1.6;
+
+  /* ── Letter Spacing ──────────────────────────────────── */
+  --tracking-tight: -0.02em;   /* large stats */
+  --tracking-caps: 0.5px;      /* uppercase section labels */
+
+  /* ── Font Stacks ─────────────────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", "Menlo", monospace;
 }
 
 * {
@@ -21,16 +74,181 @@
 }
 
 html,
-body,
-#root {
+body {
   height: 100%;
-  background: var(--bg-base);
+  background: transparent;
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--font-md);
+  line-height: var(--leading-normal);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
   user-select: none;
+}
+
+#root {
+  height: 100%;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  border-radius: 10px;
+}
+
+/* ── Global Button System ─────────────────────────────── */
+
+/* Base button — shared foundation for all buttons */
+.btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
+  padding: 5px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+  text-align: center;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Primary button — glass CTA (Start Scan style) */
+.btn-primary {
+  position: relative;
+  background: var(--bg-card);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.btn-primary:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-hover);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Danger button — destructive actions */
+.btn-danger {
+  background: rgba(253, 72, 65, 0.1);
+  border: 1px solid rgba(253, 72, 65, 0.2);
+  color: var(--red);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(253, 72, 65, 0.18);
+}
+
+/* Text button — minimal, no background */
+.btn-text {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.btn-text:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+/* Small inline action button */
+.btn-sm {
+  font-size: var(--font-xs);
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+}
+
+.btn-sm:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+/* ── Global Checkbox ─────────────────────────────────── */
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border-hover);
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.checkbox:checked {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.checkbox:checked::after {
+  content: "✓";
+  font-size: var(--font-xs);
+  color: var(--text-primary);
+  line-height: var(--leading-none);
+}
+
+/* Tri-state partial selection */
+.checkbox.partial {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.checkbox.partial::after {
+  content: "–";
+  font-size: var(--font-base);
+  font-weight: 700;
+  color: var(--text-secondary);
+  line-height: var(--leading-none);
+}
+
+@keyframes accent-slide {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes toast-slide-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ── macOS-style scrollbars ───────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Noise grain overlay for frosted glass effect */
@@ -43,7 +261,22 @@ body,
   bottom: 0;
   pointer-events: none;
   z-index: 9999;
-  opacity: 0.035;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 180px 180px;
+}
+
+/* Extra noise grain on glass surfaces (cards, dialogs) */
+.module-card::after,
+.btn-primary::after,
+.delete-dialog::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.06;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 180px 180px;

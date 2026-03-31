@@ -1,8 +1,15 @@
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use sysinfo::{Networks, System};
 use tauri::{Emitter, State};
+
+#[derive(Clone, Serialize)]
+pub struct TopProcess {
+    pub name: String,
+    pub cpu: f32,
+    pub memory: u64,
+}
 
 #[derive(Serialize)]
 pub struct SystemStats {
@@ -14,7 +21,14 @@ pub struct SystemStats {
     pub disk_free: u64,
 }
 
-pub struct StatsStreamActive(pub AtomicBool);
+pub struct StatsStreamActive(pub Arc<AtomicBool>);
+
+#[derive(Clone, Serialize)]
+pub struct NetworkInterface {
+    pub name: String,
+    pub upload: u64,
+    pub download: u64,
+}
 
 #[derive(Clone, Serialize)]
 pub struct DetailedStats {
@@ -23,12 +37,26 @@ pub struct DetailedStats {
     pub memory_total: u64,
     pub memory_used: u64,
     pub memory_percent: f32,
+    pub memory_pressure: String,
+    pub swap_total: u64,
+    pub swap_used: u64,
     pub disk_total: u64,
     pub disk_used: u64,
     pub disk_free: u64,
     pub disk_percent: f32,
     pub net_upload: u64,
     pub net_download: u64,
+    pub network_interfaces: Vec<NetworkInterface>,
+    pub battery_percent: f32,
+    pub battery_charging: bool,
+    pub battery_time_remaining: String,
+    pub battery_health: String,
+    pub battery_cycle_count: i32,
+    pub gpu_name: String,
+    pub gpu_vram: String,
+    pub thermal_pressure: String,
+    pub top_processes: Vec<TopProcess>,
+    pub uptime_secs: u64,
 }
 
 pub struct SystemMonitor(pub Mutex<System>);
@@ -79,16 +107,42 @@ pub async fn start_stats_stream(
         return Ok(());
     }
 
+    let active_flag = active.0.clone();
+
     tauri::async_runtime::spawn(async move {
         let mut sys = System::new_all();
         let mut networks = Networks::new_with_refreshed_list();
         let mut disks = sysinfo::Disks::new_with_refreshed_list();
         let mut prev_sent: u64 = networks.iter().map(|(_, n)| n.total_transmitted()).sum();
         let mut prev_recv: u64 = networks.iter().map(|(_, n)| n.total_received()).sum();
+        // Per-interface previous values for rate calculation
+        let mut prev_per_iface: std::collections::HashMap<String, (u64, u64)> = networks
+            .iter()
+            .map(|(name, n)| (name.to_string(), (n.total_transmitted(), n.total_received())))
+            .collect();
         let mut tick_count: u32 = 0;
+
+        // Cached slow data
+        let mut cached_memory_pressure = String::from("normal");
+        let mut cached_battery_health = String::from("N/A");
+        let mut cached_battery_cycle_count: i32 = -1;
+        let mut cached_gpu_name = String::from("Unknown");
+        let mut cached_gpu_vram = String::from("N/A");
+        let mut cached_thermal_pressure = String::from("nominal");
+        let mut cached_top_processes: Vec<TopProcess> = Vec::new();
+
+        // Noise interfaces to filter out
+        let noise_prefixes = [
+            "lo", "awdl", "utun", "llw", "bridge", "gif", "stf", "xhc", "anpi", "ap",
+        ];
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            // Check if we should stop
+            if !active_flag.load(Ordering::SeqCst) {
+                break;
+            }
 
             sys.refresh_cpu_usage();
             sys.refresh_memory();
@@ -104,6 +158,10 @@ pub async fn start_stats_stream(
             } else {
                 0.0
             };
+
+            // Swap usage
+            let swap_total = sys.total_swap();
+            let swap_used = sys.used_swap();
 
             // Refresh disk info every 30 seconds instead of every tick
             tick_count += 1;
@@ -127,6 +185,7 @@ pub async fn start_stats_stream(
                 0.0
             };
 
+            // ── Aggregate network ──
             let curr_sent: u64 = networks.iter().map(|(_, n)| n.total_transmitted()).sum();
             let curr_recv: u64 = networks.iter().map(|(_, n)| n.total_received()).sum();
             let net_upload = curr_sent.saturating_sub(prev_sent);
@@ -134,32 +193,308 @@ pub async fn start_stats_stream(
             prev_sent = curr_sent;
             prev_recv = curr_recv;
 
+            // ── Per-interface network (top 3 active, filtering noise) ──
+            let mut iface_stats: Vec<NetworkInterface> = Vec::new();
+            let mut new_prev_per_iface: std::collections::HashMap<String, (u64, u64)> =
+                std::collections::HashMap::new();
+            for (name, data) in networks.iter() {
+                let name_str = name.to_string();
+                let curr_tx = data.total_transmitted();
+                let curr_rx = data.total_received();
+                let (prev_tx, prev_rx) = prev_per_iface
+                    .get(&name_str)
+                    .copied()
+                    .unwrap_or((curr_tx, curr_rx));
+                let ul = curr_tx.saturating_sub(prev_tx);
+                let dl = curr_rx.saturating_sub(prev_rx);
+                new_prev_per_iface.insert(name_str.clone(), (curr_tx, curr_rx));
+
+                // Filter out noise interfaces
+                let is_noise = noise_prefixes
+                    .iter()
+                    .any(|prefix| name_str.starts_with(prefix));
+                if !is_noise && (ul > 0 || dl > 0) {
+                    iface_stats.push(NetworkInterface {
+                        name: name_str,
+                        upload: ul,
+                        download: dl,
+                    });
+                }
+            }
+            prev_per_iface = new_prev_per_iface;
+            // Sort by total activity descending, keep top 3
+            iface_stats.sort_by(|a, b| {
+                (b.upload + b.download).cmp(&(a.upload + a.download))
+            });
+            iface_stats.truncate(3);
+
+            // ── Battery info (pmset every tick, it's fast) ──
+            let (battery_percent, battery_charging, battery_time_remaining) = parse_battery_pmset();
+
+            // ── Battery health + cycle count (slow, every 60 ticks) ──
+            if tick_count % 60 == 1 {
+                let (health, cycles) = parse_battery_profiler();
+                cached_battery_health = health;
+                cached_battery_cycle_count = cycles;
+            }
+
+            // ── Memory pressure (slow, every 10 ticks) ──
+            if tick_count % 10 == 1 {
+                cached_memory_pressure = parse_memory_pressure();
+            }
+
+            // ── GPU info (very slow, every 60 ticks) ──
+            if tick_count % 60 == 1 {
+                let (gn, gv) = parse_gpu_info();
+                cached_gpu_name = gn;
+                cached_gpu_vram = gv;
+            }
+
+            // ── Thermal pressure (every 5 ticks) ──
+            if tick_count % 5 == 1 {
+                cached_thermal_pressure = parse_thermal_pressure();
+            }
+
+            // ── Top processes (every 2 ticks) ──
+            if tick_count % 2 == 0 {
+                sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+                cached_top_processes = get_top_processes(&sys);
+            }
+
             let stats = DetailedStats {
                 cpu_usage,
                 cpu_cores,
                 memory_total,
                 memory_used,
                 memory_percent,
+                memory_pressure: cached_memory_pressure.clone(),
+                swap_total,
+                swap_used,
                 disk_total,
                 disk_used,
                 disk_free,
                 disk_percent,
                 net_upload,
                 net_download,
+                network_interfaces: iface_stats,
+                battery_percent,
+                battery_charging,
+                battery_time_remaining,
+                battery_health: cached_battery_health.clone(),
+                battery_cycle_count: cached_battery_cycle_count,
+                gpu_name: cached_gpu_name.clone(),
+                gpu_vram: cached_gpu_vram.clone(),
+                thermal_pressure: cached_thermal_pressure.clone(),
+                top_processes: cached_top_processes.clone(),
+                uptime_secs: System::uptime(),
             };
 
             let _ = app.emit("system-stats-tick", &stats);
 
-            // Update tray title with compact stats
-            if let Some(tray) = app.tray_by_id("main-tray") {
-                let title = format!(
-                    "CPU {:.0}%  Mem {:.0}%",
-                    cpu_usage, memory_percent
-                );
-                let _ = tray.set_title(Some(&title));
-            }
+            // Tray title removed for performance
         }
     });
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_stats_stream(active: State<'_, StatsStreamActive>) -> Result<(), ()> {
+    active.0.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Parse GPU info from `system_profiler SPDisplaysDataType`.
+fn parse_gpu_info() -> (String, String) {
+    use std::process::Command;
+    let output = Command::new("system_profiler")
+        .args(["SPDisplaysDataType"])
+        .output();
+    match output {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let mut name = String::from("Unknown");
+            let mut vram = String::from("N/A");
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Chipset Model:") || trimmed.starts_with("Chip:") {
+                    name = trimmed
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("Unknown")
+                        .trim()
+                        .to_string();
+                }
+                if trimmed.starts_with("VRAM") || trimmed.contains("Total Number of Cores") {
+                    vram = trimmed
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("N/A")
+                        .trim()
+                        .to_string();
+                }
+            }
+            (name, vram)
+        }
+        Err(_) => ("Unknown".into(), "N/A".into()),
+    }
+}
+
+/// Parse thermal pressure from `pmset -g therm`.
+fn parse_thermal_pressure() -> String {
+    use std::process::Command;
+    let output = Command::new("pmset")
+        .args(["-g", "therm"])
+        .output();
+    match output {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            if text.contains("CPU_Scheduler_Limit") && text.contains("100") {
+                "nominal".into()
+            } else if text.contains("CPU_Scheduler_Limit") {
+                "throttled".into()
+            } else {
+                "nominal".into()
+            }
+        }
+        Err(_) => "unknown".into(),
+    }
+}
+
+/// Get top 5 processes by CPU usage.
+fn get_top_processes(sys: &System) -> Vec<TopProcess> {
+    let mut procs: Vec<_> = sys
+        .processes()
+        .values()
+        .map(|p| TopProcess {
+            name: p.name().to_string_lossy().to_string(),
+            cpu: p.cpu_usage(),
+            memory: p.memory(),
+        })
+        .collect();
+    procs.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal));
+    procs.truncate(5);
+    procs
+}
+
+/// Parse `pmset -g batt` output for battery percentage, charging status, and time remaining.
+fn parse_battery_pmset() -> (f32, bool, String) {
+    let output = std::process::Command::new("pmset")
+        .args(["-g", "batt"])
+        .output();
+
+    let output = match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => return (-1.0, false, "N/A".to_string()),
+    };
+
+    // No battery line means desktop Mac
+    if !output.contains("InternalBattery") {
+        return (-1.0, false, "N/A".to_string());
+    }
+
+    let mut percent: f32 = -1.0;
+    let mut charging = false;
+    let mut time_remaining = String::from("N/A");
+
+    for line in output.lines() {
+        let line = line.trim();
+        if !line.contains("InternalBattery") {
+            continue;
+        }
+        // Parse percentage: e.g. "85%;"
+        if let Some(pct_pos) = line.find('%') {
+            // Walk backwards from '%' to find the start of the number
+            let before = &line[..pct_pos];
+            let num_str: String = before.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>().chars().rev().collect();
+            if let Ok(p) = num_str.parse::<f32>() {
+                percent = p;
+            }
+        }
+        // Charging status
+        if line.contains("charging") && !line.contains("discharging") && !line.contains("not charging") {
+            charging = true;
+        }
+        if line.contains("AC Power") || line.contains("charged") {
+            charging = true;
+        }
+        // Time remaining
+        if let Some(idx) = line.find("remaining") {
+            // Format: "3:24 remaining"
+            let before = line[..idx].trim();
+            if let Some(time_part) = before.rsplit(';').next() {
+                let t = time_part.trim();
+                if !t.is_empty() && t != "(no estimate)" {
+                    time_remaining = t.to_string();
+                }
+            }
+        } else if line.contains("(no estimate)") {
+            time_remaining = "Calculating...".to_string();
+        } else if line.contains("not charging") || line.contains("finishing charge") {
+            time_remaining = "N/A".to_string();
+        }
+    }
+
+    // If on AC power / charged, override
+    if output.contains("AC Power") && output.contains("charged") {
+        charging = true;
+        time_remaining = "Charged".to_string();
+    }
+
+    (percent, charging, time_remaining)
+}
+
+/// Parse `system_profiler SPPowerDataType` for battery health and cycle count.
+fn parse_battery_profiler() -> (String, i32) {
+    let output = std::process::Command::new("system_profiler")
+        .arg("SPPowerDataType")
+        .output();
+
+    let output = match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => return ("N/A".to_string(), -1),
+    };
+
+    let mut health = String::from("N/A");
+    let mut cycle_count: i32 = -1;
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.starts_with("Condition:") {
+            health = line.trim_start_matches("Condition:").trim().to_string();
+        } else if line.starts_with("Cycle Count:") {
+            if let Ok(c) = line
+                .trim_start_matches("Cycle Count:")
+                .trim()
+                .parse::<i32>()
+            {
+                cycle_count = c;
+            }
+        }
+    }
+
+    (health, cycle_count)
+}
+
+/// Parse `memory_pressure` command output for system memory pressure level.
+fn parse_memory_pressure() -> String {
+    let output = std::process::Command::new("/usr/bin/memory_pressure")
+        .args(["-Q"])
+        .output();
+
+    let output = match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => return "normal".to_string(),
+    };
+
+    // The output contains a line like:
+    // "The system has <level> memory pressure"
+    let lower = output.to_lowercase();
+    if lower.contains("critical") {
+        "critical".to_string()
+    } else if lower.contains("warning") || lower.contains("warn") {
+        "warning".to_string()
+    } else {
+        "normal".to_string()
+    }
 }

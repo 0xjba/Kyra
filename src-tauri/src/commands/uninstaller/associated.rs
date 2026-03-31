@@ -14,6 +14,9 @@ const SEARCH_LOCATIONS: &[(&str, &str)] = &[
     ("Saved Application State", "Saved State"),
     ("WebKit", "WebKit Data"),
     ("HTTPStorages", "HTTP Storage"),
+    ("Cookies", "Cookies"),
+    ("Internet Plug-Ins", "Plug-ins"),
+    ("Input Methods", "Plug-ins"),
 ];
 
 /// Checks if a directory entry name matches the bundle ID or app name.
@@ -79,6 +82,47 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
                 size,
                 is_dir: path.is_dir(),
             });
+        }
+    }
+
+    // Scan LaunchAgents, LaunchDaemons, and PrivilegedHelperTools
+    if !bundle_id.is_empty() {
+        let launch_dirs: Vec<(std::path::PathBuf, &str)> = vec![
+            (home.join("Library/LaunchAgents"), "Launch Agents"),
+            (std::path::PathBuf::from("/Library/LaunchAgents"), "Launch Agents"),
+            (std::path::PathBuf::from("/Library/LaunchDaemons"), "Launch Daemons"),
+            (std::path::PathBuf::from("/Library/PrivilegedHelperTools"), "Launch Daemons"),
+        ];
+
+        let bundle_lower = bundle_id.to_lowercase();
+
+        for (dir, category) in &launch_dirs {
+            if !dir.exists() {
+                continue;
+            }
+            let entries = match fs::read_dir(dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let entry_name = entry.file_name().to_string_lossy().to_lowercase();
+                if entry_name.contains(&bundle_lower) {
+                    let path = entry.path();
+                    let size = path_size(&path);
+                    if size == 0 {
+                        continue;
+                    }
+                    let path_str = path.to_string_lossy().to_string();
+                    if !results.iter().any(|r| r.path == path_str) {
+                        results.push(AssociatedFile {
+                            path: path_str,
+                            category: category.to_string(),
+                            size,
+                            is_dir: path.is_dir(),
+                        });
+                    }
+                }
+            }
         }
     }
 

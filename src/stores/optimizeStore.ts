@@ -28,6 +28,8 @@ interface OptimizeStore {
   disableAll: () => void;
   runSelected: () => Promise<void>;
   runSingle: (id: string) => Promise<void>;
+  runTaskIds: (ids: string[]) => Promise<void>;
+  markSkipped: (ids: string[], reason: string) => void;
   reset: () => void;
 }
 
@@ -42,7 +44,10 @@ export const useOptimizeStore = create<OptimizeStore>((set, get) => ({
   loadTasks: async () => {
     try {
       const tasks = await getOptimizeTasks();
-      const enabledIds = new Set(tasks.map((t) => t.id));
+      // Default: enable all non-admin tasks
+      const enabledIds = new Set(
+        tasks.filter((t) => !t.needs_admin).map((t) => t.id)
+      );
       const statuses: TaskStatusMap = {};
       for (const t of tasks) {
         statuses[t.id] = { status: "ready" };
@@ -73,6 +78,45 @@ export const useOptimizeStore = create<OptimizeStore>((set, get) => ({
     set({ enabledIds: new Set() });
   },
 
+  runTaskIds: async (ids: string[]) => {
+    if (ids.length === 0) return;
+
+    // Reset statuses for these tasks to ready
+    const newStatuses = { ...get().statuses };
+    for (const id of ids) {
+      newStatuses[id] = { status: "ready" };
+    }
+    set({ running: true, statuses: newStatuses });
+
+    let unlisten: UnlistenFn | null = null;
+    try {
+      unlisten = await listenOptimizeStatus((status: OptTaskStatus) => {
+        const finished = status.status === "done" || status.status === "error" || status.status === "skipped";
+        set((state) => {
+          const newEnabled = finished ? new Set(state.enabledIds) : state.enabledIds;
+          if (finished) newEnabled.delete(status.task_id);
+          return {
+            statuses: {
+              ...state.statuses,
+              [status.task_id]: {
+                status: status.status as "running" | "done" | "error" | "skipped",
+                message: status.message ?? undefined,
+              },
+            },
+            enabledIds: newEnabled,
+          };
+        });
+      });
+
+      const result = await runOptimizeTasks(ids);
+      set({ running: false, result });
+    } catch (e) {
+      set({ running: false, error: String(e) });
+    } finally {
+      if (unlisten) unlisten();
+    }
+  },
+
   runSelected: async () => {
     const { enabledIds, statuses } = get();
     const taskIds = Array.from(enabledIds);
@@ -87,15 +131,21 @@ export const useOptimizeStore = create<OptimizeStore>((set, get) => ({
     let unlisten: UnlistenFn | null = null;
     try {
       unlisten = await listenOptimizeStatus((status: OptTaskStatus) => {
-        set((state) => ({
-          statuses: {
-            ...state.statuses,
-            [status.task_id]: {
-              status: status.status as "running" | "done" | "error" | "skipped",
-              message: status.message ?? undefined,
+        const finished = status.status === "done" || status.status === "error" || status.status === "skipped";
+        set((state) => {
+          const newEnabled = finished ? new Set(state.enabledIds) : state.enabledIds;
+          if (finished) newEnabled.delete(status.task_id);
+          return {
+            statuses: {
+              ...state.statuses,
+              [status.task_id]: {
+                status: status.status as "running" | "done" | "error" | "skipped",
+                message: status.message ?? undefined,
+              },
             },
-          },
-        }));
+            enabledIds: newEnabled,
+          };
+        });
       });
 
       const result = await runOptimizeTasks(taskIds);
@@ -117,15 +167,21 @@ export const useOptimizeStore = create<OptimizeStore>((set, get) => ({
     let unlisten: UnlistenFn | null = null;
     try {
       unlisten = await listenOptimizeStatus((status: OptTaskStatus) => {
-        set((state) => ({
-          statuses: {
-            ...state.statuses,
-            [status.task_id]: {
-              status: status.status as "running" | "done" | "error" | "skipped",
-              message: status.message ?? undefined,
+        const finished = status.status === "done" || status.status === "error" || status.status === "skipped";
+        set((state) => {
+          const newEnabled = finished ? new Set(state.enabledIds) : state.enabledIds;
+          if (finished) newEnabled.delete(status.task_id);
+          return {
+            statuses: {
+              ...state.statuses,
+              [status.task_id]: {
+                status: status.status as "running" | "done" | "error" | "skipped",
+                message: status.message ?? undefined,
+              },
             },
-          },
-        }));
+            enabledIds: newEnabled,
+          };
+        });
       });
 
       const result = await runOptimizeTasks([id]);
@@ -135,6 +191,16 @@ export const useOptimizeStore = create<OptimizeStore>((set, get) => ({
     } finally {
       if (unlisten) unlisten();
     }
+  },
+
+  markSkipped: (ids: string[], reason: string) => {
+    set((state) => {
+      const newStatuses = { ...state.statuses };
+      for (const id of ids) {
+        newStatuses[id] = { status: "skipped", message: reason };
+      }
+      return { statuses: newStatuses };
+    });
   },
 
   reset: () => {

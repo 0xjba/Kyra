@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   startStatsStream,
+  stopStatsStream,
   listenStatsTick,
   type DetailedStats,
 } from "../lib/tauri";
@@ -34,10 +35,9 @@ export const useStatusStore = create<StatusStore>((set, get) => ({
 
     const unlisten = await listenStatsTick((stats) => {
       set((state) => {
-        const point: NetworkPoint = {
-          upload: stats.net_upload,
-          download: stats.net_download,
-        };
+        const upload = isFinite(stats.net_upload) ? stats.net_upload : 0;
+        const download = isFinite(stats.net_download) ? stats.net_download : 0;
+        const point: NetworkPoint = { upload, download };
         const history = [...state.networkHistory, point];
         if (history.length > MAX_HISTORY) {
           history.shift();
@@ -47,12 +47,18 @@ export const useStatusStore = create<StatusStore>((set, get) => ({
     });
 
     set({ streaming: true, unlisten });
-    await startStatsStream();
+    try {
+      await startStatsStream();
+    } catch (err) {
+      console.error("[statusStore] startStatsStream failed:", err);
+    }
   },
 
   stopStream: () => {
     const { unlisten } = get();
     if (unlisten) unlisten();
+    // Stop the Rust background thread too
+    stopStatsStream().catch(() => {});
     set({ streaming: false, unlisten: null });
   },
 }));

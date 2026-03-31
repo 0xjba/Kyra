@@ -27,7 +27,7 @@ export default function ModulePlaceholder() {
     >
       <div
         style={{
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: 600,
           color: "var(--text-primary)",
         }}

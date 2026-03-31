@@ -46,9 +46,19 @@ pub fn all_tasks() -> Vec<OptTask> {
             id: "sqlite_vacuum".into(),
             name: "Vacuum SQLite Databases".into(),
             description: "Compact Mail, Messages, and Safari databases to free space".into(),
-            command: "find ~/Library/Mail ~/Library/Messages ~/Library/Safari -name '*.db' -size -100M -exec sqlite3 {} 'VACUUM;' \\; 2>/dev/null".into(),
+            // Command is unused — custom runner handles this task
+            command: String::new(),
             needs_admin: false,
-            warning: Some("Close Mail, Messages, Safari first".into()),
+            warning: Some("Mail, Messages, and Safari must be closed".into()),
+        },
+        OptTask {
+            id: "plist_repair".into(),
+            name: "Repair Broken Preferences".into(),
+            description: "Validates preference files and removes corrupted ones".into(),
+            // Command is unused — custom runner handles this task
+            command: String::new(),
+            needs_admin: false,
+            warning: Some("Corrupted preference files will be removed; apps will recreate them".into()),
         },
         OptTask {
             id: "font_cache".into(),

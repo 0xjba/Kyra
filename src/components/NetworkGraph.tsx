@@ -28,13 +28,17 @@ export default function NetworkGraph({ history, height = 120 }: NetworkGraphProp
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let rafId: number;
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setWidth(entry.contentRect.width);
-      }
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        for (const entry of entries) {
+          setWidth(entry.contentRect.width);
+        }
+      });
     });
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, []);
 
   const latest = history.length > 0 ? history[history.length - 1] : null;
@@ -53,23 +57,30 @@ export default function NetworkGraph({ history, height = 120 }: NetworkGraphProp
 
     if (history.length < 2) return;
 
-    const maxVal = Math.max(
-      ...history.map((p) => Math.max(p.upload, p.download)),
-      1024
+    const rawMax = history.reduce(
+      (acc, p) => Math.max(acc, isFinite(p.upload) ? p.upload : 0, isFinite(p.download) ? p.download : 0),
+      0
     );
+    const maxVal = Math.max(rawMax, 1024);
 
     const padding = 2;
     const graphW = width - padding * 2;
     const graphH = height - padding * 2;
 
     function drawLine(data: number[], color: string) {
-      if (!ctx) return;
+      if (!ctx || data.length < 2) return;
       ctx.beginPath();
+      let started = false;
       for (let i = 0; i < data.length; i++) {
+        const val = isFinite(data[i]) ? data[i] : 0;
         const x = padding + (i / (data.length - 1)) * graphW;
-        const y = padding + graphH - (data[i] / maxVal) * graphH;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = padding + graphH - (val / maxVal) * graphH;
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
       }
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
@@ -79,25 +90,25 @@ export default function NetworkGraph({ history, height = 120 }: NetworkGraphProp
     // Download line (cyan)
     drawLine(
       history.map((p) => p.download),
-      "#5ef5e2"
+      "#22B8F0"
     );
 
     // Upload line (green)
     drawLine(
       history.map((p) => p.upload),
-      "#4ade80"
+      "#2AC852"
     );
   }, [history, width, height]);
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.5)" }}>Network</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Network</span>
         <div style={{ display: "flex", gap: 12, fontSize: 11 }}>
-          <span style={{ color: "#5ef5e2" }}>
+          <span style={{ color: "#22B8F0" }}>
             {"\u2193"} {latest ? formatRate(latest.download) : "\u2014"}
           </span>
-          <span style={{ color: "#4ade80" }}>
+          <span style={{ color: "#2AC852" }}>
             {"\u2191"} {latest ? formatRate(latest.upload) : "\u2014"}
           </span>
         </div>

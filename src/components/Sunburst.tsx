@@ -102,14 +102,18 @@ export default function Sunburst({ node, onDrillIn, onReveal }: SunburstProps) {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let rafId: number;
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const s = Math.min(entry.contentRect.width, entry.contentRect.height);
-        setSize(s);
-      }
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        for (const entry of entries) {
+          const s = Math.min(entry.contentRect.width, entry.contentRect.height);
+          setSize(s);
+        }
+      });
     });
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
   }, []);
 
   const width = size;
@@ -195,7 +199,10 @@ export default function Sunburst({ node, onDrillIn, onReveal }: SunburstProps) {
           tooltip.style.display = "block";
           tooltip.style.left = `${e.clientX - rect.left + 12}px`;
           tooltip.style.top = `${e.clientY - rect.top - 20}px`;
-          tooltip.textContent = `${hit.node.name} — ${formatSize(hit.node.size)}`;
+          const label = hit.node.is_cleanable
+            ? `${hit.node.name} — ${formatSize(hit.node.size)} (cleanable)`
+            : `${hit.node.name} — ${formatSize(hit.node.size)}`;
+          tooltip.textContent = label;
         } else {
           tooltip.style.display = "none";
         }

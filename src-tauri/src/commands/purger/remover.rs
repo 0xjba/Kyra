@@ -20,8 +20,29 @@ const PROTECTED_PATHS: &[&str] = &[
 
 /// Known artifact directory names that are valid purge targets.
 const VALID_ARTIFACT_NAMES: &[&str] = &[
-    "node_modules", "target", "dist", "build", ".next", ".nuxt",
-    "__pycache__", ".pytest_cache", "Pods", ".gradle", ".build",
+    // JavaScript / Node.js
+    "node_modules", "dist", "build", ".next", ".nuxt",
+    ".output", ".turbo", ".parcel-cache", ".angular", ".svelte-kit", ".astro", "coverage",
+    // Rust
+    "target",
+    // Python
+    "__pycache__", ".pytest_cache", "venv", ".venv", ".mypy_cache", ".tox", ".nox", ".ruff_cache",
+    // iOS / macOS
+    "Pods", ".build", "DerivedData",
+    // Android / JVM
+    ".gradle",
+    // PHP / Go / Ruby
+    "vendor",
+    // C# / .NET
+    "obj",
+    // C++ (CMake)
+    ".cxx",
+    // React Native
+    ".expo",
+    // Flutter / Dart
+    ".dart_tool",
+    // Zig
+    ".zig-cache", "zig-out",
 ];
 
 /// Returns true if a path is safe to delete for purge operations.
@@ -66,6 +87,7 @@ fn is_safe_path(path_str: &str) -> bool {
 pub fn remove_artifacts<F>(
     paths: &[String],
     dry_run: bool,
+    permanent: bool,
     mut on_progress: F,
 ) -> PurgeResult
 where
@@ -106,11 +128,17 @@ where
             bytes_freed += size;
             items_removed += 1;
         } else {
-            match fs::remove_dir_all(path) {
+            let delete_result = if permanent {
+                fs::remove_dir_all(path)
+            } else {
+                trash::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            };
+            match delete_result {
                 Ok(()) => {
                     bytes_freed += size;
                     items_removed += 1;
-                    shared::log_operation("PURGE", path_str, "OK");
+                    let action = if permanent { "DELETED" } else { "TRASHED" };
+                    shared::log_operation("PURGE", path_str, action);
                 }
                 Err(e) => {
                     shared::log_operation("PURGE", path_str, &format!("ERROR: {}", e));

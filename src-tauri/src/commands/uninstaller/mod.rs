@@ -12,6 +12,8 @@ pub struct AppInfo {
     pub version: String,
     pub path: String,
     pub size: u64,
+    pub is_system: bool,
+    pub is_data_sensitive: bool,
 }
 
 /// A file or directory associated with an application.
@@ -62,8 +64,9 @@ pub async fn execute_uninstall(
     app_path: String,
     file_paths: Vec<String>,
     dry_run: bool,
+    permanent: bool,
 ) -> Result<UninstallResult, String> {
-    let result = remover::remove_app_and_files(&app_path, &file_paths, dry_run, |progress| {
+    let result = remover::remove_app_and_files(&app_path, &file_paths, dry_run, permanent, |progress| {
         let _ = app.emit("uninstall-progress", progress);
     });
 

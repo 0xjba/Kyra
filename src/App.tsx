@@ -26,8 +26,8 @@ export default function App() {
   return (
     <HashRouter>
       <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-        <AccentBar />
         <TitleBar />
+        <div style={{ height: 1, background: "rgba(255, 255, 255, 0.06)", flexShrink: 0 }} />
         <FdaPrompt />
         <div style={{ flex: 1, overflow: "hidden" }}>
           <Routes>
@@ -43,6 +43,7 @@ export default function App() {
             <Route path="/:module" element={<ModulePlaceholder />} />
           </Routes>
         </div>
+        <AccentBar />
       </div>
     </HashRouter>
   );

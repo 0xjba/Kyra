@@ -24,6 +24,7 @@ interface InstallersStore {
   selectAll: () => void;
   deselectAll: () => void;
   deleteSelected: () => Promise<void>;
+  dismissDone: () => void;
   reset: () => void;
 }
 
@@ -75,13 +76,25 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
     });
 
     try {
-      const dryRun = useSettingsStore.getState().settings.dry_run;
-      const result = await deleteInstallers([...selected], dryRun);
+      const { dry_run: dryRun, use_trash } = useSettingsStore.getState().settings;
+      const permanent = !use_trash;
+      const result = await deleteInstallers([...selected], dryRun, permanent);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });
     } finally {
       unlisten();
+    }
+  },
+
+  dismissDone: () => {
+    const { files, selected } = get();
+    const remaining = files.filter((f) => !selected.has(f.path));
+    if (remaining.length === 0) {
+      set({ phase: "idle", files: [], selected: new Set(), progress: null, result: null });
+    } else {
+      const newSelected = new Set(remaining.map((f) => f.path));
+      set({ phase: "list", files: remaining, selected: newSelected, progress: null, result: null });
     }
   },
 

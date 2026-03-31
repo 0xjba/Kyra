@@ -26,6 +26,7 @@ interface PurgeStore {
   selectAll: () => void;
   deselectAll: () => void;
   purge: () => Promise<void>;
+  dismissDone: () => void;
   reset: () => void;
 }
 
@@ -88,13 +89,25 @@ export const usePurgeStore = create<PurgeStore>((set, get) => ({
     });
 
     try {
-      const dryRun = useSettingsStore.getState().settings.dry_run;
-      const result = await executePurge(Array.from(selectedPaths), dryRun);
+      const { dry_run: dryRun, use_trash } = useSettingsStore.getState().settings;
+      const permanent = !use_trash;
+      const result = await executePurge(Array.from(selectedPaths), dryRun, permanent);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });
     } finally {
       unlisten();
+    }
+  },
+
+  dismissDone: () => {
+    const { artifacts, selectedPaths } = get();
+    const remaining = artifacts.filter((a) => !selectedPaths.has(a.artifact_path));
+    if (remaining.length === 0) {
+      set({ phase: "idle", artifacts: [], selectedPaths: new Set(), progress: null, result: null });
+    } else {
+      const newSelected = new Set(remaining.map((a) => a.artifact_path));
+      set({ phase: "list", artifacts: remaining, selectedPaths: newSelected, progress: null, result: null });
     }
   },
 

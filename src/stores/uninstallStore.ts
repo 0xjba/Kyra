@@ -25,7 +25,6 @@ interface UninstallStore {
   progress: UninstallProgress | null;
   result: UninstallResult | null;
   error: string | null;
-
   scanApps: () => Promise<void>;
   setSearch: (query: string) => void;
   selectApp: (app: AppInfo) => Promise<void>;
@@ -33,7 +32,8 @@ interface UninstallStore {
   toggleFile: (path: string) => void;
   selectAllFiles: () => void;
   deselectAllFiles: () => void;
-  uninstall: () => Promise<void>;
+  uninstall: (permanent: boolean) => Promise<void>;
+  bulkUninstall: (apps: AppInfo[], permanent: boolean) => Promise<void>;
   reset: () => void;
 }
 
@@ -48,7 +48,6 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
   progress: null,
   result: null,
   error: null,
-
   scanApps: async () => {
     set({ phase: "scanning", apps: [], error: null });
     try {
@@ -98,7 +97,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
     set({ selectedFilePaths: new Set() });
   },
 
-  uninstall: async () => {
+  uninstall: async (permanent: boolean) => {
     const { selectedApp, selectedFilePaths } = get();
     if (!selectedApp) return;
 
@@ -112,8 +111,80 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
 
       const filePaths = Array.from(selectedFilePaths);
       const dryRun = useSettingsStore.getState().settings.dry_run;
-      const result = await executeUninstall(selectedApp.path, filePaths, dryRun);
-      set({ phase: "done", result });
+      const result = await executeUninstall(selectedApp.path, filePaths, dryRun, permanent);
+      // Immediately remove the uninstalled app from local list + show success
+      const remainingApps = get().apps.filter((a) => a.path !== selectedApp.path);
+      set({ result, apps: remainingApps, selectedApp: null, associatedFiles: [], selectedFilePaths: new Set() });
+      // Re-scan in background to refresh app list
+      scanInstalledApps().then((apps) => set({ apps })).catch(() => {});
+    } catch (e) {
+      set({ phase: "list", error: String(e) });
+    } finally {
+      if (unlisten) unlisten();
+    }
+  },
+
+  bulkUninstall: async (appsToRemove: AppInfo[], permanent: boolean) => {
+    if (appsToRemove.length === 0) return;
+
+    set({ phase: "removing", progress: null, result: null, selectedApp: null });
+
+    let unlisten: UnlistenFn | null = null;
+    try {
+      unlisten = await listenUninstallProgress((progress) => {
+        set({ progress });
+      });
+
+      const dryRun = useSettingsStore.getState().settings.dry_run;
+      let totalRemoved = 0;
+      let totalFreed = 0;
+      const allErrors: string[] = [];
+      const failedAppPaths = new Set<string>();
+
+      for (const app of appsToRemove) {
+        // Fetch associated files for each app
+        let filePaths: string[] = [];
+        try {
+          const files = await getAssociatedFiles(app.bundle_id, app.name, app.path);
+          filePaths = files.map((f) => f.path);
+        } catch {
+          // Continue even if we can't get associated files
+        }
+
+        try {
+          const result = await executeUninstall(app.path, filePaths, dryRun, permanent);
+          totalRemoved += result.items_removed;
+          totalFreed += result.bytes_freed;
+          // Check if the app bundle itself failed (its path will appear in errors)
+          const appBundleFailed = result.errors.some((e) => e.startsWith(app.path));
+          if (appBundleFailed) {
+            failedAppPaths.add(app.path);
+          }
+          allErrors.push(...result.errors);
+        } catch (e) {
+          failedAppPaths.add(app.path);
+          allErrors.push(`${app.name}: ${String(e)}`);
+        }
+      }
+
+      // Only remove apps that were actually deleted (not ones that errored)
+      const successPaths = new Set(
+        appsToRemove.map((a) => a.path).filter((p) => !failedAppPaths.has(p))
+      );
+      const remainingApps = get().apps.filter((a) => !successPaths.has(a.path));
+      set({
+        result: {
+          items_removed: totalRemoved,
+          bytes_freed: totalFreed,
+          errors: allErrors,
+        },
+        apps: remainingApps,
+        selectedApp: null,
+        associatedFiles: [],
+        selectedFilePaths: new Set(),
+      });
+      // Re-scan in background to refresh app list
+      scanInstalledApps().then((apps) => set({ apps })).catch(() => {});
     } catch (e) {
       set({ phase: "list", error: String(e) });
     } finally {

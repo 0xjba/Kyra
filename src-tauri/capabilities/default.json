@@ -3,6 +3,9 @@
   "description": "Default capabilities for Kyra",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:event:allow-listen",
+    "core:event:allow-emit"
   ]
 }

@@ -1,8 +1,20 @@
+.home-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 12px 12px;
+  height: 100%;
+  overflow: auto;
+}
+
 .bento-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: 100px;
+  grid-template-rows: repeat(3, 1fr);
+  grid-auto-flow: dense;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
 }
 
 .mini-chart {
@@ -43,5 +55,116 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--bg-base);
+  background: var(--bg-card);
+}
+
+/* ── Module Card ─────────────────────────────────────── */
+.module-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+  box-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+}
+
+/* Hover shimmer — subtle skewed streak slides across on hover */
+.module-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.01) 40%,
+    rgba(255, 255, 255, 0.02) 50%,
+    rgba(255, 255, 255, 0.01) 60%,
+    transparent 100%
+  );
+  transform: skewX(-20deg);
+  pointer-events: none;
+  transition: left 0.6s ease-out;
+  z-index: 1;
+}
+
+.module-card:hover::before {
+  left: 150%;
+}
+
+.module-card:hover {
+  border-color: var(--border-hover);
+}
+
+/* Card internals */
+.module-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.module-card-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.module-card-title {
+  font-size: var(--font-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.module-card-desc {
+  font-size: var(--font-base);
+  color: var(--text-tertiary);
+  line-height: var(--leading-relaxed);
+}
+
+.module-card-stat {
+  margin-top: auto;
+}
+
+.module-card-stat-value {
+  font-size: var(--font-4xl);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  line-height: var(--leading-none);
+  margin-top: auto;
+}
+
+.module-card-stat-label {
+  font-size: var(--font-base);
+  color: var(--text-tertiary);
+  margin-top: 3px;
+}
+
+.module-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+}
+
+.module-card-meta-text {
+  font-size: var(--font-base);
+  color: var(--text-tertiary);
 }

@@ -78,7 +78,7 @@ export default function ArcGauge({
         ref={canvasRef}
         style={{ width: size, height: size }}
       />
-      <div style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", textAlign: "center" }}>
+      <div style={{ fontSize: 11, color: "var(--text-tertiary)", textAlign: "center" }}>
         {detail}
       </div>
     </div>

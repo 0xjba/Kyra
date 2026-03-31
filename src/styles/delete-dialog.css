@@ -1,0 +1,86 @@
+/* ── Delete Confirmation Dialog (Apple-style) ── */
+
+.delete-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  animation: deleteOverlayIn 0.15s ease;
+}
+
+@keyframes deleteOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.delete-dialog {
+  width: 240px;
+  background: rgba(30, 30, 30, 0.55);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.5),
+    0 8px 24px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+  padding: 26px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: deleteDialogIn 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes deleteDialogIn {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Warning icon */
+.delete-dialog-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(253, 210, 37, 0.1);
+  border: 1px solid rgba(253, 210, 37, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(253, 210, 37, 0.85);
+  margin-bottom: 14px;
+}
+
+/* Title */
+.delete-dialog-title {
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  line-height: var(--leading-tight);
+  margin-bottom: 6px;
+}
+
+/* Description */
+.delete-dialog-desc {
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+  line-height: var(--leading-relaxed);
+  margin-bottom: 20px;
+  max-width: 200px;
+}
+
+/* Button row */
+.delete-dialog-buttons {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.delete-dialog-buttons .btn {
+  flex: 1;
+  text-align: center;
+}

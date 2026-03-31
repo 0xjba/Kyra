@@ -2,7 +2,7 @@ pub mod executor;
 pub mod rules;
 pub mod scanner;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A cleaning rule definition — pure data describing what to scan.
 #[derive(Clone, Serialize)]
@@ -11,10 +11,11 @@ pub struct CleanRule {
     pub category: String,
     pub label: String,
     pub paths: Vec<String>,
+    pub max_age_days: Option<u32>,
 }
 
 /// A single found path with its size.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PathInfo {
     pub path: String,
     pub size: u64,
@@ -22,7 +23,7 @@ pub struct PathInfo {
 }
 
 /// Result of scanning a single rule — what was found and how big it is.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ScanItem {
     pub rule_id: String,
     pub category: String,
@@ -82,24 +83,19 @@ use tauri::Emitter;
 #[tauri::command]
 pub async fn scan_for_cleanables() -> Vec<ScanItem> {
     let rules = rules::all_rules();
-    scanner::scan_rules(&rules)
+    let mut results = scanner::scan_rules(&rules);
+    results.extend(scanner::scan_orphaned_data());
+    results
 }
 
 #[tauri::command]
 pub async fn execute_clean(
     app: tauri::AppHandle,
-    rule_ids: Vec<String>,
+    items: Vec<ScanItem>,
     dry_run: bool,
+    permanent: bool,
 ) -> Result<CleanResult, String> {
-    // First scan to get current state of selected items
-    let rules = rules::all_rules();
-    let all_items = scanner::scan_rules(&rules);
-    let selected_items: Vec<ScanItem> = all_items
-        .into_iter()
-        .filter(|item| rule_ids.contains(&item.rule_id))
-        .collect();
-
-    if selected_items.is_empty() {
+    if items.is_empty() {
         return Ok(CleanResult {
             items_cleaned: 0,
             bytes_freed: 0,
@@ -107,11 +103,65 @@ pub async fn execute_clean(
         });
     }
 
-    let result = executor::execute_clean_items(&selected_items, dry_run, |progress| {
-        let _ = app.emit("clean-progress", progress);
-    });
+    let result = tokio::task::spawn_blocking(move || {
+        executor::execute_clean_items(&items, dry_run, permanent, |progress| {
+            let _ = app.emit("clean-progress", progress);
+        })
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?;
 
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn run_brew_cleanup() -> Result<String, String> {
+    use std::path::Path;
+    use std::process::Command;
+
+    let brew_path = if Path::new("/opt/homebrew/bin/brew").exists() {
+        "/opt/homebrew/bin/brew"
+    } else if Path::new("/usr/local/bin/brew").exists() {
+        "/usr/local/bin/brew"
+    } else {
+        return Err("Homebrew not installed".into());
+    };
+
+    let mut results = Vec::new();
+
+    match Command::new(brew_path)
+        .args(["cleanup", "--prune=all"])
+        .output()
+    {
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            results.push(format!(
+                "brew cleanup: {}",
+                if output.status.success() {
+                    "done"
+                } else {
+                    stderr.trim()
+                }
+            ));
+        }
+        Err(e) => results.push(format!("brew cleanup failed: {}", e)),
+    }
+
+    match Command::new(brew_path).arg("autoremove").output() {
+        Ok(output) => {
+            results.push(format!(
+                "brew autoremove: {}",
+                if output.status.success() {
+                    "done"
+                } else {
+                    "failed"
+                }
+            ));
+        }
+        Err(e) => results.push(format!("brew autoremove failed: {}", e)),
+    }
+
+    Ok(results.join("\n"))
 }
 
 #[tauri::command]
@@ -122,18 +172,34 @@ pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
     let app_rules: Vec<(&str, &[&str])> = vec![
-        ("Safari", &["browser_safari"]),
-        ("Google Chrome", &["browser_chrome"]),
-        ("Firefox", &["browser_firefox"]),
-        ("Microsoft Edge", &["browser_edge"]),
-        ("Brave Browser", &["browser_brave"]),
-        ("Arc", &["browser_arc"]),
-        ("Discord", &["app_discord"]),
-        ("Slack", &["app_slack"]),
-        ("Spotify", &["app_spotify"]),
-        ("zoom.us", &["app_zoom"]),
-        ("Microsoft Teams", &["app_teams"]),
-        ("Code Helper", &["dev_vscode"]),
+        ("Safari", &["safari_cache"]),
+        ("Google Chrome", &["chrome_cache"]),
+        ("Firefox", &["firefox_cache"]),
+        ("Microsoft Edge", &["edge_cache"]),
+        ("Brave Browser", &["brave_cache"]),
+        ("Arc", &["arc_cache"]),
+        ("Opera", &["opera_cache"]),
+        ("Vivaldi", &["vivaldi_cache"]),
+        ("Discord", &["comm_discord"]),
+        ("Slack", &["comm_slack"]),
+        ("Spotify", &["media_spotify"]),
+        ("zoom.us", &["comm_zoom"]),
+        ("Microsoft Teams", &["comm_teams"]),
+        ("Code Helper", &["dev_vscode_cache"]),
+        ("Telegram", &["comm_telegram"]),
+        ("WhatsApp", &["comm_whatsapp"]),
+        ("WeChat", &["comm_wechat"]),
+        ("Skype", &["comm_skype"]),
+        ("Signal", &["comm_signal"]),
+        ("Figma", &["design_figma"]),
+        ("Sketch", &["design_sketch"]),
+        ("Steam", &["game_steam"]),
+        ("OBS", &["media_obs"]),
+        ("IINA", &["media_iina"]),
+        ("VLC", &["media_vlc"]),
+        ("Notion", &["notes_notion"]),
+        ("Obsidian", &["notes_obsidian"]),
+        ("Mail", &["system_mail_downloads"]),
     ];
 
     let process_names: Vec<String> = sys

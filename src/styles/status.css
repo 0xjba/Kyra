@@ -20,11 +20,11 @@
 }
 
 .status-section-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
   color: var(--text-tertiary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--tracking-caps);
   margin-bottom: 8px;
 }
 
@@ -75,6 +75,173 @@
 }
 
 .status-core-label {
-  font-size: 8px;
+  font-size: var(--font-xs);
   color: var(--text-tertiary);
+}
+
+/* ── Extra metrics row ────────────────────────────────── */
+
+.status-extras {
+  display: flex;
+  gap: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.status-info-card {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.status-info-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-info-sub {
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.status-info-label {
+  font-size: var(--font-base);
+  color: var(--text-tertiary);
+}
+
+.status-info-value {
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Battery bar ──────────────────────────────────────── */
+
+.status-battery-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.status-battery-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.status-battery-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.status-battery-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Network interfaces ───────────────────────────────── */
+
+.status-iface-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.status-iface-row + .status-iface-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.status-iface-name {
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.status-iface-stats {
+  display: flex;
+  gap: 10px;
+  font-size: var(--font-base);
+  color: var(--text-tertiary);
+}
+
+.status-iface-up::before {
+  content: "\2191 ";
+}
+
+.status-iface-down::before {
+  content: "\2193 ";
+}
+
+/* ── Top Processes ────────────────────────────────────── */
+
+.status-processes {
+  max-width: 480px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.status-process-list {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.status-process-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+}
+
+.status-process-row + .status-process-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.status-process-name {
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.status-process-stats {
+  display: flex;
+  gap: 12px;
+  font-size: var(--font-base);
+  flex-shrink: 0;
+}
+
+.status-process-cpu {
+  color: var(--cyan);
+  font-weight: var(--weight-medium);
+  min-width: 48px;
+  text-align: right;
+}
+
+.status-process-mem {
+  color: var(--text-tertiary);
+  min-width: 60px;
+  text-align: right;
 }

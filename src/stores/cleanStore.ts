@@ -25,6 +25,7 @@ interface CleanStore {
   selectAll: () => void;
   deselectAll: () => void;
   clean: () => Promise<void>;
+  dismissDone: () => void;
   reset: () => void;
 }
 
@@ -80,13 +81,30 @@ export const useCleanStore = create<CleanStore>((set, get) => ({
         set({ progress });
       });
 
-      const dryRun = useSettingsStore.getState().settings.dry_run;
-      const result = await executeClean(ruleIds, dryRun);
+      const { dry_run: dryRun, use_trash } = useSettingsStore.getState().settings;
+      const permanent = !use_trash;
+      const selectedItems = get().items.filter((item) => ruleIds.includes(item.rule_id));
+      const result = await executeClean(selectedItems, dryRun, permanent);
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "results", error: String(e) });
     } finally {
       if (unlisten) unlisten();
+    }
+  },
+
+  dismissDone: () => {
+    const { items, selectedIds } = get();
+    // Remove cleaned items (the ones that were selected), keep the rest
+    const cleanedIds = selectedIds;
+    const remaining = items.filter((i) => !cleanedIds.has(i.rule_id));
+    if (remaining.length === 0 || remaining.every((i) => i.total_size === 0)) {
+      // Nothing left — go back to idle
+      set({ phase: "idle", items: [], selectedIds: new Set(), progress: null, result: null });
+    } else {
+      // Go back to results with remaining items, re-select all
+      const newSelected = new Set(remaining.map((i) => i.rule_id));
+      set({ phase: "results", items: remaining, selectedIds: newSelected, progress: null, result: null });
     }
   },
 

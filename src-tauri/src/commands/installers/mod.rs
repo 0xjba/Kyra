@@ -38,8 +38,17 @@ pub async fn delete_installers(
     app: tauri::AppHandle,
     file_paths: Vec<String>,
     dry_run: bool,
+    permanent: bool,
 ) -> InstallerResult {
-    remover::remove_installer_files(&file_paths, dry_run, |progress| {
-        let _ = app.emit("installer-progress", progress);
+    tokio::task::spawn_blocking(move || {
+        remover::remove_installer_files(&file_paths, dry_run, permanent, |progress| {
+            let _ = app.emit("installer-progress", progress);
+        })
+    })
+    .await
+    .unwrap_or_else(|e| InstallerResult {
+        items_removed: 0,
+        bytes_freed: 0,
+        errors: vec![format!("Task panicked: {}", e)],
     })
 }
