@@ -3,6 +3,7 @@ import {
   scanForCleanables,
   executeClean,
   listenCleanProgress,
+  addBytesFreed,
   type ScanItem,
   type CleanProgress,
   type CleanResult,
@@ -85,6 +86,9 @@ export const useCleanStore = create<CleanStore>((set, get) => ({
       const permanent = !use_trash;
       const selectedItems = get().items.filter((item) => ruleIds.includes(item.rule_id));
       const result = await executeClean(selectedItems, dryRun, permanent);
+      if (!dryRun && result.bytes_freed > 0) {
+        addBytesFreed(result.bytes_freed).catch(() => {});
+      }
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "results", error: String(e) });

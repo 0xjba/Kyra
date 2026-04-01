@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -92,4 +93,50 @@ pub fn pick_folder() -> Result<Option<String>, String> {
         // User cancelled
         Ok(None)
     }
+}
+
+// ── Lifetime Stats ──────────────────────────────────────────
+
+fn stats_path() -> PathBuf {
+    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("com.kyra.app");
+    let _ = fs::create_dir_all(&path);
+    path.push("stats.json");
+    path
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LifetimeStats {
+    #[serde(default)]
+    pub total_bytes_freed: u64,
+}
+
+/// In-memory cache so we don't read the file on every tick.
+static CACHED_BYTES_FREED: AtomicU64 = AtomicU64::new(0);
+static STATS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn ensure_stats_loaded() {
+    if !STATS_LOADED.swap(true, Ordering::SeqCst) {
+        if let Ok(content) = fs::read_to_string(stats_path()) {
+            if let Ok(stats) = serde_json::from_str::<LifetimeStats>(&content) {
+                CACHED_BYTES_FREED.store(stats.total_bytes_freed, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_total_bytes_freed() -> u64 {
+    ensure_stats_loaded();
+    CACHED_BYTES_FREED.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+pub fn add_bytes_freed(bytes: u64) -> Result<u64, String> {
+    ensure_stats_loaded();
+    let new_total = CACHED_BYTES_FREED.fetch_add(bytes, Ordering::SeqCst) + bytes;
+    let stats = LifetimeStats { total_bytes_freed: new_total };
+    let json = serde_json::to_string_pretty(&stats).map_err(|e| e.to_string())?;
+    fs::write(stats_path(), json).map_err(|e| e.to_string())?;
+    Ok(new_total)
 }

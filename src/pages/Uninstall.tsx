@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   Search,
   Info,
@@ -11,6 +11,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { useNavigationStore } from "../stores/navigationStore";
 import { formatSize } from "../utils/format";
 import { getAppIconByPath } from "../lib/tauri";
+import { pickEquivalenceCard, type EquivalenceCard } from "../utils/equivalenceCards";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import "../styles/uninstall.css";
 
@@ -623,57 +624,150 @@ function DetailView() {
    Removing View — Ring progress + Done state
    ═══════════════════════════════════════════════════════════ */
 
+/* ── Confetti ── */
+const CONFETTI_COLORS = [
+  "rgba(255, 255, 255, 0.6)",
+  "rgba(255, 255, 255, 0.4)",
+  "rgba(255, 255, 255, 0.3)",
+  "rgba(253, 72, 65, 0.35)",
+  "rgba(42, 200, 82, 0.35)",
+  "rgba(58, 123, 255, 0.3)",
+  "rgba(253, 210, 37, 0.3)",
+  "rgba(142, 92, 246, 0.3)",
+];
+
+interface Particle {
+  x: number; y: number; vx: number; vy: number;
+  rotation: number; rotationSpeed: number;
+  size: number; color: string; opacity: number;
+  life: number; maxLife: number;
+}
+
+function UninstallConfetti({ active }: { active: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    ctx.scale(2, 2);
+
+    const w = canvas.offsetWidth;
+    const h = canvas.offsetHeight;
+
+    const particles: Particle[] = [];
+    for (let i = 0; i < 20; i++) {
+      particles.push({
+        x: w / 2 + (Math.random() - 0.5) * 60,
+        y: h * 0.3,
+        vx: (Math.random() - 0.5) * 3,
+        vy: -(Math.random() * 2 + 1),
+        rotation: Math.random() * 360,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        size: Math.random() * 4 + 2,
+        color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+        opacity: 1, life: 0,
+        maxLife: 1600 + Math.random() * 1800,
+      });
+    }
+
+    let animId: number;
+    let lastTime = performance.now();
+
+    function animate(now: number) {
+      const dt = Math.min(now - lastTime, 32);
+      lastTime = now;
+      ctx!.clearRect(0, 0, w, h);
+      let alive = 0;
+      for (const p of particles) {
+        p.life += dt;
+        if (p.life > p.maxLife) continue;
+        alive++;
+        p.vy += 0.03;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rotation += p.rotationSpeed;
+        p.opacity = 1 - Math.pow(p.life / p.maxLife, 2);
+        ctx!.save();
+        ctx!.translate(p.x, p.y);
+        ctx!.rotate((p.rotation * Math.PI) / 180);
+        ctx!.globalAlpha = p.opacity;
+        ctx!.fillStyle = p.color;
+        ctx!.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+        ctx!.restore();
+      }
+      if (alive > 0) animId = requestAnimationFrame(animate);
+    }
+
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, [active]);
+
+  if (!active) return null;
+  return <canvas ref={canvasRef} className="uninstall-confetti" />;
+}
+
+/* ── SSD Icon for milestone cards ── */
+function SsdIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <line x1="7" y1="10" x2="7" y2="14" />
+      <line x1="11" y1="10" x2="11" y2="14" />
+      <line x1="15" y1="10" x2="15" y2="14" />
+    </svg>
+  );
+}
+
 function RemovingView() {
+  const phase = useUninstallStore((s) => s.phase);
   const progress = useUninstallStore((s) => s.progress);
   const result = useUninstallStore((s) => s.result);
-  const isDone = result !== null;
+  const isDone = phase === "done";
 
   const handleDone = useCallback(() => {
     useUninstallStore.setState({ phase: "list", result: null, progress: null });
   }, []);
 
-  // Done state
-  if (isDone && result) {
-    return (
-      <div className="uninstall-centered">
-        <div className="uninstall-done-check">
-          <Check size={20} strokeWidth={2.5} />
-        </div>
-        <div className="uninstall-summary-stat">
-          {formatSize(result.bytes_freed)}
-        </div>
-        <div className="uninstall-summary-label">space reclaimed</div>
-        <div className="uninstall-summary-detail">
-          {result.items_removed} item{result.items_removed !== 1 ? "s" : ""} removed
-        </div>
-        {result.errors.length > 0 && (
-          <div className="uninstall-done-errors">
-            <span
-              className="uninstall-error-chip"
-              title={result.errors.map((e) => {
-                const parts = e.split(": ");
-                if (parts.length >= 2) {
-                  const filePart = parts[0].split("/").pop() || parts[0];
-                  return `${filePart}: ${parts.slice(1).join(": ")}`;
-                }
-                return e;
-              }).join("\n")}
-            >
-              {result.errors.length} error{result.errors.length > 1 ? "s" : ""}
-            </span>
-          </div>
-        )}
-        <button className="btn" style={{ minWidth: 100, marginTop: 16 }} onClick={handleDone}>
-          Done
-        </button>
-      </div>
-    );
+  // Staggered animation state
+  const [showCard, setShowCard] = useState(false);
+  const [showDoneBtn, setShowDoneBtn] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+
+  // Pick equivalence card once when done
+  const cardRef = useRef<EquivalenceCard | null>(null);
+  const bytesFreed = isDone && result ? result.bytes_freed : (progress?.bytes_freed || 0);
+  if (isDone && !cardRef.current && bytesFreed > 0) {
+    cardRef.current = pickEquivalenceCard(bytesFreed);
   }
 
-  // Progress state — ring
-  const percent = progress && progress.items_total > 0
-    ? Math.round((progress.items_done / progress.items_total) * 100)
-    : 0;
+  // Reset animation state when leaving done
+  useEffect(() => {
+    if (!isDone) {
+      setShowCard(false);
+      setShowDoneBtn(false);
+      setShowConfetti(false);
+      cardRef.current = null;
+      return;
+    }
+
+    // Staggered reveal
+    const t1 = setTimeout(() => { setShowConfetti(true); setShowCard(true); }, 500);
+    const t2 = setTimeout(() => setShowDoneBtn(true), 1050);
+
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [isDone]);
+
+  const percent = isDone
+    ? 100
+    : progress && progress.items_total > 0
+      ? Math.round((progress.items_done / progress.items_total) * 100)
+      : 0;
 
   const ringSize = 120;
   const strokeWidth = 6;
@@ -685,9 +779,13 @@ function RemovingView() {
     ? `Removing ${progress.current_item.split("/").filter(Boolean).pop() || progress.current_item}...`
     : "Starting...";
 
+  const card = cardRef.current;
+
   return (
-    <div className="uninstall-centered">
-      {/* Progress ring */}
+    <div className={`uninstall-centered${isDone ? " uninstall-done" : ""}`}>
+      <UninstallConfetti active={showConfetti} />
+
+      {/* Circular progress ring */}
       <div className="uninstall-ring-wrap">
         <svg
           className="uninstall-ring-svg"
@@ -701,28 +799,83 @@ function RemovingView() {
               <stop offset="50%" stopColor="rgba(255, 255, 255, 0.18)" />
               <stop offset="100%" stopColor="rgba(255, 255, 255, 0.30)" />
             </linearGradient>
+            <linearGradient id="uninstall-ring-glass-done" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.5)" />
+              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.28)" />
+              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.45)" />
+            </linearGradient>
+            <filter id="uninstall-ring-glow">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
           </defs>
+          {/* Background track */}
           <circle
-            cx={ringSize / 2} cy={ringSize / 2} r={radius}
-            fill="none" stroke="rgba(255, 255, 255, 0.06)" strokeWidth={strokeWidth}
-          />
-          <circle
-            cx={ringSize / 2} cy={ringSize / 2} r={radius}
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
             fill="none"
-            stroke="url(#uninstall-ring-glass)"
-            strokeWidth={strokeWidth} strokeLinecap="round"
-            strokeDasharray={circumference} strokeDashoffset={dashOffset}
+            stroke="rgba(255, 255, 255, 0.06)"
+            strokeWidth={strokeWidth}
+          />
+          {/* Filled arc — glass gradient */}
+          <circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            fill="none"
+            stroke={isDone ? "url(#uninstall-ring-glass-done)" : "url(#uninstall-ring-glass)"}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
             className="uninstall-ring-fill"
+            filter={isDone ? "url(#uninstall-ring-glow)" : undefined}
           />
         </svg>
-        <span className="uninstall-ring-percent">{percent}%</span>
+        {isDone ? (
+          <Check size={32} strokeWidth={2.5} className="uninstall-ring-check" />
+        ) : (
+          <span className="uninstall-ring-percent">{percent}%</span>
+        )}
       </div>
 
+      {/* Status text */}
       <div className="uninstall-ring-freed">
-        {progress ? `${formatSize(progress.bytes_freed)} reclaimed` : "0 B reclaimed"}
+        {isDone && result ? formatSize(result.bytes_freed) : (progress ? formatSize(progress.bytes_freed) : "0 B")} reclaimed
       </div>
 
-      <div className="uninstall-ring-current">{currentLabel}</div>
+      <div className="uninstall-ring-current">
+        {isDone
+          ? `${result ? result.items_removed : 0} items removed`
+          : currentLabel}
+      </div>
+
+      {/* Equivalence card */}
+      {isDone && card && (
+        <div className={`uninstall-equiv-card${showCard ? " visible" : ""}`}>
+          <div className="uninstall-equiv-icon">
+            {card.isMilestone ? <SsdIcon /> : <span className="uninstall-equiv-emoji">{card.emoji}</span>}
+          </div>
+          <div className="uninstall-equiv-text">
+            <div className="uninstall-equiv-title">{card.title}</div>
+            <div className="uninstall-equiv-desc">{card.description}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Done button */}
+      {isDone && (
+        <button
+          className={`btn uninstall-done-btn${showDoneBtn ? " visible" : ""}`}
+          onClick={handleDone}
+        >
+          Done
+        </button>
+      )}
     </div>
   );
 }
@@ -734,7 +887,6 @@ function RemovingView() {
 export default function Uninstall() {
   const phase = useUninstallStore((s) => s.phase);
   const error = useUninstallStore((s) => s.error);
-  const result = useUninstallStore((s) => s.result);
   const selectedApp = useUninstallStore((s) => s.selectedApp);
   const scanApps = useUninstallStore((s) => s.scanApps);
 
@@ -743,9 +895,6 @@ export default function Uninstall() {
       scanApps();
     }
   }, [phase, scanApps]);
-
-  // Show removing/done view only when actively removing
-  const showRemoving = phase === "removing";
 
   return (
     <div className="uninstall-container">
@@ -756,9 +905,9 @@ export default function Uninstall() {
       )}
 
       {phase === "scanning" && <ScanningView />}
-      {phase === "list" && !selectedApp && !result && <AppGridView />}
-      {phase === "list" && selectedApp && !result && <DetailView />}
-      {showRemoving && <RemovingView />}
+      {phase === "list" && !selectedApp && <AppGridView />}
+      {phase === "list" && selectedApp && <DetailView />}
+      {(phase === "removing" || phase === "done") && <RemovingView />}
     </div>
   );
 }

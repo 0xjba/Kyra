@@ -50,8 +50,13 @@ export interface DetailedStats {
   gpu_name: string;
   gpu_vram: string;
   thermal_pressure: string;
+  cpu_temp: number;
+  gpu_temp: number;
+  ssd_temp: number;
   top_processes: TopProcess[];
   uptime_secs: number;
+  device_name: string;
+  os_version: string;
 }
 
 export async function startStatsStream(): Promise<void> {
@@ -417,6 +422,14 @@ export async function loadSettings(): Promise<AppSettings> {
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
   return invoke<void>("save_settings", { settings });
+}
+
+export async function getTotalBytesFreed(): Promise<number> {
+  return invoke<number>("get_total_bytes_freed");
+}
+
+export async function addBytesFreed(bytes: number): Promise<number> {
+  return invoke<number>("add_bytes_freed", { bytes });
 }
 
 export async function addToWhitelist(path: string): Promise<void> {

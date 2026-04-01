@@ -84,6 +84,8 @@ pub fn run() {
             commands::settings::add_to_whitelist,
             commands::settings::remove_from_whitelist,
             commands::settings::pick_folder,
+            commands::settings::get_total_bytes_freed,
+            commands::settings::add_bytes_freed,
             commands::shared::check_full_disk_access,
             commands::shared::check_sip_status,
             commands::shared::open_fda_settings,

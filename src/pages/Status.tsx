@@ -1,179 +1,256 @@
-import { useEffect, memo } from "react";
+import { useEffect, useRef, useState, memo } from "react";
+import { Plug } from "lucide-react";
 import { useStatusStore } from "../stores/statusStore";
-import ArcGauge from "../components/ArcGauge";
-import NetworkGraph from "../components/NetworkGraph";
-import ErrorBoundary from "../components/ErrorBoundary";
 import { formatSize } from "../utils/format";
 import type { TopProcess } from "../lib/tauri";
 import "../styles/status.css";
 
-const EMPTY_CORES: number[] = [];
-const EMPTY_INTERFACES: any[] = [];
+/* ── Helpers ── */
+
 const EMPTY_PROCESSES: TopProcess[] = [];
 
-const CpuCores = memo(function CpuCores() {
-  const cores = useStatusStore((s) => {
-    const raw = s.stats?.cpu_cores;
-    return Array.isArray(raw) ? raw : EMPTY_CORES;
-  });
+function formatRate(bytesPerSec: number): string {
+  if (bytesPerSec >= 1073741824) return `${(bytesPerSec / 1073741824).toFixed(1)} GB/s`;
+  if (bytesPerSec >= 1048576) return `${(bytesPerSec / 1048576).toFixed(1)} MB/s`;
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${bytesPerSec} B/s`;
+}
+
+function formatUptime(secs: number): string {
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+  if (days >= 1) return `${days}d ${hours}h`;
+  if (hours >= 1) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Gauge Ring — SVG white/glass ring (no colors)
+   ══════════════════════════════════════════════════════════ */
+
+interface GaugeProps {
+  percent: number;
+  label: string;
+  detail: string;
+}
+
+const GaugeRing = memo(function GaugeRing({ percent, label, detail }: GaugeProps) {
+  const size = 100;
+  const strokeWidth = 6;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (percent / 100) * circumference;
+  // Glass stroke: gets brighter as usage increases
+  const strokeOpacity = 0.15 + (percent / 100) * 0.2;
 
   return (
-    <div className="status-cores">
-      <div className="status-section-label">CPU Cores</div>
-      <div className="status-core-grid">
-        {cores.map((usage, i) => {
-          const pct = isFinite(usage) ? Math.min(Math.max(usage, 0), 100) : 0;
-          return (
-            <div key={i} className="status-core">
-              <div className="status-core-bar-track">
-                <div
-                  className="status-core-bar-fill"
-                  style={{ height: `${pct}%` }}
-                />
-              </div>
-              <span className="status-core-label">{i}</span>
-            </div>
-          );
-        })}
+    <div className="status-gauge-card">
+      <div className="status-gauge-ring">
+        <svg
+          className="status-gauge-svg"
+          width={size}
+          height={size}
+          viewBox={`0 0 ${size} ${size}`}
+        >
+          <circle
+            cx={size / 2} cy={size / 2} r={radius}
+            fill="none"
+            stroke="rgba(255, 255, 255, 0.06)"
+            strokeWidth={strokeWidth}
+          />
+          <circle
+            cx={size / 2} cy={size / 2} r={radius}
+            fill="none"
+            stroke={`rgba(255, 255, 255, ${strokeOpacity})`}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+            className="status-gauge-fill"
+          />
+        </svg>
+        <div className="status-gauge-center">
+          <span className="status-gauge-percent">{Math.round(percent)}%</span>
+        </div>
       </div>
+      <span className="status-gauge-label">{label}</span>
+      <span className="status-gauge-detail">{detail}</span>
     </div>
   );
 });
 
-const MemoryPressure = memo(function MemoryPressure() {
-  const pressure = useStatusStore((s) => s.stats?.memory_pressure ?? "normal");
-  const swapTotal = useStatusStore((s) => s.stats?.swap_total ?? 0);
-  const swapUsed = useStatusStore((s) => s.stats?.swap_used ?? 0);
+/* ══════════════════════════════════════════════════════════
+   Network Graph — white/neutral lines, no color
+   ══════════════════════════════════════════════════════════ */
 
-  const dotColor =
-    pressure === "critical"
-      ? "var(--red)"
-      : pressure === "warning"
-        ? "var(--yellow)"
-        : "var(--green)";
+const NetworkCard = memo(function NetworkCard() {
+  const history = useStatusStore((s) => s.networkHistory);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(400);
+  const graphHeight = 100;
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let rafId: number;
+    const observer = new ResizeObserver((entries) => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        for (const entry of entries) {
+          setWidth(entry.contentRect.width - 24);
+        }
+      });
+    });
+    observer.observe(el);
+    return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
+  }, []);
+
+  const latest = history.length > 0 ? history[history.length - 1] : null;
+
+  const maxVal = Math.max(
+    1024,
+    ...history.map((p) => Math.max(
+      isFinite(p.download) ? p.download : 0,
+      isFinite(p.upload) ? p.upload : 0
+    ))
+  );
+
+  function toPoints(data: number[]): string {
+    if (data.length < 2) return "";
+    return data
+      .map((val, i) => {
+        const x = (i / (data.length - 1)) * width;
+        const y = graphHeight - ((isFinite(val) ? val : 0) / maxVal) * (graphHeight - 4);
+        return `${x},${y}`;
+      })
+      .join(" ");
+  }
+
+  const dlPoints = toPoints(history.map((p) => p.download));
+  const ulPoints = toPoints(history.map((p) => p.upload));
+
+  return (
+    <div className="status-network-card" ref={containerRef}>
+      <div className="status-network-header">
+        <span className="status-network-label">Network</span>
+        <div className="status-network-rates">
+          <span className="status-network-down">
+            {"\u2014"} {"\u2193"} {latest ? formatRate(latest.download) : "0 B/s"}
+          </span>
+          <span className="status-network-up">
+            {"\u2014"} {"\u2191"} {latest ? formatRate(latest.upload) : "0 B/s"}
+          </span>
+        </div>
+      </div>
+      <svg
+        className="status-network-graph"
+        width={width}
+        height={graphHeight}
+        viewBox={`0 0 ${width} ${graphHeight}`}
+      >
+        {/* Download — solid line */}
+        {dlPoints && (
+          <polyline
+            points={dlPoints}
+            fill="none"
+            stroke="rgba(255, 255, 255, 0.35)"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        )}
+        {/* Upload — dashed line */}
+        {ulPoints && (
+          <polyline
+            points={ulPoints}
+            fill="none"
+            stroke="rgba(255, 255, 255, 0.15)"
+            strokeWidth="1"
+            strokeDasharray="4 3"
+            strokeLinejoin="round"
+          />
+        )}
+      </svg>
+    </div>
+  );
+});
+
+/* ══════════════════════════════════════════════════════════
+   Info Strip — Thermals / GPU / Battery
+   ══════════════════════════════════════════════════════════ */
+
+const ThermalCard = memo(function ThermalCard() {
+  const cpuTemp = useStatusStore((s) => s.stats?.cpu_temp ?? -1);
+  const gpuTemp = useStatusStore((s) => s.stats?.gpu_temp ?? -1);
+  const ssdTemp = useStatusStore((s) => s.stats?.ssd_temp ?? -1);
+
+  const hasAnyTemp = cpuTemp > 0 || gpuTemp > 0 || ssdTemp > 0;
+
+  if (!hasAnyTemp) {
+    // No temperature sensors available — show thermal pressure fallback
+    return <ThermalPressureFallback />;
+  }
 
   return (
     <div className="status-info-card">
-      <div className="status-section-label">Memory Pressure</div>
-      <div className="status-info-row">
-        <span
-          className="status-dot"
-          style={{ backgroundColor: dotColor }}
-        />
-        <span className="status-info-value">
-          {pressure.charAt(0).toUpperCase() + pressure.slice(1)}
-        </span>
-      </div>
-      {swapTotal > 0 && (
-        <div className="status-info-row status-info-sub">
-          <span className="status-info-label">Swap</span>
-          <span className="status-info-value">
-            {formatSize(swapUsed)} / {formatSize(swapTotal)}
-          </span>
+      <span className="status-info-label">Thermals</span>
+      {cpuTemp > 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">CPU</span>
+          <span className="status-info-value">{Math.round(cpuTemp)}{"\u00B0"}C</span>
+        </div>
+      )}
+      {gpuTemp > 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">GPU</span>
+          <span className="status-info-value">{Math.round(gpuTemp)}{"\u00B0"}C</span>
+        </div>
+      )}
+      {ssdTemp > 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">SSD</span>
+          <span className="status-info-value">{Math.round(ssdTemp)}{"\u00B0"}C</span>
         </div>
       )}
     </div>
   );
 });
 
-const BatteryInfo = memo(function BatteryInfo() {
-  const percent = useStatusStore((s) => s.stats?.battery_percent ?? -1);
-  const charging = useStatusStore((s) => s.stats?.battery_charging ?? false);
-  const timeRemaining = useStatusStore(
-    (s) => s.stats?.battery_time_remaining ?? "N/A"
-  );
-  const health = useStatusStore((s) => s.stats?.battery_health ?? "N/A");
-  const cycleCount = useStatusStore((s) => s.stats?.battery_cycle_count ?? -1);
-
-  // No battery (desktop Mac)
-  if (percent < 0) return null;
-
-  const barColor =
-    percent <= 10
-      ? "var(--red)"
-      : percent <= 20
-        ? "var(--yellow)"
-        : "var(--green)";
+// Fallback when no temp sensors are available
+const ThermalPressureFallback = memo(function ThermalPressureFallback() {
+  const thermalPressure = useStatusStore((s) => s.stats?.thermal_pressure ?? "nominal");
+  const isThrottled = thermalPressure === "throttled";
 
   return (
     <div className="status-info-card">
-      <div className="status-section-label">Battery</div>
-      <div className="status-battery-bar-wrap">
-        <div className="status-battery-bar-track">
-          <div
-            className="status-battery-bar-fill"
-            style={{
-              width: `${Math.min(Math.max(percent, 0), 100)}%`,
-              backgroundColor: barColor,
-            }}
+      <span className="status-info-label">Thermals</span>
+      <div className="status-info-row">
+        <span className="status-info-key">Status</span>
+        <div className="status-info-dot-row">
+          <span
+            className="status-info-dot"
+            style={{ backgroundColor: isThrottled ? "var(--red)" : "var(--green)" }}
           />
-        </div>
-        <span className="status-info-value">
-          {Math.round(percent)}%{charging ? " Charging" : ""}
-        </span>
-      </div>
-      <div className="status-battery-details">
-        <div className="status-info-row status-info-sub">
-          <span className="status-info-label">Time</span>
-          <span className="status-info-value">{timeRemaining}</span>
-        </div>
-        <div className="status-info-row status-info-sub">
-          <span className="status-info-label">Health</span>
-          <span className="status-info-value">{health}</span>
-        </div>
-        {cycleCount >= 0 && (
-          <div className="status-info-row status-info-sub">
-            <span className="status-info-label">Cycles</span>
-            <span className="status-info-value">{cycleCount}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-});
-
-const NetworkInterfaces = memo(function NetworkInterfaces() {
-  const interfaces = useStatusStore(
-    (s) => s.stats?.network_interfaces ?? EMPTY_INTERFACES
-  );
-
-  if (interfaces.length === 0) return null;
-
-  return (
-    <div className="status-info-card">
-      <div className="status-section-label">Active Interfaces</div>
-      {interfaces.map((iface) => (
-        <div key={iface.name} className="status-iface-row">
-          <span className="status-iface-name">{iface.name}</span>
-          <span className="status-iface-stats">
-            <span className="status-iface-up">
-              {formatSize(iface.upload)}/s
-            </span>
-            <span className="status-iface-down">
-              {formatSize(iface.download)}/s
-            </span>
+          <span className="status-info-value">
+            {isThrottled ? "Throttled" : "Nominal"}
           </span>
         </div>
-      ))}
+      </div>
     </div>
   );
 });
 
-const GpuInfo = memo(function GpuInfo() {
+const GpuCard = memo(function GpuCard() {
   const gpuName = useStatusStore((s) => s.stats?.gpu_name ?? "Unknown");
   const gpuVram = useStatusStore((s) => s.stats?.gpu_vram ?? "N/A");
 
-  if (gpuName === "Unknown") return null;
-
   return (
     <div className="status-info-card">
-      <div className="status-section-label">GPU</div>
-      <div className="status-info-row">
-        <span className="status-info-value">{gpuName}</span>
-      </div>
+      <span className="status-info-label">GPU</span>
+      <span className="status-info-value-lg">{gpuName === "Unknown" ? "\u2014" : gpuName}</span>
       {gpuVram !== "N/A" && (
-        <div className="status-info-row status-info-sub">
-          <span className="status-info-label">VRAM</span>
+        <div className="status-info-row">
+          <span className="status-info-key">VRAM</span>
           <span className="status-info-value">{gpuVram}</span>
         </div>
       )}
@@ -181,86 +258,80 @@ const GpuInfo = memo(function GpuInfo() {
   );
 });
 
-const ThermalInfo = memo(function ThermalInfo() {
-  const pressure = useStatusStore((s) => s.stats?.thermal_pressure ?? "nominal");
+const BatteryCard = memo(function BatteryCard() {
+  const percent = useStatusStore((s) => s.stats?.battery_percent ?? -1);
+  const charging = useStatusStore((s) => s.stats?.battery_charging ?? false);
+  const health = useStatusStore((s) => s.stats?.battery_health ?? "N/A");
+  const cycleCount = useStatusStore((s) => s.stats?.battery_cycle_count ?? -1);
 
-  const dotColor =
-    pressure === "throttled"
-      ? "var(--red)"
-      : "var(--green)";
+  if (percent < 0) {
+    return (
+      <div className="status-info-card">
+        <span className="status-info-label">Battery</span>
+        <div className="status-plugged-in">
+          <Plug size={20} strokeWidth={1.5} />
+          <span>Plugged in</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="status-info-card">
-      <div className="status-section-label">Thermal</div>
+      <span className="status-info-label">Battery</span>
       <div className="status-info-row">
-        <span
-          className="status-dot"
-          style={{ backgroundColor: dotColor }}
-        />
+        <span className="status-info-key">Health</span>
+        <span className="status-info-value">{health}</span>
+      </div>
+      {cycleCount >= 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">Cycles</span>
+          <span className="status-info-value">{cycleCount}</span>
+        </div>
+      )}
+      <div className="status-info-row">
+        <span className="status-info-key">Charge</span>
         <span className="status-info-value">
-          {pressure.charAt(0).toUpperCase() + pressure.slice(1)}
+          {Math.round(percent)}%{charging ? " (Charging)" : ""}
         </span>
       </div>
     </div>
   );
 });
 
+/* ══════════════════════════════════════════════════════════
+   Top Processes
+   ══════════════════════════════════════════════════════════ */
+
 const TopProcesses = memo(function TopProcesses() {
-  const processes: TopProcess[] = useStatusStore(
+  const processes = useStatusStore(
     (s) => s.stats?.top_processes ?? EMPTY_PROCESSES
   );
 
   if (processes.length === 0) return null;
 
   return (
-    <div className="status-processes">
-      <div className="status-section-label">Top Processes</div>
-      <div className="status-process-list">
-        {processes.map((proc, i) => (
-          <div key={`${proc.name}-${i}`} className="status-process-row">
-            <span className="status-process-name">{proc.name}</span>
-            <span className="status-process-stats">
-              <span className="status-process-cpu">
-                {proc.cpu.toFixed(1)}%
-              </span>
-              <span className="status-process-mem">
-                {formatSize(proc.memory)}
-              </span>
-            </span>
-          </div>
-        ))}
+    <div className="status-section">
+      <div className="status-section-header">
+        <span className="status-section-title">Top Processes</span>
       </div>
+      {processes.slice(0, 5).map((proc, i) => (
+        <div key={`${proc.name}-${i}`} className="status-process-row">
+          <span className="status-process-name">{proc.name}</span>
+          <span className="status-process-cpu">{proc.cpu.toFixed(1)}%</span>
+          <span className="status-process-mem">{formatSize(proc.memory)}</span>
+        </div>
+      ))}
     </div>
   );
 });
 
-const UptimeDisplay = memo(function UptimeDisplay() {
-  const uptimeSecs = useStatusStore((s) => s.stats?.uptime_secs ?? 0);
-
-  if (uptimeSecs === 0) return null;
-
-  const days = Math.floor(uptimeSecs / 86400);
-  const hours = Math.floor((uptimeSecs % 86400) / 3600);
-  const mins = Math.floor((uptimeSecs % 3600) / 60);
-
-  let display = "";
-  if (days > 0) display += `${days}d `;
-  if (hours > 0 || days > 0) display += `${hours}h `;
-  display += `${mins}m`;
-
-  return (
-    <div className="status-info-card">
-      <div className="status-section-label">Uptime</div>
-      <div className="status-info-row">
-        <span className="status-info-value">{display.trim()}</span>
-      </div>
-    </div>
-  );
-});
+/* ══════════════════════════════════════════════════════════
+   Main Component
+   ══════════════════════════════════════════════════════════ */
 
 export default function Status() {
   const stats = useStatusStore((s) => s.stats);
-  const networkHistory = useStatusStore((s) => s.networkHistory);
   const startStream = useStatusStore((s) => s.startStream);
   const stopStream = useStatusStore((s) => s.stopStream);
 
@@ -271,74 +342,90 @@ export default function Status() {
     return () => stopStream();
   }, [startStream, stopStream]);
 
+  if (!stats) {
+    return (
+      <div className="status-container">
+        <div className="status-loading">
+          <div className="status-spinner" />
+          <span className="status-loading-text">Loading system info…</span>
+        </div>
+      </div>
+    );
+  }
+
+  const cpuPercent = stats?.cpu_usage ?? 0;
+  const memPercent = stats?.memory_percent ?? 0;
+  const diskPercent = stats?.disk_percent ?? 0;
+  const uptimeSecs = stats?.uptime_secs ?? 0;
+
+  const deviceName = stats?.device_name ?? "";
+  const chipName = (stats?.gpu_name ?? "").replace("Apple ", "");
+  const osVersion = stats?.os_version ?? "";
+
+  const machineLabel = [
+    deviceName,
+    chipName && chipName !== "Unknown" ? chipName : "",
+  ].filter(Boolean).join(" ");
+
+  const osLabel = osVersion ? `macOS ${osVersion}` : "";
+
   return (
     <div className="status-container">
-      <ErrorBoundary name="Gauges">
+      {/* Header — sticky above scroll */}
+      <div className="status-header">
+        <div className="status-header-left">
+          <span className="status-title">Status</span>
+          {(machineLabel || osLabel) && (
+            <span className="status-machine">
+              {[machineLabel, osLabel].filter(Boolean).join(" · ")}
+            </span>
+          )}
+        </div>
+        {uptimeSecs > 0 && (
+          <div className="status-uptime">
+            <span className="status-uptime-dot" />
+            Uptime {formatUptime(uptimeSecs)}
+          </div>
+        )}
+      </div>
+
+      <div className="status-scroll">
+        {/* Three Gauge Rings — white/glass, no colors */}
         <div className="status-gauges">
-          <ArcGauge
-            value={stats?.cpu_usage ?? 0}
-            max={100}
+          <GaugeRing
+            percent={cpuPercent}
             label="CPU"
             detail={stats ? `${stats.cpu_cores.length} cores` : "\u2014"}
-            color="#22B8F0"
           />
-          <ArcGauge
-            value={stats?.memory_used ?? 0}
-            max={stats?.memory_total ?? 1}
+          <GaugeRing
+            percent={memPercent}
             label="Memory"
             detail={
               stats
                 ? `${formatSize(stats.memory_used)} / ${formatSize(stats.memory_total)}`
                 : "\u2014"
             }
-            color="#2AC852"
           />
-          <ArcGauge
-            value={stats?.disk_used ?? 0}
-            max={stats?.disk_total ?? 1}
+          <GaugeRing
+            percent={diskPercent}
             label="Disk"
-            detail={
-              stats
-                ? `${formatSize(stats.disk_free)} free`
-                : "\u2014"
-            }
-            color="#FDD225"
+            detail={stats ? `${formatSize(stats.disk_free)} free` : "\u2014"}
           />
         </div>
-      </ErrorBoundary>
 
-      <ErrorBoundary name="Network Graph">
-        <div className="status-network">
-          <NetworkGraph
-            history={networkHistory}
-            height={120}
-          />
+        {/* Network */}
+        <NetworkCard />
+
+        {/* Info Strip */}
+        <div className="status-info-strip">
+          <ThermalCard />
+          <GpuCard />
+          <BatteryCard />
         </div>
-      </ErrorBoundary>
 
-      <ErrorBoundary name="Extra Metrics">
-        <div className="status-extras">
-          <MemoryPressure />
-          <ThermalInfo />
-          <UptimeDisplay />
-        </div>
-      </ErrorBoundary>
-
-      <ErrorBoundary name="GPU & Battery">
-        <div className="status-extras">
-          <GpuInfo />
-          <BatteryInfo />
-          <NetworkInterfaces />
-        </div>
-      </ErrorBoundary>
-
-      <ErrorBoundary name="Top Processes">
+        {/* Top Processes */}
         <TopProcesses />
-      </ErrorBoundary>
-
-      <ErrorBoundary name="CPU Cores">
-        <CpuCores />
-      </ErrorBoundary>
+      </div>
     </div>
   );
 }

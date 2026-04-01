@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Trash2,
   Zap,
@@ -10,17 +10,21 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import ModuleCard from "../components/ModuleCard";
-import { useCleanStore } from "../stores/cleanStore";
 import { useUninstallStore } from "../stores/uninstallStore";
+import { getTotalBytesFreed } from "../lib/tauri";
 import { formatSize } from "../utils/format";
 import "../styles/dashboard.css";
 
 export default function Home() {
-  const cleanItems = useCleanStore((s) => s.items);
-  const reclaimable = cleanItems.reduce((sum, item) => sum + item.total_size, 0);
+  const [totalFreed, setTotalFreed] = useState(0);
   const uninstallApps = useUninstallStore((s) => s.apps);
   const uninstallPhase = useUninstallStore((s) => s.phase);
   const scanApps = useUninstallStore((s) => s.scanApps);
+
+  // Load lifetime stats
+  useEffect(() => {
+    getTotalBytesFreed().then(setTotalFreed).catch(() => {});
+  }, []);
 
   // Scan apps lazily — only once, not on every dashboard visit
   const hasScannedRef = useRef(false);
@@ -49,8 +53,8 @@ export default function Home() {
           description="System caches, logs, and temporary files"
           icon={Trash2}
           route="/clean"
-          stat={reclaimable > 0 ? formatSize(reclaimable) : "—"}
-          statLabel="Reclaimable space"
+          stat={totalFreed > 0 ? formatSize(totalFreed) : "—"}
+          statLabel="All time space reclaimed"
           style={{ gridColumn: "span 2", gridRow: "span 2" }}
         />
 
