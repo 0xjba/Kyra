@@ -1,115 +1,209 @@
+/* ── Status Module ────────────────────────────────────── */
+
 .status-container {
-  padding: 18px;
+  padding: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
-.status-gauges {
+.status-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.status-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.status-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+.status-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Header ── */
+.status-header {
   display: flex;
-  justify-content: center;
-  gap: 24px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 2px;
 }
 
-.status-network {
-  max-width: 480px;
-  margin: 0 auto;
-  width: 100%;
+.status-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.status-section-label {
-  font-size: var(--font-sm);
+.status-title {
+  font-size: var(--font-3xl);
   font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.status-machine {
+  font-size: var(--font-base);
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-  margin-bottom: 8px;
 }
 
-.status-cores {
-  max-width: 480px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.status-core-grid {
+.status-uptime {
   display: flex;
-  gap: 4px;
-  align-items: flex-end;
-  height: 48px;
-  padding: 8px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
 }
 
-.status-core {
-  flex: 1;
+.status-uptime-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+}
+
+/* ── Gauge Strip ── */
+.status-gauges {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.status-gauge-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  height: 100%;
-}
-
-.status-core-bar-track {
-  flex: 1;
-  width: 100%;
-  max-width: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 2px;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: flex-end;
-}
-
-.status-core-bar-fill {
-  width: 100%;
-  background: var(--cyan);
-  opacity: 0.5;
-  border-radius: 2px;
-  transition: height 0.3s ease;
-}
-
-.status-core-label {
-  font-size: var(--font-xs);
-  color: var(--text-tertiary);
-}
-
-/* ── Extra metrics row ────────────────────────────────── */
-
-.status-extras {
-  display: flex;
-  gap: 12px;
-  max-width: 480px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.status-info-card {
-  flex: 1;
-  padding: 10px 12px;
+  padding: 16px 12px 12px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  min-width: 0;
+  gap: 2px;
+}
+
+.status-gauge-ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-gauge-svg {
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.status-gauge-fill {
+  transition: stroke-dashoffset 0.5s ease;
+}
+
+.status-gauge-center {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.status-gauge-percent {
+  font-size: var(--font-3xl);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1;
+}
+
+.status-gauge-label {
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-medium);
+}
+
+.status-gauge-detail {
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+/* ── Network Card ── */
+.status-network-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.status-network-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.status-network-label {
+  font-size: var(--font-base);
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.status-network-rates {
+  display: flex;
+  gap: 12px;
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-network-down {
+  color: var(--cyan);
+}
+
+.status-network-up {
+  color: var(--text-tertiary);
+}
+
+.status-network-graph {
+  width: 100%;
+  display: block;
+}
+
+/* ── Info Strip (Thermals / GPU / Battery) ── */
+.status-info-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.status-info-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-info-label {
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .status-info-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.status-info-sub {
   justify-content: space-between;
-  margin-top: 4px;
 }
 
-.status-info-label {
+.status-info-key {
   font-size: var(--font-base);
   color: var(--text-tertiary);
 }
@@ -117,131 +211,155 @@
 .status-info-value {
   font-size: var(--font-base);
   font-weight: var(--weight-medium);
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
-.status-dot {
+.status-info-value-lg {
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.status-info-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-right: 6px;
 }
 
-/* ── Battery bar ──────────────────────────────────────── */
-
-.status-battery-bar-wrap {
+.status-info-dot-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
 }
 
-.status-battery-bar-track {
-  flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.status-battery-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s ease;
-}
-
-.status-battery-details {
+.status-plugged-in {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-/* ── Network interfaces ───────────────────────────────── */
-
-.status-iface-row {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 3px 0;
-}
-
-.status-iface-row + .status-iface-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.status-iface-name {
-  font-size: var(--font-base);
-  font-weight: var(--weight-medium);
-  color: var(--text-secondary);
-}
-
-.status-iface-stats {
-  display: flex;
-  gap: 10px;
-  font-size: var(--font-base);
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
   color: var(--text-tertiary);
+  font-size: var(--font-sm);
 }
 
-.status-iface-up::before {
-  content: "\2191 ";
+/* ── Top Processes ── */
+.status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.status-iface-down::before {
-  content: "\2193 ";
+.status-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
 }
 
-/* ── Top Processes ────────────────────────────────────── */
-
-.status-processes {
-  max-width: 480px;
-  margin: 0 auto;
-  width: 100%;
+.status-section-title {
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.status-process-list {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 12px;
+.status-section-meta {
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .status-process-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 5px 0;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
 }
 
 .status-process-row + .status-process-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  margin-top: 2px;
 }
 
 .status-process-name {
-  font-size: var(--font-base);
+  flex: 1;
+  font-size: var(--font-md);
   font-weight: var(--weight-medium);
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 200px;
-}
-
-.status-process-stats {
-  display: flex;
-  gap: 12px;
-  font-size: var(--font-base);
-  flex-shrink: 0;
 }
 
 .status-process-cpu {
-  color: var(--cyan);
+  font-size: var(--font-base);
   font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
   min-width: 48px;
   text-align: right;
 }
 
 .status-process-mem {
+  font-size: var(--font-base);
   color: var(--text-tertiary);
-  min-width: 60px;
+  font-variant-numeric: tabular-nums;
+  min-width: 64px;
   text-align: right;
+}
+
+/* ── CPU Cores Grid ── */
+.status-core-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.status-core-grid[data-cols="8"] {
+  grid-template-columns: repeat(8, 1fr);
+}
+
+.status-core-grid[data-cols="16"] {
+  grid-template-columns: repeat(16, 1fr);
+}
+
+.status-core-grid[data-cols="32"] {
+  grid-template-columns: repeat(32, 1fr);
+}
+
+.status-core {
+  aspect-ratio: 1;
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-core-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  transition: height 0.5s ease, background 0.5s ease;
+  border-radius: 0 0 3px 3px;
+}
+
+.status-core-num {
+  position: relative;
+  z-index: 1;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
