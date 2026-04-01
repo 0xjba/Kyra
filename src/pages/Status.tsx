@@ -7,7 +7,6 @@ import "../styles/status.css";
 
 /* ── Helpers ── */
 
-const EMPTY_CORES: number[] = [];
 const EMPTY_PROCESSES: TopProcess[] = [];
 
 function formatRate(bytesPerSec: number): string {
@@ -26,30 +25,24 @@ function formatUptime(secs: number): string {
   return `${mins}m`;
 }
 
-function coreColumns(count: number): number {
-  if (count <= 16) return 8;
-  if (count <= 64) return 16;
-  return 32;
-}
-
 /* ══════════════════════════════════════════════════════════
-   Gauge Ring — SVG-based, replaces canvas ArcGauge
+   Gauge Ring — SVG white/glass ring (no colors)
    ══════════════════════════════════════════════════════════ */
 
 interface GaugeProps {
   percent: number;
   label: string;
   detail: string;
-  color: string;
 }
 
-const GaugeRing = memo(function GaugeRing({ percent, label, detail, color }: GaugeProps) {
+const GaugeRing = memo(function GaugeRing({ percent, label, detail }: GaugeProps) {
   const size = 100;
   const strokeWidth = 6;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (percent / 100) * circumference;
-  const strokeOpacity = 0.15 + (percent / 100) * 0.35;
+  // Glass stroke: gets brighter as usage increases
+  const strokeOpacity = 0.15 + (percent / 100) * 0.2;
 
   return (
     <div className="status-gauge-card">
@@ -69,8 +62,7 @@ const GaugeRing = memo(function GaugeRing({ percent, label, detail, color }: Gau
           <circle
             cx={size / 2} cy={size / 2} r={radius}
             fill="none"
-            stroke={color}
-            strokeOpacity={strokeOpacity}
+            stroke={`rgba(255, 255, 255, ${strokeOpacity})`}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeDasharray={circumference}
@@ -80,16 +72,16 @@ const GaugeRing = memo(function GaugeRing({ percent, label, detail, color }: Gau
         </svg>
         <div className="status-gauge-center">
           <span className="status-gauge-percent">{Math.round(percent)}%</span>
-          <span className="status-gauge-label">{label}</span>
         </div>
       </div>
+      <span className="status-gauge-label">{label}</span>
       <span className="status-gauge-detail">{detail}</span>
     </div>
   );
 });
 
 /* ══════════════════════════════════════════════════════════
-   Network Graph — inline SVG polyline
+   Network Graph — white/neutral lines, no color
    ══════════════════════════════════════════════════════════ */
 
 const NetworkCard = memo(function NetworkCard() {
@@ -144,10 +136,10 @@ const NetworkCard = memo(function NetworkCard() {
         <span className="status-network-label">Network</span>
         <div className="status-network-rates">
           <span className="status-network-down">
-            {"\u2193"} {latest ? formatRate(latest.download) : "\u2014"}
+            {"\u2014"} {"\u2193"} {latest ? formatRate(latest.download) : "0 B/s"}
           </span>
           <span className="status-network-up">
-            {"\u2191"} {latest ? formatRate(latest.upload) : "\u2014"}
+            {"\u2014"} {"\u2191"} {latest ? formatRate(latest.upload) : "0 B/s"}
           </span>
         </div>
       </div>
@@ -157,20 +149,22 @@ const NetworkCard = memo(function NetworkCard() {
         height={graphHeight}
         viewBox={`0 0 ${width} ${graphHeight}`}
       >
+        {/* Download — solid line */}
         {dlPoints && (
           <polyline
             points={dlPoints}
             fill="none"
-            stroke="var(--cyan)"
+            stroke="rgba(255, 255, 255, 0.35)"
             strokeWidth="1.5"
             strokeLinejoin="round"
           />
         )}
+        {/* Upload — dashed line */}
         {ulPoints && (
           <polyline
             points={ulPoints}
             fill="none"
-            stroke="var(--text-tertiary)"
+            stroke="rgba(255, 255, 255, 0.15)"
             strokeWidth="1"
             strokeDasharray="4 3"
             strokeLinejoin="round"
@@ -186,57 +180,62 @@ const NetworkCard = memo(function NetworkCard() {
    ══════════════════════════════════════════════════════════ */
 
 const ThermalCard = memo(function ThermalCard() {
-  const pressure = useStatusStore((s) => s.stats?.thermal_pressure ?? "nominal");
-  const isThrottled = pressure === "throttled";
+  const cpuTemp = useStatusStore((s) => s.stats?.cpu_temp ?? -1);
+  const gpuTemp = useStatusStore((s) => s.stats?.gpu_temp ?? -1);
+  const ssdTemp = useStatusStore((s) => s.stats?.ssd_temp ?? -1);
+
+  const hasAnyTemp = cpuTemp > 0 || gpuTemp > 0 || ssdTemp > 0;
+
+  if (!hasAnyTemp) {
+    // No temperature sensors available — show thermal pressure fallback
+    return <ThermalPressureFallback />;
+  }
 
   return (
     <div className="status-info-card">
       <span className="status-info-label">Thermals</span>
-      <div className="status-info-dot-row">
-        <span
-          className="status-info-dot"
-          style={{ backgroundColor: isThrottled ? "var(--red)" : "var(--green)" }}
-        />
-        <span className="status-info-value">
-          {isThrottled ? "Throttled" : "Nominal"}
-        </span>
-      </div>
+      {cpuTemp > 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">CPU</span>
+          <span className="status-info-value">{Math.round(cpuTemp)}{"\u00B0"}C</span>
+        </div>
+      )}
+      {gpuTemp > 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">GPU</span>
+          <span className="status-info-value">{Math.round(gpuTemp)}{"\u00B0"}C</span>
+        </div>
+      )}
+      {ssdTemp > 0 && (
+        <div className="status-info-row">
+          <span className="status-info-key">SSD</span>
+          <span className="status-info-value">{Math.round(ssdTemp)}{"\u00B0"}C</span>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// Fallback when no temp sensors are available
+const ThermalPressureFallback = memo(function ThermalPressureFallback() {
+  const thermalPressure = useStatusStore((s) => s.stats?.thermal_pressure ?? "nominal");
+  const isThrottled = thermalPressure === "throttled";
+
+  return (
+    <div className="status-info-card">
+      <span className="status-info-label">Thermals</span>
       <div className="status-info-row">
-        <span className="status-info-key">Memory pressure</span>
-        <MemoryPressureValue />
+        <span className="status-info-key">Status</span>
+        <div className="status-info-dot-row">
+          <span
+            className="status-info-dot"
+            style={{ backgroundColor: isThrottled ? "var(--red)" : "var(--green)" }}
+          />
+          <span className="status-info-value">
+            {isThrottled ? "Throttled" : "Nominal"}
+          </span>
+        </div>
       </div>
-      <SwapRow />
-    </div>
-  );
-});
-
-const MemoryPressureValue = memo(function MemoryPressureValue() {
-  const pressure = useStatusStore((s) => s.stats?.memory_pressure ?? "normal");
-  const color =
-    pressure === "critical" ? "var(--red)"
-    : pressure === "warning" ? "var(--yellow)"
-    : "var(--green)";
-
-  return (
-    <div className="status-info-dot-row">
-      <span className="status-info-dot" style={{ backgroundColor: color }} />
-      <span className="status-info-value">
-        {pressure.charAt(0).toUpperCase() + pressure.slice(1)}
-      </span>
-    </div>
-  );
-});
-
-const SwapRow = memo(function SwapRow() {
-  const swapTotal = useStatusStore((s) => s.stats?.swap_total ?? 0);
-  const swapUsed = useStatusStore((s) => s.stats?.swap_used ?? 0);
-
-  if (swapTotal === 0) return null;
-
-  return (
-    <div className="status-info-row">
-      <span className="status-info-key">Swap</span>
-      <span className="status-info-value">{formatSize(swapUsed)} / {formatSize(swapTotal)}</span>
     </div>
   );
 });
@@ -328,48 +327,6 @@ const TopProcesses = memo(function TopProcesses() {
 });
 
 /* ══════════════════════════════════════════════════════════
-   CPU Cores
-   ══════════════════════════════════════════════════════════ */
-
-const CpuCores = memo(function CpuCores() {
-  const cores = useStatusStore((s) => {
-    const raw = s.stats?.cpu_cores;
-    return Array.isArray(raw) ? raw : EMPTY_CORES;
-  });
-
-  if (cores.length === 0) return null;
-
-  const cols = coreColumns(cores.length);
-
-  return (
-    <div className="status-section">
-      <div className="status-section-header">
-        <span className="status-section-title">CPU Cores</span>
-        <span className="status-section-meta">{cores.length} cores</span>
-      </div>
-      <div className="status-core-grid" data-cols={cols}>
-        {cores.map((usage, i) => {
-          const pct = isFinite(usage) ? Math.min(Math.max(usage, 0), 100) : 0;
-          const fillOpacity = 0.08 + (pct / 100) * 0.25;
-          return (
-            <div key={i} className="status-core" title={`Core ${i}: ${Math.round(pct)}%`}>
-              <div
-                className="status-core-fill"
-                style={{
-                  height: `${pct}%`,
-                  background: `rgba(255, 255, 255, ${fillOpacity})`,
-                }}
-              />
-              <span className="status-core-num">{i}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-});
-
-/* ══════════════════════════════════════════════════════════
    Main Component
    ══════════════════════════════════════════════════════════ */
 
@@ -385,24 +342,43 @@ export default function Status() {
     return () => stopStream();
   }, [startStream, stopStream]);
 
+  if (!stats) {
+    return (
+      <div className="status-container">
+        <div className="status-loading">
+          <div className="status-spinner" />
+          <span className="status-loading-text">Loading system info…</span>
+        </div>
+      </div>
+    );
+  }
+
   const cpuPercent = stats?.cpu_usage ?? 0;
   const memPercent = stats?.memory_percent ?? 0;
   const diskPercent = stats?.disk_percent ?? 0;
   const uptimeSecs = stats?.uptime_secs ?? 0;
 
-  const gpuName = stats?.gpu_name ?? "";
-  const machineInfo = gpuName && gpuName !== "Unknown"
-    ? gpuName.replace("Apple ", "")
-    : "";
+  const deviceName = stats?.device_name ?? "";
+  const chipName = (stats?.gpu_name ?? "").replace("Apple ", "");
+  const osVersion = stats?.os_version ?? "";
+
+  const machineLabel = [
+    deviceName,
+    chipName && chipName !== "Unknown" ? chipName : "",
+  ].filter(Boolean).join(" ");
+
+  const osLabel = osVersion ? `macOS ${osVersion}` : "";
 
   return (
     <div className="status-container">
-      {/* Header */}
+      {/* Header — sticky above scroll */}
       <div className="status-header">
         <div className="status-header-left">
           <span className="status-title">Status</span>
-          {machineInfo && (
-            <span className="status-machine">{machineInfo}</span>
+          {(machineLabel || osLabel) && (
+            <span className="status-machine">
+              {[machineLabel, osLabel].filter(Boolean).join(" · ")}
+            </span>
           )}
         </div>
         {uptimeSecs > 0 && (
@@ -413,47 +389,43 @@ export default function Status() {
         )}
       </div>
 
-      {/* Three Gauge Rings */}
-      <div className="status-gauges">
-        <GaugeRing
-          percent={cpuPercent}
-          label="CPU"
-          detail={stats ? `${stats.cpu_cores.length} cores` : "\u2014"}
-          color="#22B8F0"
-        />
-        <GaugeRing
-          percent={memPercent}
-          label="Memory"
-          detail={
-            stats
-              ? `${formatSize(stats.memory_used)} / ${formatSize(stats.memory_total)}`
-              : "\u2014"
-          }
-          color="#2AC852"
-        />
-        <GaugeRing
-          percent={diskPercent}
-          label="Disk"
-          detail={stats ? `${formatSize(stats.disk_free)} free` : "\u2014"}
-          color="#FDD225"
-        />
+      <div className="status-scroll">
+        {/* Three Gauge Rings — white/glass, no colors */}
+        <div className="status-gauges">
+          <GaugeRing
+            percent={cpuPercent}
+            label="CPU"
+            detail={stats ? `${stats.cpu_cores.length} cores` : "\u2014"}
+          />
+          <GaugeRing
+            percent={memPercent}
+            label="Memory"
+            detail={
+              stats
+                ? `${formatSize(stats.memory_used)} / ${formatSize(stats.memory_total)}`
+                : "\u2014"
+            }
+          />
+          <GaugeRing
+            percent={diskPercent}
+            label="Disk"
+            detail={stats ? `${formatSize(stats.disk_free)} free` : "\u2014"}
+          />
+        </div>
+
+        {/* Network */}
+        <NetworkCard />
+
+        {/* Info Strip */}
+        <div className="status-info-strip">
+          <ThermalCard />
+          <GpuCard />
+          <BatteryCard />
+        </div>
+
+        {/* Top Processes */}
+        <TopProcesses />
       </div>
-
-      {/* Network */}
-      <NetworkCard />
-
-      {/* Info Strip */}
-      <div className="status-info-strip">
-        <ThermalCard />
-        <GpuCard />
-        <BatteryCard />
-      </div>
-
-      {/* Top Processes */}
-      <TopProcesses />
-
-      {/* CPU Cores */}
-      <CpuCores />
     </div>
   );
 }

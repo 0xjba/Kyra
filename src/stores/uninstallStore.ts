@@ -4,6 +4,7 @@ import {
   getAssociatedFiles,
   executeUninstall,
   listenUninstallProgress,
+  addBytesFreed,
   type AppInfo,
   type AssociatedFile,
   type UninstallProgress,
@@ -112,9 +113,12 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       const filePaths = Array.from(selectedFilePaths);
       const dryRun = useSettingsStore.getState().settings.dry_run;
       const result = await executeUninstall(selectedApp.path, filePaths, dryRun, permanent);
+      if (!dryRun && result.bytes_freed > 0) {
+        addBytesFreed(result.bytes_freed).catch(() => {});
+      }
       // Immediately remove the uninstalled app from local list + show success
       const remainingApps = get().apps.filter((a) => a.path !== selectedApp.path);
-      set({ result, apps: remainingApps, selectedApp: null, associatedFiles: [], selectedFilePaths: new Set() });
+      set({ phase: "done", result, apps: remainingApps, selectedApp: null, associatedFiles: [], selectedFilePaths: new Set() });
       // Re-scan in background to refresh app list
       scanInstalledApps().then((apps) => set({ apps })).catch(() => {});
     } catch (e) {
@@ -172,7 +176,11 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
         appsToRemove.map((a) => a.path).filter((p) => !failedAppPaths.has(p))
       );
       const remainingApps = get().apps.filter((a) => !successPaths.has(a.path));
+      if (!dryRun && totalFreed > 0) {
+        addBytesFreed(totalFreed).catch(() => {});
+      }
       set({
+        phase: "done",
         result: {
           items_removed: totalRemoved,
           bytes_freed: totalFreed,

@@ -3,6 +3,7 @@ import {
   scanInstallers,
   deleteInstallers,
   listenInstallerProgress,
+  addBytesFreed,
   type InstallerFile,
   type InstallerProgress,
   type InstallerResult,
@@ -79,6 +80,9 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
       const { dry_run: dryRun, use_trash } = useSettingsStore.getState().settings;
       const permanent = !use_trash;
       const result = await deleteInstallers([...selected], dryRun, permanent);
+      if (!dryRun && result.bytes_freed > 0) {
+        addBytesFreed(result.bytes_freed).catch(() => {});
+      }
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });

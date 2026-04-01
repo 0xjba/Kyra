@@ -55,8 +55,13 @@ pub struct DetailedStats {
     pub gpu_name: String,
     pub gpu_vram: String,
     pub thermal_pressure: String,
+    pub cpu_temp: f32,
+    pub gpu_temp: f32,
+    pub ssd_temp: f32,
     pub top_processes: Vec<TopProcess>,
     pub uptime_secs: u64,
+    pub device_name: String,
+    pub os_version: String,
 }
 
 pub struct SystemMonitor(pub Mutex<System>);
@@ -129,7 +134,14 @@ pub async fn start_stats_stream(
         let mut cached_gpu_name = String::from("Unknown");
         let mut cached_gpu_vram = String::from("N/A");
         let mut cached_thermal_pressure = String::from("nominal");
+        let mut cached_cpu_temp: f32 = -1.0;
+        let mut cached_gpu_temp: f32 = -1.0;
+        let mut cached_ssd_temp: f32 = -1.0;
         let mut cached_top_processes: Vec<TopProcess> = Vec::new();
+
+        // Static system info (computed once)
+        let device_name = parse_device_name();
+        let os_version = System::os_version().unwrap_or_default();
 
         // Noise interfaces to filter out
         let noise_prefixes = [
@@ -250,9 +262,13 @@ pub async fn start_stats_stream(
                 cached_gpu_vram = gv;
             }
 
-            // ── Thermal pressure (every 5 ticks) ──
-            if tick_count % 5 == 1 {
+            // ── Thermal pressure + temperatures (every 10 ticks) ──
+            if tick_count % 10 == 1 {
                 cached_thermal_pressure = parse_thermal_pressure();
+                let (ct, gt, st) = smc::read_temperatures();
+                cached_cpu_temp = ct;
+                cached_gpu_temp = gt;
+                cached_ssd_temp = st;
             }
 
             // ── Top processes (every 2 ticks) ──
@@ -285,8 +301,13 @@ pub async fn start_stats_stream(
                 gpu_name: cached_gpu_name.clone(),
                 gpu_vram: cached_gpu_vram.clone(),
                 thermal_pressure: cached_thermal_pressure.clone(),
+                cpu_temp: cached_cpu_temp,
+                gpu_temp: cached_gpu_temp,
+                ssd_temp: cached_ssd_temp,
                 top_processes: cached_top_processes.clone(),
                 uptime_secs: System::uptime(),
+                device_name: device_name.clone(),
+                os_version: os_version.clone(),
             };
 
             let _ = app.emit("system-stats-tick", &stats);
@@ -340,6 +361,32 @@ fn parse_gpu_info() -> (String, String) {
     }
 }
 
+/// Parse device model name from `system_profiler SPHardwareDataType`.
+fn parse_device_name() -> String {
+    use std::process::Command;
+    let output = Command::new("system_profiler")
+        .arg("SPHardwareDataType")
+        .output();
+    match output {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Model Name:") {
+                    return trimmed
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("Mac")
+                        .trim()
+                        .to_string();
+                }
+            }
+            "Mac".into()
+        }
+        Err(_) => "Mac".into(),
+    }
+}
+
 /// Parse thermal pressure from `pmset -g therm`.
 fn parse_thermal_pressure() -> String {
     use std::process::Command;
@@ -358,6 +405,305 @@ fn parse_thermal_pressure() -> String {
             }
         }
         Err(_) => "unknown".into(),
+    }
+}
+
+/// ── SMC Temperature Reading via IOKit ──────────────────────────────────
+/// Reads CPU, GPU, and SSD temperatures directly from the Apple SMC.
+/// Works on Apple Silicon (M1-M4+) without sudo.
+/// Returns (cpu_temp, gpu_temp, ssd_temp) in Celsius. -1.0 means unavailable.
+
+mod smc {
+    use std::mem::size_of;
+    use std::os::raw::c_uint;
+
+    type IOReturn = i32;
+    type MachPort = c_uint;
+
+    #[allow(non_upper_case_globals)]
+    const kIOReturnSuccess: IOReturn = 0;
+
+    // ── KeyData struct — must match Apple's SMC user-client layout exactly ──
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct KeyDataVer {
+        major: u8,
+        minor: u8,
+        build: u8,
+        reserved: u8,
+        release: u16,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct PLimitData {
+        version: u16,
+        length: u16,
+        cpu_p_limit: u32,
+        gpu_p_limit: u32,
+        mem_p_limit: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct KeyInfo {
+        data_size: u32,
+        data_type: u32,
+        data_attributes: u8,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct KeyData {
+        key: u32,
+        vers: KeyDataVer,
+        p_limit_data: PLimitData,
+        key_info: KeyInfo,
+        result: u8,
+        status: u8,
+        data8: u8,
+        data32: u32,
+        bytes: [u8; 32],
+    }
+
+    impl Default for KeyData {
+        fn default() -> Self {
+            unsafe { std::mem::zeroed() }
+        }
+    }
+
+    extern "C" {
+        fn mach_task_self() -> MachPort;
+        fn IOServiceOpen(service: MachPort, task: MachPort, typ: u32, conn: *mut MachPort) -> IOReturn;
+        fn IOServiceClose(conn: MachPort) -> IOReturn;
+        fn IOConnectCallStructMethod(
+            conn: MachPort, selector: u32,
+            input: *const KeyData, input_size: usize,
+            output: *mut KeyData, output_size: *mut usize,
+        ) -> IOReturn;
+        fn IOServiceGetMatchingServices(
+            main_port: MachPort,
+            matching: *const std::ffi::c_void,
+            iterator: *mut MachPort,
+        ) -> IOReturn;
+        fn IOServiceMatching(name: *const u8) -> *const std::ffi::c_void;
+        fn IOIteratorNext(iterator: MachPort) -> MachPort;
+        fn IOObjectRelease(object: MachPort) -> IOReturn;
+        fn IORegistryEntryGetNameInPlane(
+            entry: MachPort, plane: *const u8, name: *mut [u8; 128],
+        ) -> IOReturn;
+    }
+
+    fn fourcc(s: &str) -> u32 {
+        s.bytes().fold(0u32, |acc, b| (acc << 8) | b as u32)
+    }
+
+    fn fourcc_str(v: u32) -> String {
+        let b = v.to_be_bytes();
+        String::from_utf8_lossy(&b).to_string()
+    }
+
+    struct SmcConn(MachPort);
+
+    impl SmcConn {
+        fn open() -> Option<Self> {
+            unsafe {
+                let matching = IOServiceMatching(b"AppleSMC\0".as_ptr());
+                if matching.is_null() { return None; }
+
+                let mut iter: MachPort = 0;
+                let kr = IOServiceGetMatchingServices(0, matching, &mut iter);
+                if kr != kIOReturnSuccess || iter == 0 { return None; }
+
+                // Find AppleSMCKeysEndpoint (Apple Silicon) or fall back to first service
+                let mut fallback: MachPort = 0;
+                let mut endpoint: MachPort = 0;
+
+                loop {
+                    let service = IOIteratorNext(iter);
+                    if service == 0 { break; }
+
+                    let mut name_buf = [0u8; 128];
+                    let kr = IORegistryEntryGetNameInPlane(
+                        service, b"IOService\0".as_ptr(), &mut name_buf,
+                    );
+                    if kr == kIOReturnSuccess {
+                        let name = std::ffi::CStr::from_ptr(name_buf.as_ptr() as *const _)
+                            .to_string_lossy();
+                        if name.contains("AppleSMCKeysEndpoint") {
+                            endpoint = service;
+                            break;
+                        }
+                    }
+                    if fallback == 0 {
+                        fallback = service;
+                    } else {
+                        IOObjectRelease(service);
+                    }
+                }
+                IOObjectRelease(iter);
+
+                let target = if endpoint != 0 {
+                    if fallback != 0 { IOObjectRelease(fallback); }
+                    endpoint
+                } else if fallback != 0 {
+                    fallback
+                } else {
+                    return None;
+                };
+
+                let mut conn: MachPort = 0;
+                let kr = IOServiceOpen(target, mach_task_self(), 0, &mut conn);
+                IOObjectRelease(target);
+                if kr != kIOReturnSuccess || conn == 0 { return None; }
+                Some(SmcConn(conn))
+            }
+        }
+
+        fn call(&self, input: &KeyData) -> Option<KeyData> {
+            unsafe {
+                let mut output = KeyData::default();
+                let mut olen = size_of::<KeyData>();
+                let kr = IOConnectCallStructMethod(
+                    self.0, 2,
+                    input, size_of::<KeyData>(),
+                    &mut output, &mut olen,
+                );
+                if kr != kIOReturnSuccess { return None; }
+                if output.result != 0 { return None; }
+                Some(output)
+            }
+        }
+
+        fn key_count(&self) -> u32 {
+            // Step 1: get key info for #KEY
+            let mut q = KeyData::default();
+            q.data8 = 9;
+            q.key = fourcc("#KEY");
+            let info = match self.call(&q) {
+                Some(o) => o.key_info,
+                None => return 0,
+            };
+            // Step 2: read #KEY value
+            let mut q2 = KeyData::default();
+            q2.data8 = 5;
+            q2.key = fourcc("#KEY");
+            q2.key_info = info;
+            match self.call(&q2) {
+                Some(o) => u32::from_be_bytes(o.bytes[0..4].try_into().unwrap_or([0; 4])),
+                None => 0,
+            }
+        }
+
+        fn key_at_index(&self, index: u32) -> Option<u32> {
+            let mut q = KeyData::default();
+            q.data8 = 8;
+            q.data32 = index;
+            self.call(&q).map(|o| o.key)
+        }
+
+        fn key_info(&self, key: u32) -> Option<KeyInfo> {
+            let mut q = KeyData::default();
+            q.data8 = 9;
+            q.key = key;
+            self.call(&q).map(|o| o.key_info)
+        }
+
+        fn read_val(&self, key: u32, info: &KeyInfo) -> Option<[u8; 32]> {
+            let mut q = KeyData::default();
+            q.data8 = 5;
+            q.key = key;
+            q.key_info = *info;
+            self.call(&q).map(|o| o.bytes)
+        }
+    }
+
+    impl Drop for SmcConn {
+        fn drop(&mut self) {
+            unsafe { IOServiceClose(self.0); }
+        }
+    }
+
+    // Category for a temperature key
+    #[derive(Clone, Copy)]
+    enum TempCat { Cpu, Gpu, Ssd }
+
+    // Cached list of (key, info, category) for temperature sensors
+    static TEMP_KEYS: std::sync::OnceLock<Vec<(u32, KeyInfo, TempCat)>> = std::sync::OnceLock::new();
+
+    fn discover_temp_keys(conn: &SmcConn) -> Vec<(u32, KeyInfo, TempCat)> {
+        let flt_type = fourcc("flt ");
+        let count = conn.key_count();
+        let mut keys = Vec::new();
+
+        for i in 0..count {
+            let key = match conn.key_at_index(i) {
+                Some(k) => k,
+                None => continue,
+            };
+            let info = match conn.key_info(key) {
+                Some(i) => i,
+                None => continue,
+            };
+            if info.data_size != 4 || info.data_type != flt_type {
+                continue;
+            }
+
+            let key_str = fourcc_str(key);
+            let cat = if key_str.starts_with("Tp") || key_str.starts_with("Te") {
+                Some(TempCat::Cpu)
+            } else if key_str.starts_with("Tg") {
+                Some(TempCat::Gpu)
+            } else if key_str.starts_with("Th") || key_str.starts_with("TN") {
+                Some(TempCat::Ssd)
+            } else {
+                None
+            };
+
+            if let Some(cat) = cat {
+                keys.push((key, info, cat));
+            }
+        }
+        keys
+    }
+
+    pub fn read_temperatures() -> (f32, f32, f32) {
+        let conn = match SmcConn::open() {
+            Some(c) => c,
+            None => return (-1.0, -1.0, -1.0),
+        };
+
+        let keys = TEMP_KEYS.get_or_init(|| discover_temp_keys(&conn));
+
+        if keys.is_empty() { return (-1.0, -1.0, -1.0); }
+
+        let mut cpu_temps: Vec<f32> = Vec::new();
+        let mut gpu_temps: Vec<f32> = Vec::new();
+        let mut ssd_temp: f32 = -1.0;
+
+        for &(key, ref info, cat) in keys {
+            let bytes = match conn.read_val(key, info) {
+                Some(b) => b,
+                None => continue,
+            };
+
+            let val = f32::from_le_bytes(bytes[0..4].try_into().unwrap());
+            if !val.is_finite() || val <= 0.0 || val > 150.0 { continue; }
+
+            match cat {
+                TempCat::Cpu => cpu_temps.push(val),
+                TempCat::Gpu => gpu_temps.push(val),
+                TempCat::Ssd => { if val > ssd_temp { ssd_temp = val; } }
+            }
+        }
+
+        let cpu_avg = if cpu_temps.is_empty() { -1.0 }
+            else { cpu_temps.iter().sum::<f32>() / cpu_temps.len() as f32 };
+        let gpu_avg = if gpu_temps.is_empty() { -1.0 }
+            else { gpu_temps.iter().sum::<f32>() / gpu_temps.len() as f32 };
+
+        (cpu_avg, gpu_avg, ssd_temp)
     }
 }
 

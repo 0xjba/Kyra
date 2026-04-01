@@ -3,6 +3,7 @@ import {
   scanArtifacts,
   executePurge,
   listenPurgeProgress,
+  addBytesFreed,
   type ArtifactEntry,
   type PurgeProgress,
   type PurgeResult,
@@ -92,6 +93,9 @@ export const usePurgeStore = create<PurgeStore>((set, get) => ({
       const { dry_run: dryRun, use_trash } = useSettingsStore.getState().settings;
       const permanent = !use_trash;
       const result = await executePurge(Array.from(selectedPaths), dryRun, permanent);
+      if (!dryRun && result.bytes_freed > 0) {
+        addBytesFreed(result.bytes_freed).catch(() => {});
+      }
       set({ phase: "done", result });
     } catch (e) {
       set({ phase: "list", error: String(e) });
