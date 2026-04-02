@@ -388,8 +388,8 @@ export default function Optimize() {
       </div>
 
       {/* Footer */}
-      <div className="opt-footer">
-        <span className="opt-footer-count">
+      <div className="module-footer">
+        <span className="module-footer-info">
           {selectedCount} of {tasks.length} tasks selected
         </span>
         <button

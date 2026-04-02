@@ -1,11 +1,8 @@
-import { useState, useCallback } from "react";
 import { HardDrive, FolderOpen } from "lucide-react";
 import { useAnalyzeStore } from "../stores/analyzeStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { deleteAnalyzedItem, pickFolder, type LargeFile } from "../lib/tauri";
+import { pickFolder } from "../lib/tauri";
 import Treemap from "../components/Treemap";
-import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
-import Toast from "../components/Toast";
 import { formatSize } from "../utils/format";
 import "../styles/analyze.css";
 
@@ -36,7 +33,7 @@ function IdleView() {
   };
 
   return (
-    <div className="analyze-centered">
+    <div className="centered">
       <div className="analyze-idle-icon">
         <HardDrive size={26} strokeWidth={1.5} />
       </div>
@@ -107,8 +104,8 @@ function ScanningView() {
   const progress = useAnalyzeStore((s) => s.progress);
 
   return (
-    <div className="analyze-centered">
-      <div className="analyze-spinner" />
+    <div className="centered">
+      <div className="spinner" />
       <div className="analyze-scanning-text">Scanning directory…</div>
       {progress && (
         <div className="analyze-scan-count">
@@ -278,43 +275,13 @@ function LargeFilesView() {
   const largeFiles = useAnalyzeStore((s) => s.largeFiles);
   const largeFilesLoading = useAnalyzeStore((s) => s.largeFilesLoading);
   const loadLargeFiles = useAnalyzeStore((s) => s.loadLargeFiles);
-  const removeLargeFile = useAnalyzeStore((s) => s.removeLargeFile);
   const reveal = useAnalyzeStore((s) => s.reveal);
-  const useTrash = useSettingsStore((s) => s.settings.use_trash);
   const threshold = useSettingsStore((s) => s.settings.large_file_threshold_mb);
-
-  const [deleteTarget, setDeleteTarget] = useState<LargeFile | null>(null);
-  const [toast, setToast] = useState<{
-    message: string;
-    variant: "success" | "error";
-  } | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const handleDelete = useCallback(
-    async (permanent: boolean) => {
-      if (!deleteTarget || deleting) return;
-      setDeleting(true);
-      try {
-        const freed = await deleteAnalyzedItem(deleteTarget.path, permanent);
-        removeLargeFile(deleteTarget.path);
-        setToast({
-          message: `${permanent ? "Deleted" : "Trashed"} ${deleteTarget.name} (${formatSize(freed)})`,
-          variant: "success",
-        });
-      } catch (e) {
-        setToast({ message: String(e), variant: "error" });
-      } finally {
-        setDeleteTarget(null);
-        setDeleting(false);
-      }
-    },
-    [deleteTarget, deleting, removeLargeFile],
-  );
 
   if (largeFilesLoading) {
     return (
-      <div className="analyze-centered">
-        <div className="analyze-spinner" />
+      <div className="centered">
+        <div className="spinner" />
         <div className="analyze-idle-text">Searching for large files…</div>
       </div>
     );
@@ -322,7 +289,7 @@ function LargeFilesView() {
 
   if (largeFiles.length === 0) {
     return (
-      <div className="analyze-centered">
+      <div className="centered">
         <div className="analyze-idle-text">No files larger than {threshold >= 1000 ? `${threshold / 1000} GB` : `${threshold} MB`} found</div>
         <button className="btn btn-primary" onClick={loadLargeFiles}>
           Scan Again
@@ -354,44 +321,10 @@ function LargeFilesView() {
               />
             </div>
             <span className="analyze-list-size">{formatSize(file.size)}</span>
-            <button
-              className="analyze-delete-btn"
-              title="Delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteTarget(file);
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4M6.667 7.333v4M9.333 7.333v4M13.333 4v9.333a1.333 1.333 0 01-1.333 1.334H4a1.333 1.333 0 01-1.333-1.334V4" />
-              </svg>
-            </button>
           </div>
         ))}
       </div>
 
-      <DeleteConfirmDialog
-        visible={deleteTarget !== null}
-        title={`Delete "${deleteTarget?.name}"?`}
-        onConfirm={() => handleDelete(!useTrash)}
-        onCancel={() => setDeleteTarget(null)}
-      />
-
-      <Toast
-        message={toast?.message ?? ""}
-        visible={toast !== null}
-        variant={toast?.variant}
-        onDone={() => setToast(null)}
-      />
     </>
   );
 }

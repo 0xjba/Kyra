@@ -9,15 +9,6 @@
   flex-direction: column;
 }
 
-/* ── Centered States (scanning / empty / removing) ── */
-.uninstall-centered {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
 
 .uninstall-empty-icon {
   width: 48px;
@@ -46,18 +37,6 @@
   line-height: var(--leading-relaxed);
 }
 
-.uninstall-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border);
-  border-top-color: var(--text-secondary);
-  border-radius: 50%;
-  animation: uninstall-spin 0.8s linear infinite;
-}
-
-@keyframes uninstall-spin {
-  to { transform: rotate(360deg); }
-}
 
 .uninstall-scanning-text {
   font-size: var(--font-md);
@@ -228,23 +207,6 @@
   scrollbar-gutter: stable;
   min-height: 0;
   padding-right: 6px;
-}
-
-.uninstall-grid-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.uninstall-grid-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.uninstall-grid-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-.uninstall-grid-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 .uninstall-grid {
@@ -512,23 +474,6 @@
   overflow: hidden;
 }
 
-.uninstall-file-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.uninstall-file-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.uninstall-file-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-.uninstall-file-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 .uninstall-file-empty {
   font-size: var(--font-base);
   color: var(--text-tertiary);
@@ -599,23 +544,6 @@
   min-width: 50px;
   text-align: right;
   margin-left: auto;
-}
-
-/* ── Sticky Footer ── */
-.uninstall-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 2px 0;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  position: sticky;
-  bottom: 0;
-}
-
-.uninstall-footer-info {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
 }
 
 /* ── Progress Ring View ── */

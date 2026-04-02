@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Trash2,
   Zap,
@@ -25,6 +25,29 @@ export default function Home() {
   useEffect(() => {
     getTotalBytesFreed().then(setTotalFreed).catch(() => {});
   }, []);
+
+  // Animated counter
+  const [displayBytes, setDisplayBytes] = useState(0);
+  const animRef = useRef(0);
+  const animate = useCallback((target: number) => {
+    cancelAnimationFrame(animRef.current);
+    const duration = 2000;
+    const start = performance.now();
+    const from = 0;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / duration, 1);
+      const ease = t < 0.5
+        ? 4 * t * t * t
+        : 1 - (-2 * t + 2) ** 3 / 2; // ease-in-out cubic
+      setDisplayBytes(Math.round(from + (target - from) * ease));
+      if (t < 1) animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  useEffect(() => {
+    if (totalFreed > 0) animate(totalFreed);
+  }, [totalFreed, animate]);
 
   // Scan apps lazily — only once, not on every dashboard visit
   const hasScannedRef = useRef(false);
@@ -53,7 +76,7 @@ export default function Home() {
           description="System caches, logs, and temporary files"
           icon={Trash2}
           route="/clean"
-          stat={totalFreed > 0 ? formatSize(totalFreed) : "—"}
+          stat={displayBytes > 0 ? formatSize(displayBytes) : "—"}
           statLabel="All time space reclaimed"
           style={{ gridColumn: "span 2", gridRow: "span 2" }}
         />

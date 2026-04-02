@@ -34,7 +34,7 @@ function IdleView() {
   const error = useInstallersStore((s) => s.error);
 
   return (
-    <div className="inst-centered">
+    <div className="centered">
       <div className="inst-idle-icon">
         <Download size={26} strokeWidth={1.5} />
       </div>
@@ -69,8 +69,8 @@ function IdleView() {
 /* ── Scanning View ── */
 function ScanningView() {
   return (
-    <div className="inst-centered">
-      <div className="inst-spinner" />
+    <div className="centered">
+      <div className="spinner" />
       <div className="inst-scanning-text">Scanning for installers...</div>
     </div>
   );
@@ -81,7 +81,7 @@ function EmptyView() {
   const reset = useInstallersStore((s) => s.reset);
 
   return (
-    <div className="inst-centered">
+    <div className="centered">
       <div className="inst-empty-icon">
         <Check size={26} strokeWidth={1.5} />
       </div>
@@ -219,8 +219,8 @@ function ListView() {
       </div>
 
       {/* Footer */}
-      <div className="inst-footer">
-        <span className="inst-footer-info">
+      <div className="module-footer">
+        <span className="module-footer-info">
           {selected.size} of {files.length} selected
         </span>
         <button
@@ -401,7 +401,7 @@ function DeletingView() {
   const card = cardRef.current;
 
   return (
-    <div className={`inst-centered${isDone ? " inst-done" : ""}`}>
+    <div className={`centered${isDone ? " inst-done" : ""}`}>
       <InstConfetti active={showConfetti} />
 
       {/* Circular progress ring */}

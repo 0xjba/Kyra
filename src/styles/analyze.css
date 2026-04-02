@@ -140,15 +140,6 @@
   color: var(--text-secondary);
 }
 
-/* ── Centered states (idle, scanning) ── */
-.analyze-centered {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  flex: 1;
-}
 
 .analyze-idle-icon {
   width: 48px;
@@ -311,19 +302,6 @@
   color: var(--text-tertiary);
 }
 
-/* ── Spinner ── */
-.analyze-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border);
-  border-top-color: var(--text-secondary);
-  border-radius: 50%;
-  animation: analyze-spin 0.8s linear infinite;
-}
-
-@keyframes analyze-spin {
-  to { transform: rotate(360deg); }
-}
 
 /* ── Content area ── */
 .analyze-content {
@@ -381,23 +359,6 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding-right: 6px;
-}
-
-.analyze-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.analyze-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.analyze-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-.analyze-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 .analyze-list-row {

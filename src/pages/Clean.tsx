@@ -186,7 +186,7 @@ const CLEANED_TYPES = [
 /* ── Idle ── */
 function IdleView({ onScan }: { onScan: () => void }) {
   return (
-    <div className="clean-centered">
+    <div className="centered">
       <div className="clean-idle-icon">
         <Trash2 size={26} strokeWidth={1.5} />
       </div>
@@ -219,8 +219,8 @@ function IdleView({ onScan }: { onScan: () => void }) {
 /* ── Scanning ── */
 function ScanningView() {
   return (
-    <div className="clean-centered">
-      <div className="clean-spinner" />
+    <div className="centered">
+      <div className="spinner" />
       <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
         Scanning files and caches…
       </div>
@@ -606,7 +606,7 @@ function ResultsView() {
   // Empty state
   if (items.length === 0) {
     return (
-      <div className="clean-centered">
+      <div className="centered">
         <div className="clean-empty-icon">
           <Check size={26} strokeWidth={1.5} />
         </div>
@@ -684,8 +684,8 @@ function ResultsView() {
       </div>
 
       {/* Footer */}
-      <div className="clean-footer">
-        <span className="clean-footer-info">
+      <div className="module-footer clean-footer">
+        <span className="module-footer-info">
           {selectedIds.size} of {selectableIds.size} items selected
         </span>
         <button
@@ -859,7 +859,7 @@ function CleaningView() {
   const card = cardRef.current;
 
   return (
-    <div className={`clean-centered${isDone ? " clean-done" : ""}`}>
+    <div className={`centered${isDone ? " clean-done" : ""}`}>
       <CleanConfetti active={showConfetti} />
 
       <div className="clean-ring-wrap">

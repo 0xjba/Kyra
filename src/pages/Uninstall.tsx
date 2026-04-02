@@ -84,8 +84,8 @@ function matchesFilter(name: string, filter: FilterMode, size: number): boolean 
 
 function ScanningView() {
   return (
-    <div className="uninstall-centered">
-      <div className="uninstall-spinner" />
+    <div className="centered">
+      <div className="spinner" />
       <div className="uninstall-scanning-text">Scanning installed applications...</div>
     </div>
   );
@@ -213,7 +213,7 @@ function AppGridView() {
   // Empty state
   if (apps.length === 0) {
     return (
-      <div className="uninstall-centered">
+      <div className="centered">
         <div className="uninstall-empty-icon">
           <Check size={26} strokeWidth={1.5} />
         </div>
@@ -294,7 +294,7 @@ function AppGridView() {
       {/* App Grid */}
       <div className="uninstall-grid-scroll">
         {displayed.length === 0 ? (
-          <div className="uninstall-centered" style={{ minHeight: 200 }}>
+          <div className="centered" style={{ minHeight: 200 }}>
             <div className="uninstall-idle-desc">No apps match your search or filter.</div>
           </div>
         ) : (
@@ -372,8 +372,8 @@ function AppGridView() {
       </div>
 
       {/* Footer */}
-      <div className="uninstall-footer">
-        <span className="uninstall-footer-info">
+      <div className="module-footer">
+        <span className="module-footer-info">
           {selectedApps.size} of {apps.filter((a) => !a.is_system).length} apps selected
         </span>
         <button
@@ -549,8 +549,8 @@ function DetailView() {
       {/* ── File list ── */}
       <div className="uninstall-file-list">
         {loadingFiles ? (
-          <div className="uninstall-centered" style={{ minHeight: 120 }}>
-            <div className="uninstall-spinner" />
+          <div className="centered" style={{ minHeight: 120 }}>
+            <div className="spinner" />
             <div className="uninstall-scanning-text">Searching for associated files...</div>
           </div>
         ) : (
@@ -597,8 +597,8 @@ function DetailView() {
       </div>
 
       {/* ── Footer ── */}
-      <div className="uninstall-footer">
-        <span className="uninstall-footer-info">
+      <div className="module-footer">
+        <span className="module-footer-info">
           {selectedCount} of {totalItemCount} items selected
         </span>
         <button
@@ -782,7 +782,7 @@ function RemovingView() {
   const card = cardRef.current;
 
   return (
-    <div className={`uninstall-centered${isDone ? " uninstall-done" : ""}`}>
+    <div className={`centered${isDone ? " uninstall-done" : ""}`}>
       <UninstallConfetti active={showConfetti} />
 
       {/* Circular progress ring */}

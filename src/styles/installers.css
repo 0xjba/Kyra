@@ -9,15 +9,6 @@
   min-height: 0;
 }
 
-/* ── Idle / Scanning / Empty centered states ── */
-.inst-centered {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
 
 /* ── Idle View — Feature icon ── */
 .inst-idle-icon {
@@ -113,18 +104,6 @@
   margin-top: 4px;
 }
 
-.inst-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border);
-  border-top-color: var(--text-secondary);
-  border-radius: 50%;
-  animation: inst-spin 0.8s linear infinite;
-}
-
-@keyframes inst-spin {
-  to { transform: rotate(360deg); }
-}
 
 .inst-scanning-text {
   font-size: var(--font-md);
@@ -252,23 +231,6 @@
   min-height: 0;
 }
 
-.inst-file-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.inst-file-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.inst-file-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-.inst-file-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 /* ── Installer item icon ── */
 .inst-item-icon {
   width: 22px;
@@ -335,23 +297,6 @@
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-/* ── Sticky Footer ── */
-.inst-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 2px 0;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  position: sticky;
-  bottom: 0;
-}
-
-.inst-footer-info {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
 }
 
 /* ── Progress Ring View ── */

@@ -348,7 +348,7 @@ export default function Status() {
     return (
       <div className="status-container">
         <div className="status-loading">
-          <div className="status-spinner" />
+          <div className="spinner" />
           <span className="status-loading-text">Loading system info…</span>
         </div>
       </div>

@@ -141,7 +141,7 @@ function IdleView() {
   }, [setRootPath]);
 
   return (
-    <div className="purge-centered">
+    <div className="centered">
       {/* Feature icon — matches dashboard Package icon */}
       <div className="purge-idle-icon">
         <Package size={26} strokeWidth={1.5} />
@@ -209,8 +209,8 @@ function IdleView() {
 /* ── Scanning View ── */
 function ScanningView() {
   return (
-    <div className="purge-centered">
-      <div className="purge-spinner" />
+    <div className="centered">
+      <div className="spinner" />
       <div className="purge-scanning-text">Scanning for artifacts...</div>
     </div>
   );
@@ -508,7 +508,7 @@ function ListView() {
 
   if (artifacts.length === 0) {
     return (
-      <div className="purge-centered">
+      <div className="centered">
         <div className="purge-empty-icon">
           <Check size={26} strokeWidth={1.5} />
         </div>
@@ -596,8 +596,8 @@ function ListView() {
       </div>
 
       {/* Footer */}
-      <div className="purge-footer">
-        <span className="purge-footer-info">
+      <div className="module-footer">
+        <span className="module-footer-info">
           {selectedPaths.size} of {artifacts.length} items selected
         </span>
         <button
@@ -821,7 +821,7 @@ function PurgingView() {
   const card = cardRef.current;
 
   return (
-    <div className={`purge-centered${isDone ? " purge-done" : ""}`}>
+    <div className={`centered${isDone ? " purge-done" : ""}`}>
       <Confetti active={showConfetti} />
 
       {/* Circular progress ring */}

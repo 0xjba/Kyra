@@ -134,23 +134,6 @@
   padding-right: 6px;
 }
 
-.opt-task-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.opt-task-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.opt-task-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-.opt-task-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 /* ── Category Group ── */
 .opt-category-group {
   margin-bottom: 16px;
@@ -383,23 +366,6 @@
   0% { border-color: var(--border); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
   20% { border-color: rgba(255, 255, 255, 0.18); box-shadow: 0 0 12px 0 rgba(255, 255, 255, 0.06); }
   100% { border-color: var(--border); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
-}
-
-/* ── Sticky Footer ── */
-.opt-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 2px 0;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  position: sticky;
-  bottom: 0;
-}
-
-.opt-footer-count {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
 }
 
 /* ── Error banner ── */

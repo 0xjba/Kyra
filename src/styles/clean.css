@@ -6,32 +6,6 @@
   flex-direction: column;
 }
 
-/* Consistent macOS-style thin scrollbar */
-.clean-split-left::-webkit-scrollbar,
-.clean-split-right::-webkit-scrollbar,
-.clean-detail-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.clean-split-left::-webkit-scrollbar-track,
-.clean-split-right::-webkit-scrollbar-track,
-.clean-detail-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.clean-split-left::-webkit-scrollbar-thumb,
-.clean-split-right::-webkit-scrollbar-thumb,
-.clean-detail-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-.clean-split-left::-webkit-scrollbar-thumb:hover,
-.clean-split-right::-webkit-scrollbar-thumb:hover,
-.clean-detail-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 /* ── Summary header ── */
 .clean-summary-bar {
   display: flex;
@@ -404,23 +378,10 @@
   opacity: 0.35;
 }
 
-/* ── Sticky footer ── */
+/* ── Sticky footer (backdrop-filter override) ── */
 .clean-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 2px 0;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  position: sticky;
-  bottom: 0;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-}
-
-.clean-footer-info {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
 }
 
 
@@ -720,26 +681,4 @@
   flex-shrink: 0;
 }
 
-/* ── Centered content for idle/scanning states ── */
-.clean-centered {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-}
 
-/* ── Spinner ── */
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.clean-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border);
-  border-top-color: var(--text-secondary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
