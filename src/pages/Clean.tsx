@@ -552,13 +552,17 @@ function ResultsView() {
 
   const toggleCategory = useCallback(
     (ids: string[], shouldSelect: boolean) => {
+      const next = new Set(selectedIds);
       for (const id of ids) {
-        const isSelected = selectedIds.has(id);
-        if (shouldSelect && !isSelected) toggleItem(id);
-        if (!shouldSelect && isSelected) toggleItem(id);
+        if (shouldSelect) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
       }
+      useCleanStore.setState({ selectedIds: next });
     },
-    [selectedIds, toggleItem],
+    [selectedIds],
   );
 
   // Group by category (memoized)
