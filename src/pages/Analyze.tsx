@@ -1,39 +1,107 @@
 import { useState, useCallback } from "react";
+import { HardDrive, FolderOpen } from "lucide-react";
 import { useAnalyzeStore } from "../stores/analyzeStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { deleteAnalyzedItem, type LargeFile } from "../lib/tauri";
-import Sunburst from "../components/Sunburst";
+import { deleteAnalyzedItem, pickFolder, type LargeFile } from "../lib/tauri";
+import Treemap from "../components/Treemap";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import Toast from "../components/Toast";
 import { formatSize } from "../utils/format";
 import "../styles/analyze.css";
+
+/* ── Idle ── */
+
+const QUICK_PATHS = [
+  { path: "/", label: "Macintosh HD" },
+  { path: "/Users", label: "Users" },
+];
+
+// Add home dir dynamically
+const home = "/Users/" + (typeof window !== "undefined" ? window.__TAURI_INTERNALS__?.metadata?.currentDir?.split("/")[2] : "");
 
 function IdleView() {
   const scanPath = useAnalyzeStore((s) => s.scanPath);
   const setScanPath = useAnalyzeStore((s) => s.setScanPath);
   const scan = useAnalyzeStore((s) => s.scan);
 
+  const handlePickFolder = async () => {
+    const selected = await pickFolder();
+    if (selected) {
+      setScanPath(selected);
+    }
+  };
+
+  const handleScan = () => {
+    if (scanPath.trim()) scan();
+  };
+
   return (
     <div className="analyze-centered">
-      <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
-        Scan a directory to explore disk usage
+      <div className="analyze-idle-icon">
+        <HardDrive size={26} strokeWidth={1.5} />
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          className="analyze-path-input"
-          type="text"
-          value={scanPath}
-          onChange={(e) => setScanPath(e.target.value)}
-          placeholder="/"
-          onKeyDown={(e) => e.key === "Enter" && scan()}
-        />
-        <button className="btn" onClick={scan}>
+
+      <div className="analyze-idle-title">Analyze Disk Usage</div>
+      <div className="analyze-idle-desc">
+        Visualize what's taking up space on your disk.
+        Drill into folders and find large files.
+      </div>
+
+      <div className="analyze-path-row">
+        <div className="analyze-path-input-wrap">
+          <FolderOpen
+            size={14}
+            className="analyze-path-icon clickable"
+            onClick={handlePickFolder}
+          />
+          <input
+            type="text"
+            className="analyze-path-input"
+            value={scanPath}
+            onChange={(e) => setScanPath(e.target.value)}
+            placeholder="Browse or type a path to scan..."
+            onKeyDown={(e) => e.key === "Enter" && handleScan()}
+          />
+        </div>
+        <button className="btn btn-primary" onClick={handleScan} disabled={!scanPath.trim()}>
           Scan
         </button>
+      </div>
+
+      <div className="analyze-quick-picks">
+        {QUICK_PATHS.map((p) => (
+          <button
+            key={p.path}
+            className={`analyze-pick-chip${scanPath === p.path ? " active" : ""}`}
+            onClick={() => setScanPath(p.path)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="analyze-detected-section">
+        <span className="analyze-detected-label">WHAT YOU'LL SEE</span>
+        <div className="analyze-detected-types">
+          <span className="analyze-detected-chip">
+            <span className="analyze-detected-dot" style={{ backgroundColor: "var(--blue)" }} />
+            Treemap
+          </span>
+          <span className="analyze-detected-chip">
+            <span className="analyze-detected-dot" style={{ backgroundColor: "var(--green)" }} />
+            List view
+          </span>
+          <span className="analyze-detected-chip">
+            <span className="analyze-detected-dot" style={{ backgroundColor: "var(--orange)" }} />
+            Large files
+          </span>
+        </div>
       </div>
     </div>
   );
 }
+
+/* ── Scanning ── */
 
 function ScanningView() {
   const progress = useAnalyzeStore((s) => s.progress);
@@ -41,11 +109,9 @@ function ScanningView() {
   return (
     <div className="analyze-centered">
       <div className="analyze-spinner" />
-      <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
-        Scanning...
-      </div>
+      <div className="analyze-scanning-text">Scanning directory…</div>
       {progress && (
-        <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+        <div className="analyze-scan-count">
           {progress.files_scanned.toLocaleString()} files scanned
         </div>
       )}
@@ -53,157 +119,160 @@ function ScanningView() {
   );
 }
 
+/** Turn a root path into a human-friendly label */
+function friendlyRootName(node: { name: string; path: string }): string {
+  const name = node.name || node.path;
+  if (name === "/" || name === "") return "Macintosh HD";
+  return name;
+}
+
+/* ── Breadcrumb ── */
+
 function Breadcrumb() {
   const breadcrumb = useAnalyzeStore((s) => s.breadcrumb);
   const current = useAnalyzeStore((s) => s.current);
+  const reveal = useAnalyzeStore((s) => s.reveal);
   const drillToRoot = useAnalyzeStore((s) => s.drillToRoot);
   const drillToIndex = useAnalyzeStore((s) => s.drillToIndex);
 
-  if (breadcrumb.length === 0) return null;
+  if (!current) return null;
+
+  // Build path segments from breadcrumb + current
+  const segments: { name: string; onClick?: () => void }[] = [];
+
+  // Root entry
+  if (breadcrumb.length === 0) {
+    segments.push({ name: friendlyRootName(current) });
+  } else {
+    // We have navigation history
+    segments.push({ name: friendlyRootName(breadcrumb[0]), onClick: drillToRoot });
+
+    for (let i = 1; i < breadcrumb.length; i++) {
+      const idx = i;
+      segments.push({
+        name: breadcrumb[i].name,
+        onClick: () => drillToIndex(idx),
+      });
+    }
+    // Current (non-clickable)
+    segments.push({ name: current.name });
+  }
 
   return (
     <div className="analyze-breadcrumb">
-      <button className="analyze-breadcrumb-item" onClick={drillToRoot}>
-        {breadcrumb[0]?.name || "/"}
-      </button>
-      {breadcrumb.slice(1).map((node, i) => (
-        <span key={node.path}>
-          <span className="analyze-breadcrumb-sep">/</span>
-          <button
-            className="analyze-breadcrumb-item"
-            onClick={() => drillToIndex(i + 1)}
-          >
-            {node.name}
-          </button>
+      {segments.map((seg, i) => (
+        <span key={i}>
+          {i > 0 && <span className="analyze-breadcrumb-sep">/</span>}
+          {seg.onClick ? (
+            <button className="analyze-breadcrumb-item" onClick={seg.onClick}>
+              {seg.name}
+            </button>
+          ) : (
+            <span className="analyze-breadcrumb-current">
+              {seg.name}
+            </span>
+          )}
         </span>
       ))}
-      {current && (
-        <span>
-          <span className="analyze-breadcrumb-sep">/</span>
-          <span style={{ color: "var(--text-primary)" }}>{current.name}</span>
-        </span>
-      )}
+      <button
+        className="analyze-reveal-btn"
+        onClick={() => reveal(current.path)}
+        title="Show in Finder"
+      >
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M6 2h8v8" />
+          <path d="M14 2L2 14" />
+        </svg>
+      </button>
     </div>
   );
 }
+
+/* ── List View ── */
 
 function ListView() {
   const current = useAnalyzeStore((s) => s.current);
   const drillInto = useAnalyzeStore((s) => s.drillInto);
   const reveal = useAnalyzeStore((s) => s.reveal);
-  const removeNodeByPath = useAnalyzeStore((s) => s.removeNodeByPath);
-  const useTrash = useSettingsStore((s) => s.settings.use_trash);
-
-  const [deleteTarget, setDeleteTarget] = useState<{
-    path: string;
-    name: string;
-  } | null>(null);
-  const [toast, setToast] = useState<{
-    message: string;
-    variant: "success" | "error";
-  } | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const handleDelete = useCallback(
-    async (permanent: boolean) => {
-      if (!deleteTarget || deleting) return;
-      setDeleting(true);
-      try {
-        const freed = await deleteAnalyzedItem(deleteTarget.path, permanent);
-        removeNodeByPath(deleteTarget.path, freed);
-        setToast({
-          message: `${permanent ? "Deleted" : "Trashed"} ${deleteTarget.name} (${formatSize(freed)})`,
-          variant: "success",
-        });
-      } catch (e) {
-        setToast({ message: String(e), variant: "error" });
-      } finally {
-        setDeleteTarget(null);
-        setDeleting(false);
-      }
-    },
-    [deleteTarget, deleting, removeNodeByPath]
-  );
 
   if (!current) return null;
 
   const maxSize =
     current.children.length > 0 ? current.children[0].size : 1;
+  const parentSize = current.size || 1;
 
   return (
     <>
-      <div className="analyze-list">
-        {current.children.map((child) => (
-          <div
-            key={child.path}
-            className="analyze-list-row"
-            onClick={() => {
-              if (child.is_dir && child.children.length > 0) {
-                drillInto(child);
-              }
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              reveal(child.path);
-            }}
-          >
-            <span className="analyze-list-icon">
-              {child.is_dir ? "\uD83D\uDCC1" : "\uD83D\uDCC4"}
-            </span>
-            {child.is_cleanable && (
-              <span className="analyze-cleanable-dot" title="Safe to remove" />
-            )}
-            <span className="analyze-list-name">{child.name}</span>
-            <div className="analyze-list-bar-track">
-              <div
-                className="analyze-list-bar-fill"
-                style={{ width: `${(child.size / maxSize) * 100}%` }}
-              />
-            </div>
-            <span className="analyze-list-size">
-              {formatSize(child.size)}
-            </span>
-            <button
-              className="analyze-delete-btn"
-              title="Delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteTarget({ path: child.path, name: child.name });
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4M6.667 7.333v4M9.333 7.333v4M13.333 4v9.333a1.333 1.333 0 01-1.333 1.334H4a1.333 1.333 0 01-1.333-1.334V4" />
-              </svg>
-            </button>
-          </div>
-        ))}
+      {/* Column headers */}
+      <div className="analyze-list-header">
+        <span className="analyze-list-header-name">NAME</span>
+        <span className="analyze-list-header-size">SIZE</span>
+        <span className="analyze-list-header-pct">%</span>
       </div>
 
-      <DeleteConfirmDialog
-        visible={deleteTarget !== null}
-        title={`Delete "${deleteTarget?.name}"?`}
-        onConfirm={() => handleDelete(!useTrash)}
-        onCancel={() => setDeleteTarget(null)}
-      />
+      <div className="analyze-list">
+        {current.children.map((child) => {
+          const pct = Math.round((child.size / parentSize) * 100);
+          const canDrill = child.is_dir && child.children.length > 0;
 
-      <Toast
-        message={toast?.message ?? ""}
-        visible={toast !== null}
-        variant={toast?.variant}
-        onDone={() => setToast(null)}
-      />
+          return (
+            <div
+              key={child.path}
+              className={`analyze-list-row ${canDrill ? "analyze-list-drillable" : ""}`}
+              onClick={() => canDrill && drillInto(child)}
+            >
+              <span className="analyze-list-checkbox" />
+              <span className="analyze-list-name">{child.name}</span>
+              <div className="analyze-list-bar-track">
+                <div
+                  className="analyze-list-bar-fill"
+                  style={{ width: `${(child.size / maxSize) * 100}%` }}
+                />
+              </div>
+              <span className="analyze-list-size">
+                {formatSize(child.size)}
+              </span>
+              <span className="analyze-list-pct">{pct}%</span>
+              <button
+                className="analyze-reveal-row-btn"
+                title="Show in Finder"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  reveal(child.path);
+                }}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M6 2h8v8" />
+                  <path d="M14 2L2 14" />
+                </svg>
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }
+
+/* ── Large Files View ── */
 
 function LargeFilesView() {
   const largeFiles = useAnalyzeStore((s) => s.largeFiles);
@@ -238,16 +307,14 @@ function LargeFilesView() {
         setDeleting(false);
       }
     },
-    [deleteTarget, deleting, removeLargeFile]
+    [deleteTarget, deleting, removeLargeFile],
   );
 
   if (largeFilesLoading) {
     return (
       <div className="analyze-centered">
         <div className="analyze-spinner" />
-        <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
-          Searching for large files...
-        </div>
+        <div className="analyze-idle-text">Searching for large files…</div>
       </div>
     );
   }
@@ -255,10 +322,8 @@ function LargeFilesView() {
   if (largeFiles.length === 0) {
     return (
       <div className="analyze-centered">
-        <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
-          No files larger than 100 MB found
-        </div>
-        <button className="btn" onClick={loadLargeFiles}>
+        <div className="analyze-idle-text">No files larger than 100 MB found</div>
+        <button className="btn btn-primary" onClick={loadLargeFiles}>
           Scan Again
         </button>
       </div>
@@ -280,7 +345,6 @@ function LargeFilesView() {
             }}
             title={file.path}
           >
-            <span className="analyze-list-icon">{"\uD83D\uDCC4"}</span>
             <span className="analyze-list-name">{file.name}</span>
             <div className="analyze-list-bar-track">
               <div
@@ -288,9 +352,7 @@ function LargeFilesView() {
                 style={{ width: `${(file.size / maxSize) * 100}%` }}
               />
             </div>
-            <span className="analyze-list-size">
-              {formatSize(file.size)}
-            </span>
+            <span className="analyze-list-size">{formatSize(file.size)}</span>
             <button
               className="analyze-delete-btn"
               title="Delete"
@@ -333,49 +395,39 @@ function LargeFilesView() {
   );
 }
 
+/* ── Ready View ── */
+
 function ReadyView() {
   const current = useAnalyzeStore((s) => s.current);
   const viewMode = useAnalyzeStore((s) => s.viewMode);
   const setViewMode = useAnalyzeStore((s) => s.setViewMode);
   const activeTab = useAnalyzeStore((s) => s.activeTab);
-  const setActiveTab = useAnalyzeStore((s) => s.setActiveTab);
   const drillInto = useAnalyzeStore((s) => s.drillInto);
-  const drillUp = useAnalyzeStore((s) => s.drillUp);
-  const reveal = useAnalyzeStore((s) => s.reveal);
   const reset = useAnalyzeStore((s) => s.reset);
-  const breadcrumb = useAnalyzeStore((s) => s.breadcrumb);
 
   if (!current) return null;
 
+  const contextText =
+    activeTab === "tree"
+      ? `${formatSize(current.size)} in ${friendlyRootName(current)}`
+      : "Large Files";
+
   return (
     <>
+      {/* Header */}
       <div className="analyze-header">
         <div className="analyze-header-left">
           <span className="analyze-header-title">Analyze</span>
-          <span className="analyze-header-size">{activeTab === "tree" ? formatSize(current.size) : ""}</span>
-          {activeTab === "large-files" && <span className="analyze-header-context">Large Files</span>}
+          <span className="analyze-header-context">{contextText}</span>
         </div>
         <div className="analyze-actions">
-          <button
-            className={`btn ${activeTab === "tree" ? "btn-active" : ""}`}
-            onClick={() => setActiveTab("tree")}
-          >
-            Tree
-          </button>
-          <button
-            className={`btn ${activeTab === "large-files" ? "btn-active" : ""}`}
-            onClick={() => setActiveTab("large-files")}
-          >
-            Large Files
-          </button>
           {activeTab === "tree" && (
             <>
-              <span style={{ width: 1, height: 16, background: "var(--border)" }} />
               <button
-                className={`btn ${viewMode === "sunburst" ? "btn-active" : ""}`}
-                onClick={() => setViewMode("sunburst")}
+                className={`btn ${viewMode === "treemap" ? "btn-active" : ""}`}
+                onClick={() => setViewMode("treemap")}
               >
-                Sunburst
+                Treemap
               </button>
               <button
                 className={`btn ${viewMode === "list" ? "btn-active" : ""}`}
@@ -391,32 +443,31 @@ function ReadyView() {
         </div>
       </div>
 
+      {/* Breadcrumb */}
       {activeTab === "tree" && <Breadcrumb />}
 
+      {/* Content */}
       <div className="analyze-content">
         {activeTab === "large-files" ? (
           <LargeFilesView />
-        ) : viewMode === "sunburst" ? (
-          <div
-            onClick={(e) => {
-              if (e.target === e.currentTarget && breadcrumb.length > 0) {
-                drillUp();
-              }
-            }}
-          >
-            <Sunburst
-              node={current}
-              onDrillIn={drillInto}
-              onReveal={reveal}
-            />
-          </div>
+        ) : viewMode === "treemap" ? (
+          <Treemap node={current} onDrillIn={drillInto} />
         ) : (
           <ListView />
         )}
       </div>
+
+      {/* Footer hint */}
+      {activeTab === "tree" && (
+        <div className="analyze-footer">
+          <span className="analyze-footer-hint">Click folder to drill down</span>
+        </div>
+      )}
     </>
   );
 }
+
+/* ── Main ── */
 
 export default function Analyze() {
   const phase = useAnalyzeStore((s) => s.phase);
@@ -425,20 +476,8 @@ export default function Analyze() {
   return (
     <div className="analyze-container">
       {error && (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--red)",
-            padding: "8px 12px",
-            background: "rgba(253, 72, 65, 0.08)",
-            borderRadius: 6,
-            marginBottom: 12,
-          }}
-        >
-          {error}
-        </div>
+        <div className="analyze-error">{error}</div>
       )}
-
       {phase === "idle" && <IdleView />}
       {phase === "scanning" && <ScanningView />}
       {phase === "ready" && <ReadyView />}
