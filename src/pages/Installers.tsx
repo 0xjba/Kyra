@@ -199,21 +199,23 @@ function ListView() {
 
       {/* File List */}
       <div className="inst-file-list">
-        {filtered.map((file) => (
-          <label key={file.path} className="inst-row">
-            <input
-              type="checkbox"
-              className="checkbox"
-              checked={selected.has(file.path)}
-              onChange={() => toggleSelect(file.path)}
-            />
-            <div className="inst-row-info">
-              <div className="inst-row-name">{file.name}</div>
-              <div className="inst-row-meta">{formatDate(file.modified_secs)}</div>
-            </div>
-            <div className="inst-row-size">{formatSize(file.size)}</div>
-          </label>
-        ))}
+        <div className="inst-card">
+          {filtered.map((file) => (
+            <label key={file.path} className="inst-row">
+              <input
+                type="checkbox"
+                className="checkbox"
+                checked={selected.has(file.path)}
+                onChange={() => toggleSelect(file.path)}
+              />
+              <div className="inst-row-info">
+                <div className="inst-row-name">{file.name}</div>
+                <div className="inst-row-meta">{formatDate(file.modified_secs)}</div>
+              </div>
+              <div className="inst-row-size">{formatSize(file.size)}</div>
+            </label>
+          ))}
+        </div>
       </div>
 
       {/* Footer */}

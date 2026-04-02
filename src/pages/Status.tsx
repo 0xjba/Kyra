@@ -315,13 +315,15 @@ const TopProcesses = memo(function TopProcesses() {
       <div className="status-section-header">
         <span className="status-section-title">Top Processes</span>
       </div>
-      {processes.slice(0, 5).map((proc, i) => (
-        <div key={`${proc.name}-${i}`} className="status-process-row">
-          <span className="status-process-name">{proc.name}</span>
-          <span className="status-process-cpu">{proc.cpu.toFixed(1)}%</span>
-          <span className="status-process-mem">{formatSize(proc.memory)}</span>
-        </div>
-      ))}
+      <div className="status-process-card">
+        {processes.slice(0, 5).map((proc, i) => (
+          <div key={`${proc.name}-${i}`} className="status-process-row">
+            <span className="status-process-name">{proc.name}</span>
+            <span className="status-process-cpu">{proc.cpu.toFixed(1)}%</span>
+            <span className="status-process-mem">{formatSize(proc.memory)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 });

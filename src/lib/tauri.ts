@@ -414,6 +414,8 @@ export interface AppSettings {
   dry_run: boolean;
   whitelist: string[];
   use_trash: boolean;
+  large_file_threshold_mb: number;
+  analyze_scan_depth: number;
 }
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -438,6 +440,14 @@ export async function addToWhitelist(path: string): Promise<void> {
 
 export async function removeFromWhitelist(path: string): Promise<void> {
   return invoke<void>("remove_from_whitelist", { path });
+}
+
+export async function resetLifetimeStats(): Promise<void> {
+  return invoke<void>("reset_lifetime_stats");
+}
+
+export async function getStoragePath(): Promise<string> {
+  return invoke<string>("get_storage_path");
 }
 
 export async function pickFolder(): Promise<string | null> {

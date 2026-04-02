@@ -281,6 +281,7 @@ function LargeFilesView() {
   const removeLargeFile = useAnalyzeStore((s) => s.removeLargeFile);
   const reveal = useAnalyzeStore((s) => s.reveal);
   const useTrash = useSettingsStore((s) => s.settings.use_trash);
+  const threshold = useSettingsStore((s) => s.settings.large_file_threshold_mb);
 
   const [deleteTarget, setDeleteTarget] = useState<LargeFile | null>(null);
   const [toast, setToast] = useState<{
@@ -322,7 +323,7 @@ function LargeFilesView() {
   if (largeFiles.length === 0) {
     return (
       <div className="analyze-centered">
-        <div className="analyze-idle-text">No files larger than 100 MB found</div>
+        <div className="analyze-idle-text">No files larger than {threshold >= 1000 ? `${threshold / 1000} GB` : `${threshold} MB`} found</div>
         <button className="btn btn-primary" onClick={loadLargeFiles}>
           Scan Again
         </button>

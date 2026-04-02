@@ -86,6 +86,8 @@ pub fn run() {
             commands::settings::pick_folder,
             commands::settings::get_total_bytes_freed,
             commands::settings::add_bytes_freed,
+            commands::settings::reset_lifetime_stats,
+            commands::settings::get_storage_path,
             commands::shared::check_full_disk_access,
             commands::shared::check_sip_status,
             commands::shared::open_fda_settings,

@@ -554,7 +554,7 @@ function DetailView() {
             <div className="uninstall-scanning-text">Searching for associated files...</div>
           </div>
         ) : (
-          <>
+          <div className="uninstall-file-card">
             {/* App bundle row — always included */}
             <div className="uninstall-file-row uninstall-file-row-bundle">
               <span className="uninstall-file-name">
@@ -592,7 +592,7 @@ function DetailView() {
                 </label>
               ))
             )}
-          </>
+          </div>
         )}
       </div>
 

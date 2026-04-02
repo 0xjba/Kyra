@@ -3,6 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+fn default_large_file_threshold() -> u64 { 100 }
+fn default_analyze_scan_depth() -> u32 { 8 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub dry_run: bool,
@@ -10,6 +13,10 @@ pub struct AppSettings {
     pub whitelist: Vec<String>,
     #[serde(default)]
     pub use_trash: bool,
+    #[serde(default = "default_large_file_threshold")]
+    pub large_file_threshold_mb: u64,
+    #[serde(default = "default_analyze_scan_depth")]
+    pub analyze_scan_depth: u32,
 }
 
 impl Default for AppSettings {
@@ -18,6 +25,8 @@ impl Default for AppSettings {
             dry_run: false,
             whitelist: Vec::new(),
             use_trash: false,
+            large_file_threshold_mb: default_large_file_threshold(),
+            analyze_scan_depth: default_analyze_scan_depth(),
         }
     }
 }
@@ -139,4 +148,19 @@ pub fn add_bytes_freed(bytes: u64) -> Result<u64, String> {
     let json = serde_json::to_string_pretty(&stats).map_err(|e| e.to_string())?;
     fs::write(stats_path(), json).map_err(|e| e.to_string())?;
     Ok(new_total)
+}
+
+#[tauri::command]
+pub fn reset_lifetime_stats() -> Result<(), String> {
+    CACHED_BYTES_FREED.store(0, Ordering::SeqCst);
+    let stats = LifetimeStats { total_bytes_freed: 0 };
+    let json = serde_json::to_string_pretty(&stats).map_err(|e| e.to_string())?;
+    fs::write(stats_path(), json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_storage_path() -> String {
+    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("com.kyra.app");
+    path.to_string_lossy().to_string()
 }

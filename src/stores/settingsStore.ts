@@ -14,6 +14,8 @@ interface SettingsStore {
   load: () => Promise<void>;
   setDryRun: (dryRun: boolean) => Promise<void>;
   setUseTrash: (useTrash: boolean) => Promise<void>;
+  setLargeFileThreshold: (mb: number) => Promise<void>;
+  setAnalyzeScanDepth: (depth: number) => Promise<void>;
   addWhitelist: (path: string) => Promise<void>;
   removeWhitelist: (path: string) => Promise<void>;
 }
@@ -22,6 +24,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   dry_run: false,
   whitelist: [],
   use_trash: false,
+  large_file_threshold_mb: 100,
+  analyze_scan_depth: 8,
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -45,6 +49,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setUseTrash: async (useTrash: boolean) => {
     const settings = { ...get().settings, use_trash: useTrash };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setLargeFileThreshold: async (mb: number) => {
+    const settings = { ...get().settings, large_file_threshold_mb: mb };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setAnalyzeScanDepth: async (depth: number) => {
+    const settings = { ...get().settings, analyze_scan_depth: depth };
     set({ settings });
     await saveSettings(settings);
   },

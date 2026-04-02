@@ -102,7 +102,10 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
         set({ progress });
       });
 
-      const root = await analyzePath(scanPath, 8);
+      // Use scan depth from settings, fallback to 8
+      const { useSettingsStore } = await import("./settingsStore");
+      const depth = useSettingsStore.getState().settings.analyze_scan_depth || 8;
+      const root = await analyzePath(scanPath, depth);
       set({
         phase: "ready",
         root,
@@ -212,7 +215,9 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
   loadLargeFiles: async () => {
     set({ largeFilesLoading: true });
     try {
-      const files = await findLargeFiles(100);
+      const { useSettingsStore } = await import("./settingsStore");
+      const threshold = useSettingsStore.getState().settings.large_file_threshold_mb || 100;
+      const files = await findLargeFiles(threshold);
       set({ largeFiles: files, largeFilesLoading: false });
     } catch {
       set({ largeFilesLoading: false });
