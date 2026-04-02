@@ -3,10 +3,10 @@ import {
   Trash2,
   Zap,
   Grid2x2Plus,
-  PieChart,
+  HardDrive,
   Activity,
   Package,
-  Disc,
+  Download,
   Settings as SettingsIcon,
 } from "lucide-react";
 import ModuleCard from "../components/ModuleCard";
@@ -101,7 +101,7 @@ export default function Home() {
         <ModuleCard
           title="Installers"
           description="Find .dmg, .pkg, .iso"
-          icon={Disc}
+          icon={Download}
           route="/installers"
           meta="Scan downloads"
         />
@@ -109,7 +109,7 @@ export default function Home() {
         <ModuleCard
           title="Analyze"
           description="Explore disk usage"
-          icon={PieChart}
+          icon={HardDrive}
           route="/analyze"
           meta="Scan to explore"
           style={{ gridColumn: "span 2" }}

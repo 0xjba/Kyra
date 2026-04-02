@@ -25,7 +25,7 @@ interface AnalyzeStore {
   breadcrumb: DirNode[];
   current: DirNode | null;
   progress: AnalyzeScanProgress | null;
-  viewMode: "sunburst" | "list";
+  viewMode: "treemap" | "list";
   activeTab: AnalyzeTab;
   error: string | null;
   scanCache: Record<string, ScanCache>;
@@ -40,7 +40,7 @@ interface AnalyzeStore {
   drillUp: () => void;
   drillToIndex: (index: number) => void;
   drillToRoot: () => void;
-  setViewMode: (mode: "sunburst" | "list") => void;
+  setViewMode: (mode: "treemap" | "list") => void;
   setActiveTab: (tab: AnalyzeTab) => void;
   reveal: (path: string) => void;
   reset: () => void;
@@ -73,7 +73,7 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
   breadcrumb: [],
   current: null,
   progress: null,
-  viewMode: "sunburst",
+  viewMode: "treemap",
   activeTab: "tree",
   error: null,
   scanCache: {},
@@ -147,7 +147,7 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
     }
   },
 
-  setViewMode: (mode: "sunburst" | "list") => {
+  setViewMode: (mode: "treemap" | "list") => {
     set({ viewMode: mode });
   },
 

@@ -44,10 +44,8 @@ export const useOptimizeStore = create<OptimizeStore>((set, get) => ({
   loadTasks: async () => {
     try {
       const tasks = await getOptimizeTasks();
-      // Default: enable all non-admin tasks
-      const enabledIds = new Set(
-        tasks.filter((t) => !t.needs_admin).map((t) => t.id)
-      );
+      // Default: none checked
+      const enabledIds = new Set<string>();
       const statuses: TaskStatusMap = {};
       for (const t of tasks) {
         statuses[t.id] = { status: "ready" };
