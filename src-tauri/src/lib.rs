@@ -14,7 +14,7 @@ pub fn run() {
         .manage(SystemMonitor(Mutex::new(System::new_all())))
         .manage(StatsStreamActive(Arc::new(AtomicBool::new(false))))
         .setup(|app| {
-            // Apply macOS vibrancy effect
+            // Apply macOS vibrancy effect & disable fullscreen (keep tiling)
             if let Some(window) = app.get_webview_window("main") {
                 use tauri::window::{Effect, EffectState, EffectsBuilder};
                 let _ = window.set_effects(
@@ -23,6 +23,19 @@ pub fn run() {
                         .state(EffectState::Active)
                         .build(),
                 );
+
+                // Disable fullscreen but keep green button for tiling/arrange
+                #[cfg(target_os = "macos")]
+                unsafe {
+                    use objc2::msg_send;
+                    use objc2::runtime::AnyObject;
+
+                    let ns_win = window.ns_window().unwrap() as *mut AnyObject;
+                    let behavior: u64 = msg_send![&*ns_win, collectionBehavior];
+                    // Remove FullScreenPrimary (1 << 7), add FullScreenAuxiliary (1 << 8)
+                    let new_behavior = (behavior & !(1 << 7)) | (1 << 8);
+                    let _: () = msg_send![&*ns_win, setCollectionBehavior: new_behavior];
+                }
             }
 
             let show_item = MenuItemBuilder::with_id("show", "Show Kyra").build(app)?;

@@ -1,6 +1,6 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 interface ModuleCardProps {
   title: string;
@@ -14,7 +14,7 @@ interface ModuleCardProps {
   style?: React.CSSProperties;
 }
 
-export default function ModuleCard({
+function ModuleCard({
   title,
   description,
   icon: Icon,
@@ -64,3 +64,5 @@ export default function ModuleCard({
     </div>
   );
 }
+
+export default memo(ModuleCard);

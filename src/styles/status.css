@@ -330,3 +330,37 @@
   text-align: right;
 }
 
+/* ── Skeleton Loading ── */
+.status-skeleton {
+  display: inline-block;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: status-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.status-skeleton-name {
+  width: 100px;
+  height: 12px;
+}
+
+.status-skeleton-cpu {
+  width: 36px;
+  height: 12px;
+  min-width: 48px;
+}
+
+.status-skeleton-mem {
+  width: 48px;
+  height: 12px;
+  min-width: 64px;
+}
+
+.status-skeleton-row {
+  opacity: 0.5;
+}
+
+@keyframes status-skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+

@@ -30,9 +30,11 @@ export default function Settings() {
   const [statsReset, setStatsReset] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     if (!loaded) load();
-    getStoragePath().then(setStoragePath).catch(() => {});
-    getTotalBytesFreed().then(setTotalFreed).catch(() => {});
+    getStoragePath().then((v) => { if (!cancelled) setStoragePath(v); }).catch(() => {});
+    getTotalBytesFreed().then((v) => { if (!cancelled) setTotalFreed(v); }).catch(() => {});
+    return () => { cancelled = true; };
   }, [loaded, load]);
 
   if (!loaded) return null;

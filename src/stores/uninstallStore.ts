@@ -165,6 +165,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
             failedAppPaths.add(app.path);
           }
           allErrors.push(...result.errors);
+          if (allErrors.length > 50) allErrors.length = 50;
         } catch (e) {
           failedAppPaths.add(app.path);
           allErrors.push(`${app.name}: ${String(e)}`);

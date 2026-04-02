@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, memo } from "react";
+import { useCallback, useEffect, useRef, useState, memo } from "react";
 import { Plug } from "lucide-react";
 import { useStatusStore } from "../stores/statusStore";
 import { formatSize } from "../utils/format";
@@ -116,7 +116,7 @@ const NetworkCard = memo(function NetworkCard() {
     ))
   );
 
-  function toPoints(data: number[]): string {
+  const toPoints = useCallback(function toPoints(data: number[]): string {
     if (data.length < 2) return "";
     return data
       .map((val, i) => {
@@ -125,7 +125,7 @@ const NetworkCard = memo(function NetworkCard() {
         return `${x},${y}`;
       })
       .join(" ");
-  }
+  }, [width, maxVal]);
 
   const dlPoints = toPoints(history.map((p) => p.download));
   const ulPoints = toPoints(history.map((p) => p.upload));
@@ -308,21 +308,27 @@ const TopProcesses = memo(function TopProcesses() {
     (s) => s.stats?.top_processes ?? EMPTY_PROCESSES
   );
 
-  if (processes.length === 0) return null;
-
   return (
     <div className="status-section">
       <div className="status-section-header">
         <span className="status-section-title">Top Processes</span>
       </div>
       <div className="status-process-card">
-        {processes.slice(0, 5).map((proc, i) => (
-          <div key={`${proc.name}-${i}`} className="status-process-row">
-            <span className="status-process-name">{proc.name}</span>
-            <span className="status-process-cpu">{proc.cpu.toFixed(1)}%</span>
-            <span className="status-process-mem">{formatSize(proc.memory)}</span>
-          </div>
-        ))}
+        {processes.length === 0
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="status-process-row status-skeleton-row">
+                <span className="status-skeleton status-skeleton-name" />
+                <span className="status-skeleton status-skeleton-cpu" />
+                <span className="status-skeleton status-skeleton-mem" />
+              </div>
+            ))
+          : processes.slice(0, 5).map((proc, i) => (
+              <div key={`${proc.name}-${i}`} className="status-process-row">
+                <span className="status-process-name">{proc.name}</span>
+                <span className="status-process-cpu">{proc.cpu.toFixed(1)}%</span>
+                <span className="status-process-mem">{formatSize(proc.memory)}</span>
+              </div>
+            ))}
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -5,8 +6,13 @@ use super::{is_safe_path, CleanProgress, CleanResult, ScanItem};
 use crate::commands::shared;
 
 /// Returns true if `path` (or any parent) is covered by a whitelisted entry.
-fn is_whitelisted(path: &str, whitelist: &[String]) -> bool {
-    whitelist.iter().any(|w| path == w || path.starts_with(&format!("{}/", w)))
+fn is_whitelisted(path: &str, whitelist: &HashSet<&str>) -> bool {
+    // O(1) exact match
+    if whitelist.contains(path) {
+        return true;
+    }
+    // Check if any whitelisted entry is a parent directory of path
+    whitelist.iter().any(|w| path.starts_with(&format!("{}/", w)))
 }
 
 /// Deletes all paths for the given scan items.
@@ -22,6 +28,7 @@ where
     F: FnMut(&CleanProgress),
 {
     let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
+    let whitelist_set: HashSet<&str> = settings.whitelist.iter().map(|s| s.as_str()).collect();
     let mut bytes_freed: u64 = 0;
     let mut items_cleaned: usize = 0;
     let mut errors: Vec<String> = Vec::new();
@@ -34,7 +41,7 @@ where
                 continue;
             }
 
-            if is_whitelisted(&path_info.path, &settings.whitelist) {
+            if is_whitelisted(&path_info.path, &whitelist_set) {
                 errors.push(format!("Skipped whitelisted path: {}", path_info.path));
                 continue;
             }

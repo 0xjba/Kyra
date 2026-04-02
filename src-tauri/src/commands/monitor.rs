@@ -255,8 +255,8 @@ pub async fn start_stats_stream(
                 cached_memory_pressure = parse_memory_pressure();
             }
 
-            // ── GPU info (very slow, every 60 ticks) ──
-            if tick_count % 60 == 1 {
+            // ── GPU info (very slow, every 300 ticks) ──
+            if tick_count % 300 == 1 {
                 let (gn, gv) = parse_gpu_info();
                 cached_gpu_name = gn;
                 cached_gpu_vram = gv;
@@ -271,8 +271,8 @@ pub async fn start_stats_stream(
                 cached_ssd_temp = st;
             }
 
-            // ── Top processes (every 2 ticks) ──
-            if tick_count % 2 == 0 {
+            // ── Top processes (every 5 ticks) ──
+            if tick_count % 5 == 0 {
                 sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
                 cached_top_processes = get_top_processes(&sys);
             }
