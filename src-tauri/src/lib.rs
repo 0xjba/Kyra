@@ -46,6 +46,7 @@ pub fn run() {
                 .build()?;
 
             TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().cloned().unwrap())
                 .tooltip("Kyra")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -73,6 +74,10 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::monitor::get_system_stats,
             commands::monitor::start_stats_stream,

@@ -8,6 +8,21 @@
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/0xjba/Kyra/releases/latest/download/latest.json"],
+      "pubkey": ""
+    }
+  },
+  "bundle": {
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.png",
+      "icons/128x128.png",
+      "icons/256x256.png",
+      "icons/512x512.png"
+    ]
+  },
   "app": {
     "macOSPrivateApi": true,
     "windows": [

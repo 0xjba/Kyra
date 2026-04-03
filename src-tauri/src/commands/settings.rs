@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 fn default_large_file_threshold() -> u64 { 100 }
 fn default_analyze_scan_depth() -> u32 { 8 }
+fn default_true() -> bool { true }
+fn default_low_disk_threshold() -> u64 { 10 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -17,6 +19,16 @@ pub struct AppSettings {
     pub large_file_threshold_mb: u64,
     #[serde(default = "default_analyze_scan_depth")]
     pub analyze_scan_depth: u32,
+    #[serde(default)]
+    pub launch_at_login: bool,
+    #[serde(default = "default_true")]
+    pub check_for_updates: bool,
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
+    #[serde(default = "default_low_disk_threshold")]
+    pub low_disk_threshold_gb: u64,
+    #[serde(default)]
+    pub onboarding_completed: bool,
 }
 
 impl Default for AppSettings {
@@ -27,6 +39,11 @@ impl Default for AppSettings {
             use_trash: false,
             large_file_threshold_mb: default_large_file_threshold(),
             analyze_scan_depth: default_analyze_scan_depth(),
+            launch_at_login: false,
+            check_for_updates: default_true(),
+            notifications_enabled: default_true(),
+            low_disk_threshold_gb: default_low_disk_threshold(),
+            onboarding_completed: false,
         }
     }
 }

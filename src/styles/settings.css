@@ -286,6 +286,14 @@ label.settings-row:hover {
   text-align: center;
 }
 
+.settings-about-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  image-rendering: pixelated;
+}
+
 .settings-about-name {
   font-size: var(--font-xl);
   font-weight: var(--weight-semibold);

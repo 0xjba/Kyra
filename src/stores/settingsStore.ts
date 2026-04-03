@@ -16,6 +16,11 @@ interface SettingsStore {
   setUseTrash: (useTrash: boolean) => Promise<void>;
   setLargeFileThreshold: (mb: number) => Promise<void>;
   setAnalyzeScanDepth: (depth: number) => Promise<void>;
+  setLaunchAtLogin: (enabled: boolean) => Promise<void>;
+  setCheckForUpdates: (enabled: boolean) => Promise<void>;
+  setNotificationsEnabled: (enabled: boolean) => Promise<void>;
+  setLowDiskThreshold: (gb: number) => Promise<void>;
+  setOnboardingCompleted: (completed: boolean) => Promise<void>;
   addWhitelist: (path: string) => Promise<void>;
   removeWhitelist: (path: string) => Promise<void>;
 }
@@ -26,6 +31,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   use_trash: false,
   large_file_threshold_mb: 100,
   analyze_scan_depth: 8,
+  launch_at_login: false,
+  check_for_updates: true,
+  notifications_enabled: true,
+  low_disk_threshold_gb: 10,
+  onboarding_completed: false,
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -61,6 +71,36 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setAnalyzeScanDepth: async (depth: number) => {
     const settings = { ...get().settings, analyze_scan_depth: depth };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setLaunchAtLogin: async (enabled: boolean) => {
+    const settings = { ...get().settings, launch_at_login: enabled };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setCheckForUpdates: async (enabled: boolean) => {
+    const settings = { ...get().settings, check_for_updates: enabled };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setNotificationsEnabled: async (enabled: boolean) => {
+    const settings = { ...get().settings, notifications_enabled: enabled };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setLowDiskThreshold: async (gb: number) => {
+    const settings = { ...get().settings, low_disk_threshold_gb: gb };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setOnboardingCompleted: async (completed: boolean) => {
+    const settings = { ...get().settings, onboarding_completed: completed };
     set({ settings });
     await saveSettings(settings);
   },

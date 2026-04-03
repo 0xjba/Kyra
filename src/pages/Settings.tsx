@@ -6,11 +6,16 @@ import {
   getTotalBytesFreed,
   pickFolder,
 } from "../lib/tauri";
+import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { formatSize } from "../utils/format";
+import logoSrc from "../assets/logo.png";
 import "../styles/settings.css";
 
 const LARGE_FILE_OPTIONS = [50, 100, 250, 500, 1000];
 const SCAN_DEPTH_OPTIONS = [4, 6, 8, 10, 12];
+const LOW_DISK_OPTIONS = [5, 10, 15, 20, 25];
 
 export default function Settings() {
   const settings = useSettingsStore((s) => s.settings);
@@ -20,6 +25,10 @@ export default function Settings() {
   const setUseTrash = useSettingsStore((s) => s.setUseTrash);
   const setLargeFileThreshold = useSettingsStore((s) => s.setLargeFileThreshold);
   const setAnalyzeScanDepth = useSettingsStore((s) => s.setAnalyzeScanDepth);
+  const setLaunchAtLogin = useSettingsStore((s) => s.setLaunchAtLogin);
+  const setCheckForUpdates = useSettingsStore((s) => s.setCheckForUpdates);
+  const setNotificationsEnabled = useSettingsStore((s) => s.setNotificationsEnabled);
+  const setLowDiskThreshold = useSettingsStore((s) => s.setLowDiskThreshold);
   const addWhitelist = useSettingsStore((s) => s.addWhitelist);
   const removeWhitelist = useSettingsStore((s) => s.removeWhitelist);
 
@@ -28,6 +37,8 @@ export default function Settings() {
   const [storagePath, setStoragePath] = useState("");
   const [totalFreed, setTotalFreed] = useState(0);
   const [statsReset, setStatsReset] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date">("idle");
+  const [autoStartSynced, setAutoStartSynced] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +48,60 @@ export default function Settings() {
     return () => { cancelled = true; };
   }, [loaded, load]);
 
+  // Sync autostart toggle with actual OS state on mount
+  useEffect(() => {
+    if (loaded && !autoStartSynced) {
+      isEnabled().then((enabled) => {
+        if (enabled !== settings.launch_at_login) {
+          setLaunchAtLogin(enabled);
+        }
+        setAutoStartSynced(true);
+      }).catch(() => setAutoStartSynced(true));
+    }
+  }, [loaded, autoStartSynced, settings.launch_at_login, setLaunchAtLogin]);
+
   if (!loaded) return null;
+
+  const handleAutoStartToggle = async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        await enable();
+      } else {
+        await disable();
+      }
+      await setLaunchAtLogin(enabled);
+    } catch {
+      // Revert on failure
+    }
+  };
+
+  const handleCheckForUpdate = async () => {
+    setUpdateStatus("checking");
+    try {
+      const update = await check();
+      if (update) {
+        setUpdateStatus("available");
+      } else {
+        setUpdateStatus("up-to-date");
+        setTimeout(() => setUpdateStatus("idle"), 3000);
+      }
+    } catch {
+      setUpdateStatus("idle");
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    setUpdateStatus("downloading");
+    try {
+      const update = await check();
+      if (update) {
+        await update.downloadAndInstall();
+        await relaunch();
+      }
+    } catch {
+      setUpdateStatus("idle");
+    }
+  };
 
   const handleAddPath = async () => {
     const trimmed = newPath.trim();
@@ -73,7 +137,14 @@ export default function Settings() {
       use_trash: false,
       large_file_threshold_mb: 100,
       analyze_scan_depth: 8,
+      launch_at_login: false,
+      check_for_updates: true,
+      notifications_enabled: true,
+      low_disk_threshold_gb: 10,
+      onboarding_completed: false,
     };
+    // Also disable autostart if it was enabled
+    try { await disable(); } catch {}
     await saveSettings(defaults);
     await load();
   };
@@ -87,6 +158,18 @@ export default function Settings() {
       <div className="settings-section">
         <div className="settings-section-label">General</div>
         <div className="settings-card">
+          <label className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Launch at Login</div>
+              <div className="settings-row-desc">Start Kyra automatically when you log in</div>
+            </div>
+            <input
+              type="checkbox"
+              className="settings-toggle"
+              checked={settings.launch_at_login}
+              onChange={(e) => handleAutoStartToggle(e.target.checked)}
+            />
+          </label>
           <label className="settings-row">
             <div className="settings-row-info">
               <div className="settings-row-name">Move to Trash</div>
@@ -151,6 +234,82 @@ export default function Settings() {
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Notifications & Updates ── */}
+      <div className="settings-section">
+        <div className="settings-section-label">Notifications & Updates</div>
+        <div className="settings-card">
+          <label className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Notifications</div>
+              <div className="settings-row-desc">Enable system notifications for alerts</div>
+            </div>
+            <input
+              type="checkbox"
+              className="settings-toggle"
+              checked={settings.notifications_enabled}
+              onChange={(e) => setNotificationsEnabled(e.target.checked)}
+            />
+          </label>
+          <label className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Check for Updates</div>
+              <div className="settings-row-desc">Automatically check for updates on launch</div>
+            </div>
+            <input
+              type="checkbox"
+              className="settings-toggle"
+              checked={settings.check_for_updates}
+              onChange={(e) => setCheckForUpdates(e.target.checked)}
+            />
+          </label>
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Low Disk Space Alert</div>
+              <div className="settings-row-desc">Warn when free space drops below threshold</div>
+            </div>
+            <select
+              className="settings-select"
+              value={settings.low_disk_threshold_gb}
+              onChange={(e) => setLowDiskThreshold(Number(e.target.value))}
+            >
+              {LOW_DISK_OPTIONS.map((gb) => (
+                <option key={gb} value={gb}>
+                  {gb} GB
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Software Update</div>
+              <div className="settings-row-desc">
+                {updateStatus === "checking" ? "Checking..." :
+                 updateStatus === "available" ? "Update available" :
+                 updateStatus === "downloading" ? "Downloading..." :
+                 updateStatus === "up-to-date" ? "You're up to date" :
+                 "Check for the latest version"}
+              </div>
+            </div>
+            {updateStatus === "available" ? (
+              <button className="btn settings-btn-sm" onClick={handleDownloadUpdate}>
+                Update
+              </button>
+            ) : (
+              <button
+                className="btn settings-btn-sm"
+                onClick={handleCheckForUpdate}
+                disabled={updateStatus === "checking" || updateStatus === "downloading"}
+              >
+                {updateStatus === "checking" ? "Checking" :
+                 updateStatus === "downloading" ? "Installing" :
+                 updateStatus === "up-to-date" ? "Up to date" :
+                 "Check Now"}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -261,6 +420,7 @@ export default function Settings() {
       <div className="settings-section">
         <div className="settings-section-label">About</div>
         <div className="settings-card settings-about">
+          <img src={logoSrc} alt="Kyra" className="settings-about-logo" />
           <div className="settings-about-name">Kyra</div>
           <div className="settings-about-version">v0.1.0</div>
           <div className="settings-about-desc">macOS Cleaner & Optimizer</div>

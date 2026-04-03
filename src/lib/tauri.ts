@@ -416,6 +416,11 @@ export interface AppSettings {
   use_trash: boolean;
   large_file_threshold_mb: number;
   analyze_scan_depth: number;
+  launch_at_login: boolean;
+  check_for_updates: boolean;
+  notifications_enabled: boolean;
+  low_disk_threshold_gb: number;
+  onboarding_completed: boolean;
 }
 
 export async function loadSettings(): Promise<AppSettings> {
