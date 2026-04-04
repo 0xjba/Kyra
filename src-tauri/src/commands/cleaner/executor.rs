@@ -4,6 +4,7 @@ use std::path::Path;
 
 use super::{is_safe_path, CleanProgress, CleanResult, ScanItem};
 use crate::commands::shared;
+use crate::commands::utils::dir_size;
 
 /// Returns true if `path` (or any parent) is covered by a whitelisted entry.
 fn is_whitelisted(path: &str, whitelist: &HashSet<&str>) -> bool {
@@ -13,6 +14,57 @@ fn is_whitelisted(path: &str, whitelist: &HashSet<&str>) -> bool {
     }
     // Check if any whitelisted entry is a parent directory of path
     whitelist.iter().any(|w| path.starts_with(&format!("{}/", w)))
+}
+
+/// Delete the contents of a directory without removing the directory itself.
+/// Returns (bytes_freed, errors).
+fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<String>) {
+    let mut freed: u64 = 0;
+    let mut errs: Vec<String> = Vec::new();
+
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            errs.push(format!("{}: {}", dir.display(), e));
+            return (freed, errs);
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_symlink() {
+            continue;
+        }
+
+        let size = if path.is_dir() {
+            dir_size(&path)
+        } else {
+            path.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+
+        let result = if permanent {
+            if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            }
+        } else {
+            trash::delete(&path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        };
+
+        match result {
+            Ok(()) => {
+                freed += size;
+                let action = if permanent { "DELETED" } else { "TRASHED" };
+                shared::log_operation("CLEAN", &path.to_string_lossy(), action);
+            }
+            Err(e) => {
+                errs.push(format!("{}: {}", path.display(), e));
+            }
+        }
+    }
+
+    (freed, errs)
 }
 
 /// Deletes all paths for the given scan items.
@@ -32,9 +84,12 @@ where
     let mut bytes_freed: u64 = 0;
     let mut items_cleaned: usize = 0;
     let mut errors: Vec<String> = Vec::new();
+    let mut cleaned_ids: Vec<String> = Vec::new();
     let items_total = items.len();
 
     for (i, item) in items.iter().enumerate() {
+        let mut item_had_success = false;
+
         for path_info in &item.paths {
             if !is_safe_path(&path_info.path) {
                 errors.push(format!("Skipped protected path: {}", path_info.path));
@@ -48,36 +103,54 @@ where
 
             if dry_run {
                 bytes_freed += path_info.size;
+                item_had_success = true;
             } else {
                 let path = Path::new(&path_info.path);
-                let delete_result = if permanent {
-                    if path_info.is_dir {
-                        fs::remove_dir_all(path)
-                    } else {
-                        fs::remove_file(path)
+
+                // For directories that are top-level containers (e.g. ~/Library/Caches),
+                // delete contents instead of the directory itself to avoid permission errors
+                // from macOS locking the parent directory.
+                if path_info.is_dir && is_container_dir(&path_info.path) {
+                    let (freed, errs) = delete_dir_contents(path, permanent);
+                    if freed > 0 {
+                        bytes_freed += freed;
+                        item_had_success = true;
                     }
+                    errors.extend(errs);
                 } else {
-                    trash::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                };
-                match delete_result {
-                    Ok(()) => {
-                        bytes_freed += path_info.size;
-                        let action = if permanent { "DELETED" } else { "TRASHED" };
-                        shared::log_operation("CLEAN", &path_info.path, action);
-                    }
-                    Err(e) => {
-                        shared::log_operation("CLEAN", &path_info.path, &format!("ERROR: {}", e));
-                        errors.push(format!("{}: {}", path_info.path, e));
+                    let delete_result = if permanent {
+                        if path_info.is_dir {
+                            fs::remove_dir_all(path)
+                        } else {
+                            fs::remove_file(path)
+                        }
+                    } else {
+                        trash::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    };
+                    match delete_result {
+                        Ok(()) => {
+                            bytes_freed += path_info.size;
+                            item_had_success = true;
+                            let action = if permanent { "DELETED" } else { "TRASHED" };
+                            shared::log_operation("CLEAN", &path_info.path, action);
+                        }
+                        Err(e) => {
+                            shared::log_operation("CLEAN", &path_info.path, &format!("ERROR: {}", e));
+                            errors.push(format!("{}: {}", path_info.path, e));
+                        }
                     }
                 }
             }
         }
 
-        items_cleaned = i + 1;
+        if item_had_success {
+            items_cleaned += 1;
+            cleaned_ids.push(item.rule_id.clone());
+        }
 
         on_progress(&CleanProgress {
             current_item: item.label.clone(),
-            items_done: items_cleaned,
+            items_done: i + 1,
             items_total,
             bytes_freed,
         });
@@ -87,5 +160,25 @@ where
         items_cleaned,
         bytes_freed,
         errors,
+        cleaned_ids,
     }
+}
+
+/// Returns true if the path is a well-known container directory whose contents
+/// should be deleted rather than the directory itself (macOS recreates these).
+fn is_container_dir(path: &str) -> bool {
+    let home = match dirs::home_dir() {
+        Some(h) => h.to_string_lossy().to_string(),
+        None => return false,
+    };
+
+    let containers = [
+        format!("{}/Library/Caches", home),
+        format!("{}/Library/Logs", home),
+        "/Library/Caches".to_string(),
+        "/Library/Logs".to_string(),
+        "/private/var/log".to_string(),
+    ];
+
+    containers.iter().any(|c| path == c.as_str())
 }

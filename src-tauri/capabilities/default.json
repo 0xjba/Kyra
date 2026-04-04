@@ -17,6 +17,12 @@
     "updater:allow-download-and-install",
     "updater:default",
     "process:allow-restart",
-    "process:allow-exit"
+    "process:allow-exit",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://github.com/*" }
+      ]
+    }
   ]
 }

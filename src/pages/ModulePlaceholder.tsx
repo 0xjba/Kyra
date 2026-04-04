@@ -6,7 +6,7 @@ const MODULE_NAMES: Record<string, string> = {
   uninstall: "Uninstall",
   analyze: "Analyze",
   status: "Status",
-  purge: "Purge",
+  prune: "Prune",
   installers: "Installers",
 };
 

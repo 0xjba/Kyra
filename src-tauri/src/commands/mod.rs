@@ -3,7 +3,7 @@ pub mod cleaner;
 pub mod monitor;
 pub mod optimizer;
 pub mod installers;
-pub mod purger;
+pub mod pruner;
 pub mod settings;
 pub mod shared;
 pub mod uninstaller;

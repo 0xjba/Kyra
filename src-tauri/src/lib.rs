@@ -78,6 +78,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::monitor::get_system_stats,
             commands::monitor::start_stats_stream,
@@ -93,8 +94,8 @@ pub fn run() {
             commands::analyzer::reveal_in_finder,
             commands::analyzer::delete_analyzed_item,
             commands::analyzer::find_large_files,
-            commands::purger::scan_artifacts,
-            commands::purger::execute_purge,
+            commands::pruner::scan_artifacts,
+            commands::pruner::execute_prune,
             commands::installers::scan_installers,
             commands::installers::delete_installers,
             commands::settings::load_settings,

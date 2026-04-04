@@ -99,7 +99,7 @@ export default function Home() {
 
         <ModuleCard
           title="Status"
-          description=""
+          description="CPU, memory, disk, & network"
           icon={Activity}
           route="/status"
           meta="Live monitoring"
@@ -114,10 +114,10 @@ export default function Home() {
         />
 
         <ModuleCard
-          title="Purge"
-          description="Project build artifacts"
+          title="Prune"
+          description="Developer artifacts"
           icon={Package}
-          route="/purge"
+          route="/prune"
           meta="node_modules, dist, target"
         />
 

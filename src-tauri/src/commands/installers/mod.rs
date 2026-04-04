@@ -26,6 +26,7 @@ pub struct InstallerResult {
     pub items_removed: usize,
     pub bytes_freed: u64,
     pub errors: Vec<String>,
+    pub deleted_paths: Vec<String>,
 }
 
 #[tauri::command]
@@ -50,5 +51,6 @@ pub async fn delete_installers(
         items_removed: 0,
         bytes_freed: 0,
         errors: vec![format!("Task panicked: {}", e)],
+        deleted_paths: Vec::new(),
     })
 }

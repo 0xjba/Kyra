@@ -13,8 +13,6 @@ const QUICK_PATHS = [
   { path: "/Users", label: "Users" },
 ];
 
-// Add home dir dynamically
-const home = "/Users/" + (typeof window !== "undefined" ? window.__TAURI_INTERNALS__?.metadata?.currentDir?.split("/")[2] : "");
 
 function IdleView() {
   const scanPath = useAnalyzeStore((s) => s.scanPath);

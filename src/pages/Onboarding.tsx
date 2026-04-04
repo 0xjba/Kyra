@@ -9,9 +9,18 @@ import cat4 from "../assets/cat-tail/cat4.png";
 import cat5 from "../assets/cat-tail/cat5.png";
 import cat6 from "../assets/cat-tail/cat6.png";
 import cat7 from "../assets/cat-tail/cat7.png";
+import walk1 from "../assets/cat-walking/cat_walking_01.png";
+import walk2 from "../assets/cat-walking/cat_walking_02.png";
+import walk3 from "../assets/cat-walking/cat_walking_03.png";
+import walk4 from "../assets/cat-walking/cat_walking_04.png";
+import walk5 from "../assets/cat-walking/cat_walking_05.png";
+import DemoPlayer, { DEMO_STORAGE_SEGMENTS } from "../components/DemoPlayer";
+import FdaMockup from "../components/FdaMockup";
 import "../styles/onboarding.css";
+import "../styles/settings.css";
 
 const CAT_FRAMES = [cat1, cat2, cat3, cat4, cat5, cat6, cat7, cat6, cat5, cat4, cat3, cat2];
+const WALK_FRAMES = [walk1, walk2, walk3, walk4, walk5, walk4, walk3, walk2];
 
 const STEPS = 5;
 
@@ -19,7 +28,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<"forward" | "backward">("forward");
   const [fdaGranted, setFdaGranted] = useState<boolean | null>(null);
-  const [notifStatus, setNotifStatus] = useState<"idle" | "granted" | "denied">("idle");
+  const [demoStorageUsed, setDemoStorageUsed] = useState(249);
 
   // Local prefs — saved atomically on completion
   const [launchAtLogin, setLaunchAtLoginLocal] = useState(false);
@@ -37,6 +46,7 @@ export default function Onboarding() {
   const [catFrame, setCatFrame] = useState(0);
   const [nextFrame, setNextFrame] = useState(1);
   const [fadeProgress, setFadeProgress] = useState(0);
+  const [walkFrame, setWalkFrame] = useState(0);
 
   // Sprite animation — crossfade between frames
   useEffect(() => {
@@ -60,6 +70,15 @@ export default function Onboarding() {
         setFadeProgress(0);
       }
     }, stepMs);
+    return () => clearInterval(id);
+  }, [step]);
+
+  // Walk sprite animation
+  useEffect(() => {
+    if (step !== 4) return;
+    const id = setInterval(() => {
+      setWalkFrame((f) => (f + 1) % WALK_FRAMES.length);
+    }, 120);
     return () => clearInterval(id);
   }, [step]);
 
@@ -112,24 +131,6 @@ export default function Onboarding() {
     setStep((s) => Math.max(s - 1, 0));
   };
 
-  const handleRequestNotifs = async () => {
-    try {
-      const { isPermissionGranted, requestPermission } = await import(
-        "@tauri-apps/plugin-notification"
-      );
-      let granted = await isPermissionGranted();
-      if (!granted) {
-        const result = await requestPermission();
-        granted = result === "granted";
-      }
-      setNotifStatus(granted ? "granted" : "denied");
-      setNotificationsEnabledLocal(granted);
-    } catch {
-      setNotifStatus("denied");
-      setNotificationsEnabledLocal(false);
-    }
-  };
-
   const handleComplete = async () => {
     await setUseTrash(useTrash);
     await setCheckForUpdates(checkUpdates);
@@ -168,81 +169,57 @@ export default function Onboarding() {
     </div>
   );
 
-  // ── Screen 1: Features ──
-  const renderFeatures = () => (
-    <div className={`onboarding-slide ${direction}`} key="features">
-      <div className="onboarding-heading">What Kyra Does</div>
-      <div className="onboarding-desc">
-        Everything you need to keep your Mac fast, clean, and clutter-free.
+  // ── Screen 1: Features (Live Demo) ──
+  const renderFeatures = () => {
+    const diskTotal = 249;
+    const freeGB = diskTotal - demoStorageUsed;
+    const freePct = Math.max((freeGB / diskTotal) * 100, 0);
+
+    return (
+      <div className={`onboarding-slide ${direction}`} key="features">
+        <div className="onboarding-heading">See Kyra in Action</div>
+        <div className="onboarding-desc">
+          Watch how Kyra frees up your storage in seconds.
+        </div>
+
+        <div className="onboarding-storage-wrapper">
+          <div className="onboarding-storage-track">
+            {DEMO_STORAGE_SEGMENTS.map((seg, i) => {
+              const pct = (seg.ratio * demoStorageUsed / diskTotal) * 100;
+              return (
+                <div
+                  key={seg.label}
+                  className="onboarding-storage-segment"
+                  style={{
+                    width: `${Math.max(pct, 0.5)}%`,
+                    background: `linear-gradient(90deg, color-mix(in srgb, ${seg.color}, white 25%) 0%, ${seg.color} 100%)`,
+                    borderRadius:
+                      i === 0 && i === DEMO_STORAGE_SEGMENTS.length - 1
+                        ? "4px"
+                        : i === 0
+                          ? "4px 0 0 4px"
+                          : i === DEMO_STORAGE_SEGMENTS.length - 1
+                            ? "0 4px 4px 0"
+                            : "0",
+                  }}
+                />
+              );
+            })}
+            <div
+              className="onboarding-storage-segment onboarding-storage-free"
+              style={{ width: `${freePct}%`, borderRadius: "0 4px 4px 0" }}
+            />
+          </div>
+          <div className="onboarding-storage-info">
+            <span className="onboarding-storage-disk">Macintosh HD</span>
+            <span className="onboarding-storage-label">{demoStorageUsed} GB used of {diskTotal} GB</span>
+          </div>
+        </div>
+
+        <DemoPlayer onStorageChange={setDemoStorageUsed} />
       </div>
-
-      <div className="onboarding-features-grid">
-        <div className="onboarding-feature">
-          <div className="onboarding-feature-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-            </svg>
-          </div>
-          <div className="onboarding-feature-name">Clean</div>
-          <div className="onboarding-feature-desc">Remove caches, logs & junk files</div>
-        </div>
-
-        <div className="onboarding-feature">
-          <div className="onboarding-feature-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-          </div>
-          <div className="onboarding-feature-name">Optimize</div>
-          <div className="onboarding-feature-desc">Speed up your Mac in one click</div>
-        </div>
-
-        <div className="onboarding-feature">
-          <div className="onboarding-feature-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <path d="M8 21h8M12 17v4" />
-            </svg>
-          </div>
-          <div className="onboarding-feature-name">Monitor</div>
-          <div className="onboarding-feature-desc">Real-time CPU, memory & disk stats</div>
-        </div>
-
-        <div className="onboarding-feature">
-          <div className="onboarding-feature-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 4H8l-7 8 7 8h13a2 2 0 002-2V6a2 2 0 00-2-2z" />
-              <line x1="18" y1="9" x2="12" y2="15" />
-              <line x1="12" y1="9" x2="18" y2="15" />
-            </svg>
-          </div>
-          <div className="onboarding-feature-name">Uninstall</div>
-          <div className="onboarding-feature-desc">Fully remove apps & leftovers</div>
-        </div>
-
-        <div className="onboarding-feature">
-          <div className="onboarding-feature-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-          </div>
-          <div className="onboarding-feature-name">Analyze</div>
-          <div className="onboarding-feature-desc">Visualize what's eating your disk</div>
-        </div>
-
-        <div className="onboarding-feature">
-          <div className="onboarding-feature-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
-            </svg>
-          </div>
-          <div className="onboarding-feature-name">Purge</div>
-          <div className="onboarding-feature-desc">Delete dev build artifacts</div>
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   // ── Screen 2: Full Disk Access ──
   const renderFda = () => (
@@ -253,37 +230,19 @@ export default function Onboarding() {
         Full Disk Access.
       </div>
 
-      <div className="onboarding-steps">
-        <div className="onboarding-step">
-          <span className="onboarding-step-num">1</span>
-          <span>Click "Open System Settings" below</span>
-        </div>
-        <div className="onboarding-step">
-          <span className="onboarding-step-num">2</span>
-          <span>Find Kyra in the list and toggle it on</span>
-        </div>
-        <div className="onboarding-step">
-          <span className="onboarding-step-num">3</span>
-          <span>Come back here — we'll detect it automatically</span>
-        </div>
+      <FdaMockup />
+
+      <div className="onboarding-fda-hint">
+        Open System Settings, scroll to see Kyra &amp; enable it
       </div>
 
-      <button className="btn btn-primary" onClick={openFdaSettings}>
-        Open System Settings
+      <button
+        className="btn btn-primary"
+        onClick={fdaGranted ? undefined : openFdaSettings}
+        disabled={!!fdaGranted}
+      >
+        {fdaGranted ? "Access Granted" : "Open System Settings"}
       </button>
-
-      <div className="onboarding-status">
-        <div
-          className={`onboarding-status-dot ${fdaGranted ? "granted" : "pending"}`}
-        />
-        <span className="onboarding-status-text">
-          {fdaGranted === null
-            ? "Checking..."
-            : fdaGranted
-              ? "Access Granted"
-              : "Not Yet Granted"}
-        </span>
-      </div>
     </div>
   );
 
@@ -293,8 +252,8 @@ export default function Onboarding() {
       <div className="onboarding-heading">Quick Setup</div>
       <div className="onboarding-prefs-note">You can always change these in Settings</div>
 
-      <div className="onboarding-prefs-card">
-        <label className="settings-row">
+      <div className="onboarding-prefs-list">
+        <label className="onboarding-pref-item">
           <div className="settings-row-info">
             <div className="settings-row-name">Launch at Login</div>
             <div className="settings-row-desc">Start Kyra when you log in</div>
@@ -306,19 +265,7 @@ export default function Onboarding() {
             onChange={(e) => setLaunchAtLoginLocal(e.target.checked)}
           />
         </label>
-        <label className="settings-row">
-          <div className="settings-row-info">
-            <div className="settings-row-name">Check for Updates</div>
-            <div className="settings-row-desc">Automatically check on launch</div>
-          </div>
-          <input
-            type="checkbox"
-            className="settings-toggle"
-            checked={checkUpdates}
-            onChange={(e) => setCheckUpdatesLocal(e.target.checked)}
-          />
-        </label>
-        <label className="settings-row">
+        <label className="onboarding-pref-item">
           <div className="settings-row-info">
             <div className="settings-row-name">Move to Trash</div>
             <div className="settings-row-desc">Send files to Trash instead of deleting</div>
@@ -330,21 +277,30 @@ export default function Onboarding() {
             onChange={(e) => setUseTrashLocal(e.target.checked)}
           />
         </label>
-        <div className="settings-row">
+        <label className="onboarding-pref-item">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Check for Updates</div>
+            <div className="settings-row-desc">Automatically check on launch</div>
+          </div>
+          <input
+            type="checkbox"
+            className="settings-toggle"
+            checked={checkUpdates}
+            onChange={(e) => setCheckUpdatesLocal(e.target.checked)}
+          />
+        </label>
+        <label className="onboarding-pref-item">
           <div className="settings-row-info">
             <div className="settings-row-name">Notifications</div>
             <div className="settings-row-desc">Low disk space & update alerts</div>
           </div>
-          {notifStatus === "idle" ? (
-            <button className="btn settings-btn-sm" onClick={handleRequestNotifs}>
-              Enable
-            </button>
-          ) : (
-            <span className={`onboarding-inline-status ${notifStatus === "granted" ? "granted" : ""}`}>
-              {notifStatus === "granted" ? "Enabled" : "Denied"}
-            </span>
-          )}
-        </div>
+          <input
+            type="checkbox"
+            className="settings-toggle"
+            checked={notificationsEnabled}
+            onChange={(e) => setNotificationsEnabledLocal(e.target.checked)}
+          />
+        </label>
       </div>
     </div>
   );
@@ -352,39 +308,14 @@ export default function Onboarding() {
   // ── Screen 4: Done ──
   const renderDone = () => (
     <div className={`onboarding-slide ${direction}`} key="done">
-      <div className="onboarding-check-circle">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path className="onboarding-check-path" d="M5 12l5 5L19 7" />
-        </svg>
+      <div className="onboarding-walk-cat">
+        <img src={WALK_FRAMES[walkFrame]} alt="Kyra walking" />
       </div>
-      <div className="onboarding-heading">You're All Set</div>
-      <div className="onboarding-desc">Kyra is ready to keep your Mac clean and fast.</div>
-
-      <div className="onboarding-summary">
-        <div className="onboarding-summary-row">
-          <span className="onboarding-summary-label">Full Disk Access</span>
-          <span className="onboarding-summary-value">
-            {fdaGranted ? "Granted" : "Limited"}
-          </span>
-        </div>
-        <div className="onboarding-summary-row">
-          <span className="onboarding-summary-label">Notifications</span>
-          <span className="onboarding-summary-value">
-            {notifStatus === "granted" ? "Enabled" : "Skipped"}
-          </span>
-        </div>
-        <div className="onboarding-summary-row">
-          <span className="onboarding-summary-label">Launch at Login</span>
-          <span className="onboarding-summary-value">
-            {launchAtLogin ? "On" : "Off"}
-          </span>
-        </div>
-        <div className="onboarding-summary-row">
-          <span className="onboarding-summary-label">Auto Updates</span>
-          <span className="onboarding-summary-value">
-            {checkUpdates ? "On" : "Off"}
-          </span>
-        </div>
+      <div className="onboarding-heading">Kyra's on paw-trol</div>
+      <div className="onboarding-desc">
+        She grooms your caches clean. Hunts down stale builds.
+        {"\n"}Chases out forgotten apps & keeps one eye on your disk
+        {"\n"}Purr-manently.
       </div>
     </div>
   );
@@ -420,7 +351,7 @@ export default function Onboarding() {
           )}
           {step > 0 && step < STEPS - 1 && (
             <button className="btn btn-primary" onClick={goNext}>
-              Next
+              {step === 2 && !fdaGranted ? "Skip" : "Next"}
             </button>
           )}
           {step === STEPS - 1 && (

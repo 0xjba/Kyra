@@ -102,6 +102,7 @@ export interface CleanResult {
   items_cleaned: number;
   bytes_freed: number;
   errors: string[];
+  cleaned_ids: string[];
 }
 
 // ── Clean Module Commands ───────────────────────────────
@@ -208,6 +209,7 @@ export interface UninstallResult {
   items_removed: number;
   bytes_freed: number;
   errors: string[];
+  deleted_paths: string[];
 }
 
 // ── Uninstall Module Commands ─────────────────────────────
@@ -305,7 +307,7 @@ export async function findLargeFiles(minSizeMb: number): Promise<LargeFile[]> {
   return invoke<LargeFile[]>("find_large_files", { minSizeMb });
 }
 
-// ── Purge Module Types ──────────────────────────────────
+// ── Prune Module Types ──────────────────────────────────
 
 export interface ArtifactEntry {
   project_name: string;
@@ -315,50 +317,51 @@ export interface ArtifactEntry {
   size: number;
 }
 
-export interface PurgeScanProgress {
+export interface PruneScanProgress {
   current_path: string;
   artifacts_found: number;
 }
 
-export interface PurgeProgress {
+export interface PruneProgress {
   current_item: string;
   items_done: number;
   items_total: number;
   bytes_freed: number;
 }
 
-export interface PurgeResult {
+export interface PruneResult {
   items_removed: number;
   bytes_freed: number;
   errors: string[];
+  cleaned_paths: string[];
 }
 
-// ── Purge Module Commands ───────────────────────────────
+// ── Prune Module Commands ───────────────────────────────
 
 export async function scanArtifacts(rootPath: string): Promise<ArtifactEntry[]> {
   return invoke<ArtifactEntry[]>("scan_artifacts", { rootPath });
 }
 
-export async function executePurge(
+export async function executePrune(
   artifactPaths: string[],
   dryRun: boolean,
   permanent: boolean
-): Promise<PurgeResult> {
-  return invoke<PurgeResult>("execute_purge", { artifactPaths, dryRun, permanent });
+): Promise<PruneResult> {
+  return invoke<PruneResult>("execute_prune", { artifactPaths, dryRun, permanent });
 }
 
-export async function listenPurgeScanProgress(
-  callback: (progress: PurgeScanProgress) => void
+export async function listenPruneScanProgress(
+  callback: (progress: PruneScanProgress) => void
 ): Promise<UnlistenFn> {
-  return listen<PurgeScanProgress>("purge-scan-progress", (event) => {
+  return listen<PruneScanProgress>("prune-scan-progress", (event) => {
     callback(event.payload);
   });
 }
 
-export async function listenPurgeProgress(
-  callback: (progress: PurgeProgress) => void
+export async function listenPruneProgress(
+  callback: (progress: PruneProgress) => void
 ): Promise<UnlistenFn> {
-  return listen<PurgeProgress>("purge-progress", (event) => {
+  return listen<PruneProgress>("prune-progress", (event) => {
     callback(event.payload);
   });
 }
@@ -384,6 +387,7 @@ export interface InstallerResult {
   items_removed: number;
   bytes_freed: number;
   errors: string[];
+  deleted_paths: string[];
 }
 
 // ── Installers Module Commands ───────────────────────────

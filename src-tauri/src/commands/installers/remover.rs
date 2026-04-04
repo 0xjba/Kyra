@@ -77,6 +77,7 @@ pub fn remove_installer_files(
     let mut items_removed: usize = 0;
     let mut bytes_freed: u64 = 0;
     let mut errors: Vec<String> = Vec::new();
+    let mut deleted_paths: Vec<String> = Vec::new();
 
     for (i, path_str) in file_paths.iter().enumerate() {
         let path = Path::new(path_str);
@@ -105,6 +106,7 @@ pub fn remove_installer_files(
         if dry_run {
             bytes_freed += size;
             items_removed += 1;
+            deleted_paths.push(path_str.clone());
             continue;
         }
 
@@ -121,6 +123,7 @@ pub fn remove_installer_files(
             Ok(()) => {
                 bytes_freed += size;
                 items_removed += 1;
+                deleted_paths.push(path_str.clone());
                 let action = if permanent { "DELETED" } else { "TRASHED" };
                 shared::log_operation("DELETE_INSTALLER", path_str, action);
             }
@@ -142,6 +145,7 @@ pub fn remove_installer_files(
         items_removed,
         bytes_freed,
         errors,
+        deleted_paths,
     }
 }
 

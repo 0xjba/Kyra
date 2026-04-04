@@ -116,9 +116,12 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       if (!dryRun && result.bytes_freed > 0) {
         addBytesFreed(result.bytes_freed).catch(() => {});
       }
-      // Immediately remove the uninstalled app from local list + show success
-      const remainingApps = get().apps.filter((a) => a.path !== selectedApp.path);
-      set({ phase: "done", result, apps: remainingApps, selectedApp: null, associatedFiles: [], selectedFilePaths: new Set() });
+      // Only remove the app from local list if its path was actually deleted
+      const appWasDeleted = result.deleted_paths.includes(selectedApp.path);
+      const remainingApps = appWasDeleted
+        ? get().apps.filter((a) => a.path !== selectedApp.path)
+        : get().apps;
+      set({ phase: "done", result, apps: remainingApps, selectedApp: appWasDeleted ? null : selectedApp, associatedFiles: appWasDeleted ? [] : get().associatedFiles, selectedFilePaths: appWasDeleted ? new Set() : get().selectedFilePaths });
       // Re-scan in background to refresh app list
       scanInstalledApps().then((apps) => set({ apps })).catch(() => {});
     } catch (e) {
@@ -143,7 +146,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       let totalRemoved = 0;
       let totalFreed = 0;
       const allErrors: string[] = [];
-      const failedAppPaths = new Set<string>();
+      const allDeletedPaths: string[] = [];
 
       for (const app of appsToRemove) {
         // Fetch associated files for each app
@@ -159,23 +162,16 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
           const result = await executeUninstall(app.path, filePaths, dryRun, permanent);
           totalRemoved += result.items_removed;
           totalFreed += result.bytes_freed;
-          // Check if the app bundle itself failed (its path will appear in errors)
-          const appBundleFailed = result.errors.some((e) => e.startsWith(app.path));
-          if (appBundleFailed) {
-            failedAppPaths.add(app.path);
-          }
+          allDeletedPaths.push(...result.deleted_paths);
           allErrors.push(...result.errors);
           if (allErrors.length > 50) allErrors.length = 50;
         } catch (e) {
-          failedAppPaths.add(app.path);
           allErrors.push(`${app.name}: ${String(e)}`);
         }
       }
 
-      // Only remove apps that were actually deleted (not ones that errored)
-      const successPaths = new Set(
-        appsToRemove.map((a) => a.path).filter((p) => !failedAppPaths.has(p))
-      );
+      // Only remove apps whose path was actually deleted
+      const successPaths = new Set(allDeletedPaths);
       const remainingApps = get().apps.filter((a) => !successPaths.has(a.path));
       if (!dryRun && totalFreed > 0) {
         addBytesFreed(totalFreed).catch(() => {});
@@ -186,6 +182,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
           items_removed: totalRemoved,
           bytes_freed: totalFreed,
           errors: allErrors,
+          deleted_paths: allDeletedPaths,
         },
         apps: remainingApps,
         selectedApp: null,

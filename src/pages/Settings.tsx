@@ -10,6 +10,8 @@ import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { formatSize } from "../utils/format";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { getVersion } from "@tauri-apps/api/app";
 import logoSrc from "../assets/logo.png";
 import "../styles/settings.css";
 
@@ -39,12 +41,14 @@ export default function Settings() {
   const [statsReset, setStatsReset] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date">("idle");
   const [autoStartSynced, setAutoStartSynced] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     if (!loaded) load();
     getStoragePath().then((v) => { if (!cancelled) setStoragePath(v); }).catch(() => {});
     getTotalBytesFreed().then((v) => { if (!cancelled) setTotalFreed(v); }).catch(() => {});
+    getVersion().then((v) => { if (!cancelled) setAppVersion(v); }).catch(() => {});
     return () => { cancelled = true; };
   }, [loaded, load]);
 
@@ -419,18 +423,18 @@ export default function Settings() {
       {/* ── About ── */}
       <div className="settings-section">
         <div className="settings-section-label">About</div>
-        <div className="settings-card settings-about">
+        <div className="settings-about">
           <img src={logoSrc} alt="Kyra" className="settings-about-logo" />
-          <div className="settings-about-name">Kyra</div>
-          <div className="settings-about-version">v0.1.0</div>
-          <div className="settings-about-desc">macOS Cleaner & Optimizer</div>
+          <div className="settings-about-name">Kyra <span className="settings-about-version">{appVersion ? `v${appVersion}` : ""}</span></div>
+          <div className="settings-about-desc">NINE LIVES FOR YOUR STORAGE</div>
           <div className="settings-about-links">
-            <a href="https://github.com/0xjba/Kyra" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); openUrl("https://github.com/0xjba/Kyra").catch(console.error); }}>GitHub</a>
             <span className="settings-about-sep">·</span>
-            <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">Changelog</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); openUrl("https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md").catch(console.error); }}>Changelog</a>
             <span className="settings-about-sep">·</span>
-            <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">License</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); openUrl("https://github.com/0xjba/Kyra/blob/main/LICENSE").catch(console.error); }}>License</a>
           </div>
+          <div className="settings-about-dev">Developed by Jobin Ayathil</div>
         </div>
       </div>
       </div>

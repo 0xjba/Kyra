@@ -40,6 +40,7 @@ pub struct UninstallResult {
     pub items_removed: usize,
     pub bytes_freed: u64,
     pub errors: Vec<String>,
+    pub deleted_paths: Vec<String>,
 }
 
 use tauri::Emitter;

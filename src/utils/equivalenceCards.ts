@@ -1,5 +1,5 @@
 /**
- * Purge Success — Equivalence Cards
+ * Prune Success — Equivalence Cards
  *
  * Two tiers:
  *   Tier 1 (< 250 GB): "cloud cost → real-world treat" — no dollar amounts shown
@@ -72,7 +72,7 @@ const MILESTONE_2TB: EquivalenceCard[] = [
 
 /* ── Repeat avoidance ── */
 
-const LAST_CARD_KEY = "kyra_purge_last_card";
+const LAST_CARD_KEY = "kyra_prune_last_card";
 
 function getLastCardTitle(): string | null {
   try { return localStorage.getItem(LAST_CARD_KEY); } catch { return null; }

@@ -144,6 +144,7 @@ where
     let mut bytes_freed: u64 = 0;
     let mut items_removed: usize = 0;
     let mut errors: Vec<String> = Vec::new();
+    let mut deleted_paths: Vec<String> = Vec::new();
 
     // Collect all paths to delete: associated files first, then the app bundle
     let mut all_paths: Vec<&str> = file_paths.iter().map(|s| s.as_str()).collect();
@@ -185,6 +186,7 @@ where
         if dry_run {
             bytes_freed += size;
             items_removed += 1;
+            deleted_paths.push(path_str.to_string());
         } else {
             let delete_result = if permanent {
                 if path.is_dir() {
@@ -199,6 +201,7 @@ where
                 Ok(()) => {
                     bytes_freed += size;
                     items_removed += 1;
+                    deleted_paths.push(path_str.to_string());
                     let action = if permanent { "DELETED" } else { "TRASHED" };
                     shared::log_operation("UNINSTALL", path_str, action);
                 }
@@ -210,6 +213,7 @@ where
                             Ok(()) => {
                                 bytes_freed += size;
                                 items_removed += 1;
+                                deleted_paths.push(path_str.to_string());
                                 let action = if permanent { "DELETED (admin)" } else { "TRASHED (admin)" };
                                 shared::log_operation("UNINSTALL", path_str, action);
                             }
@@ -238,6 +242,7 @@ where
         items_removed,
         bytes_freed,
         errors,
+        deleted_paths,
     }
 }
 

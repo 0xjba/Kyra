@@ -98,9 +98,9 @@ export const useCleanStore = create<CleanStore>((set, get) => ({
   },
 
   dismissDone: () => {
-    const { items, selectedIds } = get();
-    // Remove cleaned items (the ones that were selected), keep the rest
-    const cleanedIds = selectedIds;
+    const { items, result } = get();
+    // Only remove items the backend confirmed were actually cleaned
+    const cleanedIds = new Set(result?.cleaned_ids ?? []);
     const remaining = items.filter((i) => !cleanedIds.has(i.rule_id));
     if (remaining.length === 0 || remaining.every((i) => i.total_size === 0)) {
       // Nothing left — go back to idle

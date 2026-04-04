@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCleanStore } from "../stores/cleanStore";
-import { checkRunningProcesses, getAppIcon, type RunningApp } from "../lib/tauri";
+import { checkRunningProcesses, getAppIcon, getSystemStats, type RunningApp } from "../lib/tauri";
 import { formatSize } from "../utils/format";
 import { pickEquivalenceCard, type EquivalenceCard } from "../utils/equivalenceCards";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
@@ -367,7 +367,7 @@ const CATEGORY_DESC: Record<string, string> = {
   System: "System caches, logs, and temporary files. Safe to remove — macOS will regenerate them as needed.",
   User: "User-level caches, recent items, and saved state. Removes personalisation data like recent files.",
   Browsers: "Browser caches, cookies, and history. May log you out of websites.",
-  "Developer Tools": "IDE caches, package manager stores, and build artifacts. May slow next build or install.",
+  "Developer Tools": "IDE caches, package manager stores, and developer artifacts. May slow next build or install.",
   Communication: "Chat app caches and downloaded media. Message history is preserved.",
   "AI Tools": "AI assistant caches and local model data. Preferences and accounts are unaffected.",
   Design: "Design tool caches and media previews. Project files remain untouched.",
@@ -473,39 +473,59 @@ function DetailPanel({
 /* ── Storage visualization bar ── */
 function StorageBar({
   categories,
-  totalSize,
+  scannedSize,
+  diskTotal,
+  diskFree,
 }: {
   categories: [string, { rule_id: string; label: string; total_size: number }[]][];
-  totalSize: number;
+  scannedSize: number;
+  diskTotal: number;
+  diskFree: number;
 }) {
-  if (totalSize === 0) return null;
+  if (diskTotal === 0) return null;
 
-  // Build segments from categories that have non-zero sizes
-  const segments = categories
+  // Build segments from scanned categories
+  const scannedSegments = categories
     .map(([name, items]) => {
       const size = items.reduce((s, i) => s + (i.total_size > 0 ? i.total_size : 0), 0);
       return { name, size, color: CATEGORY_COLORS[name] || "#64748b" };
     })
     .filter((s) => s.size > 0);
 
+  // "Other" = used space that wasn't scanned
+  const diskUsed = diskTotal - diskFree;
+  const otherSize = Math.max(0, diskUsed - scannedSize);
+
+  // All segments: scanned categories + Other + Free
+  type Seg = { name: string; size: number; color: string };
+  const allSegments: Seg[] = [...scannedSegments];
+  if (otherSize > 0) allSegments.push({ name: "Other", size: otherSize, color: "var(--text-quaternary)" });
+  if (diskFree > 0) allSegments.push({ name: "Free", size: diskFree, color: "rgba(255,255,255,0.06)" });
+
   return (
     <div className="clean-storage-bar">
       <div className="clean-storage-track">
-        {segments.map((seg, i) => {
-          const pct = (seg.size / totalSize) * 100;
+        {allSegments.map((seg, i) => {
+          const pct = (seg.size / diskTotal) * 100;
+          const isContext = seg.name === "Free" || seg.name === "Other";
+          const minPct = isContext ? 0.5 : 1;
           return (
             <div
               key={seg.name}
               className="clean-storage-segment"
               style={{
-                width: `${Math.max(pct, 0.5)}%`,
-                background: `linear-gradient(90deg, color-mix(in srgb, ${seg.color}, white 25%) 0%, ${seg.color} 100%)`,
+                width: `${Math.max(pct, minPct)}%`,
+                background: seg.name === "Free"
+                  ? "rgba(255,255,255,0.06)"
+                  : seg.name === "Other"
+                    ? "rgba(255,255,255,0.12)"
+                    : `linear-gradient(90deg, color-mix(in srgb, ${seg.color}, white 25%) 0%, ${seg.color} 100%)`,
                 borderRadius:
-                  i === 0 && i === segments.length - 1
+                  i === 0 && i === allSegments.length - 1
                     ? "4px"
                     : i === 0
                       ? "4px 0 0 4px"
-                      : i === segments.length - 1
+                      : i === allSegments.length - 1
                         ? "0 4px 4px 0"
                         : "0",
               }}
@@ -515,11 +535,11 @@ function StorageBar({
         })}
       </div>
       <div className="clean-storage-legend">
-        {segments.map((seg) => (
+        {allSegments.map((seg) => (
           <div key={seg.name} className="clean-storage-legend-item">
             <span
               className="clean-storage-legend-dot"
-              style={{ backgroundColor: seg.color }}
+              style={{ backgroundColor: seg.name === "Free" ? "rgba(255,255,255,0.06)" : seg.name === "Other" ? "rgba(255,255,255,0.12)" : seg.color }}
             />
             <span className="clean-storage-legend-label">{seg.name}</span>
           </div>
@@ -541,6 +561,8 @@ function ResultsView() {
   const [runningApps, setRunningApps] = useState<RunningApp[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [diskTotal, setDiskTotal] = useState(0);
+  const [diskFree, setDiskFree] = useState(0);
 
   // Fetch real app icons
   const ruleIds = useMemo(() => items.map((i) => i.rule_id), [items]);
@@ -548,6 +570,7 @@ function ResultsView() {
 
   useEffect(() => {
     checkRunningProcesses(ruleIds).then(setRunningApps).catch(() => {});
+    getSystemStats().then((s) => { setDiskTotal(s.disk_total); setDiskFree(s.disk_free); }).catch(() => {});
   }, [items]);
 
   const toggleCategory = useCallback(
@@ -646,7 +669,7 @@ function ResultsView() {
       </div>
 
       {/* Storage visualization */}
-      <StorageBar categories={sortedCategories} totalSize={totalSize} />
+      <StorageBar categories={sortedCategories} scannedSize={totalSize} diskTotal={diskTotal} diskFree={diskFree} />
 
       {/* Split panel */}
       <div className="clean-split">

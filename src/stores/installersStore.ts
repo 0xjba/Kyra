@@ -92,8 +92,9 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
   },
 
   dismissDone: () => {
-    const { files, selected } = get();
-    const remaining = files.filter((f) => !selected.has(f.path));
+    const { files, result } = get();
+    const deletedSet = new Set(result?.deleted_paths ?? []);
+    const remaining = files.filter((f) => !deletedSet.has(f.path));
     if (remaining.length === 0) {
       set({ phase: "idle", files: [], selected: new Set(), progress: null, result: null });
     } else {

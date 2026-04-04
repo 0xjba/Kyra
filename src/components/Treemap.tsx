@@ -9,8 +9,6 @@ interface TreemapProps {
 }
 
 const GAP = 4;
-// Minimum pixel dimensions for a card to be worth showing
-const MIN_CARD_PX = 64;
 
 export default function Treemap({ node, onDrillIn }: TreemapProps) {
   const containerRef = useRef<HTMLDivElement>(null);

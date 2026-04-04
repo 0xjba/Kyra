@@ -11,7 +11,7 @@ const Optimize = lazy(() => import("./pages/Optimize"));
 const Uninstall = lazy(() => import("./pages/Uninstall"));
 const Analyze = lazy(() => import("./pages/Analyze"));
 const Status = lazy(() => import("./pages/Status"));
-const Purge = lazy(() => import("./pages/Purge"));
+const Prune = lazy(() => import("./pages/Prune"));
 const Installers = lazy(() => import("./pages/Installers"));
 const Settings = lazy(() => import("./pages/Settings"));
 const ModulePlaceholder = lazy(() => import("./pages/ModulePlaceholder"));
@@ -83,8 +83,7 @@ export default function App() {
     }
   }, [settingsLoaded, settings.onboarding_completed, settings.notifications_enabled, settings.check_for_updates, settings.low_disk_threshold_gb]);
 
-  // TODO: remove `true ||` after onboarding is finalized
-  const showOnboarding = settingsLoaded && (true || !settings.onboarding_completed);
+  const showOnboarding = settingsLoaded && !settings.onboarding_completed;
 
   return (
     <HashRouter>
@@ -107,7 +106,7 @@ export default function App() {
                   <Route path="/uninstall" element={<Uninstall />} />
                   <Route path="/analyze" element={<Analyze />} />
                   <Route path="/status" element={<Status />} />
-                  <Route path="/purge" element={<Purge />} />
+                  <Route path="/prune" element={<Prune />} />
                   <Route path="/installers" element={<Installers />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/:module" element={<ModulePlaceholder />} />

@@ -1,0 +1,167 @@
+/* ── FDA Settings Mockup ── */
+
+.fda-mockup {
+  width: 100%;
+  max-width: 320px;
+  position: relative;
+  margin-bottom: 16px;
+}
+
+/* ── App Row ── */
+.fda-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+/* Kyra row — highlighted */
+.fda-row-kyra {
+  background: rgba(58, 123, 255, 0.2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  transition: background 0.3s;
+}
+
+.fda-row-kyra.granted {
+  background: rgba(58, 123, 255, 0.28);
+}
+
+/* ── Skeleton rows ── */
+.fda-row-skeleton {
+  opacity: 0.4;
+}
+
+.fda-skeleton-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.fda-skeleton-text {
+  width: 90px;
+  height: 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  flex: none;
+  margin-right: auto;
+}
+
+.fda-skeleton-text-short {
+  width: 60px;
+}
+
+/* ── App Icon ── */
+.fda-app-icon-img {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.fda-app-name {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.fda-app-name-kyra {
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Toggle Switch ── */
+.fda-toggle {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  position: relative;
+  transition: background 0.3s ease;
+  cursor: default;
+}
+
+.fda-toggle.off {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.fda-toggle.on {
+  background: var(--blue);
+}
+
+.fda-toggle-knob {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  position: absolute;
+  top: 2px;
+  transition: left 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.fda-toggle.off .fda-toggle-knob {
+  left: 2px;
+}
+
+.fda-toggle.on .fda-toggle-knob {
+  left: 14px;
+}
+
+/* ── Animated Cursor ── */
+.fda-cursor {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+  transition: top 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              right 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s;
+}
+
+.fda-cursor-idle {
+  top: 80%;
+  right: 40%;
+  opacity: 0;
+}
+
+.fda-cursor-moving {
+  top: 46%;
+  right: 3%;
+  opacity: 1;
+}
+
+.fda-cursor-clicking {
+  top: 46%;
+  right: 3%;
+  opacity: 1;
+}
+
+.fda-cursor-done {
+  top: 80%;
+  right: 40%;
+  opacity: 0;
+  transition: top 1.2s cubic-bezier(0.4, 0, 0.2, 1),
+              right 1.2s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.6s 0.8s;
+}
+
+/* Click ripple */
+.fda-cursor-ripple {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(58, 123, 255, 0.3);
+  animation: fda-ripple 0.3s ease-out forwards;
+}
+
+@keyframes fda-ripple {
+  0%   { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}

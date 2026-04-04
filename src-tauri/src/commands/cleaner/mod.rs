@@ -47,6 +47,7 @@ pub struct CleanResult {
     pub items_cleaned: usize,
     pub bytes_freed: u64,
     pub errors: Vec<String>,
+    pub cleaned_ids: Vec<String>,
 }
 
 /// Paths that must never be deleted.
@@ -100,6 +101,7 @@ pub async fn execute_clean(
             items_cleaned: 0,
             bytes_freed: 0,
             errors: vec![],
+            cleaned_ids: vec![],
         });
     }
 

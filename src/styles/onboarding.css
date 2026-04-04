@@ -26,7 +26,7 @@
   align-items: center;
   text-align: center;
   width: 100%;
-  max-width: 360px;
+  max-width: 420px;
 }
 
 .onboarding-slide.forward {
@@ -116,9 +116,62 @@
   font-size: var(--font-base);
   color: var(--text-tertiary);
   line-height: var(--leading-relaxed);
+  white-space: pre-line;
   margin-bottom: 20px;
   max-width: 320px;
 }
+
+/* ── Storage Bar ── */
+.onboarding-storage-wrapper {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.onboarding-storage-track {
+  display: flex;
+  height: 15px;
+  border-radius: 4px;
+  overflow: hidden;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.onboarding-storage-segment {
+  height: 100%;
+  transition: width 0.8s ease-in-out;
+  opacity: 0.85;
+}
+
+.onboarding-storage-free {
+  background: rgba(255, 255, 255, 0.04) !important;
+  opacity: 1;
+}
+
+.onboarding-storage-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.onboarding-storage-label {
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.onboarding-storage-disk {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+
+/* ── FDA Hint & Status ── */
+.onboarding-fda-hint {
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+
 
 /* ── Permission Steps ── */
 .onboarding-steps {
@@ -230,17 +283,6 @@
   line-height: var(--leading-normal);
 }
 
-/* ── Inline Notification Status ── */
-.onboarding-inline-status {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-  font-weight: var(--weight-medium);
-}
-
-.onboarding-inline-status.granted {
-  color: var(--green);
-}
-
 /* ── Notification Bullets ── */
 .onboarding-bullets {
   display: flex;
@@ -286,70 +328,55 @@
   margin-top: 1px;
 }
 
-/* ── Preferences Card ── */
-.onboarding-prefs-card {
-  width: 100%;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
+/* ── Quick Setup ── */
 .onboarding-prefs-note {
-  font-size: var(--font-sm);
+  font-size: var(--font-base);
   color: var(--text-tertiary);
-  margin-bottom: 12px;
+  line-height: var(--leading-relaxed);
+  margin-bottom: 20px;
+  max-width: 320px;
 }
 
-/* ── Done Screen ── */
-.onboarding-check-circle {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: rgba(42, 200, 82, 0.1);
-  border: 1px solid rgba(42, 200, 82, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-  color: var(--green);
-}
-
-.onboarding-check-path {
-  stroke-dasharray: 24;
-  stroke-dashoffset: 24;
-  animation: onboarding-draw-check 0.5s ease 0.2s forwards;
-}
-
-@keyframes onboarding-draw-check {
-  to { stroke-dashoffset: 0; }
-}
-
-.onboarding-summary {
+.onboarding-prefs-list {
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: 100%;
-  margin-top: 12px;
-  margin-bottom: 4px;
 }
 
-.onboarding-summary-row {
+.onboarding-pref-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--font-sm);
-  padding: 4px 0;
+  gap: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
 }
 
-.onboarding-summary-label {
-  color: var(--text-tertiary);
+.onboarding-pref-item:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.onboarding-summary-value {
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
+div.onboarding-pref-item {
+  cursor: default;
+}
+
+/* ── Walking Cat (Done screen) ── */
+.onboarding-walk-cat {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 16px;
+}
+
+.onboarding-walk-cat img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
 }
 
 /* ── Action Button ── */
