@@ -172,17 +172,17 @@ export function askAiOptimize(
     })
     .join("\n");
 
-  const prompt = `I'm using a macOS optimizer app called Kyra. I'm about to run these optimization tasks on my Mac:
+  const prompt = `I'm using a macOS maintenance app called Kyra. I'm about to run these system maintenance tasks on my Mac:
 
 ${taskList}
 
-For each task, briefly explain:
-1. What it actually does under the hood
-2. Is it safe to run?
-3. Will it affect any running apps or require a restart?
-4. How much performance improvement can I realistically expect?
+These are maintenance and troubleshooting tasks, not raw performance boosters. For each task, briefly explain:
+1. What it does under the hood
+2. Is it safe to run? Any precautions?
+3. Will it affect running apps or need a restart?
+4. What specific problems or symptoms does this fix?
 
-Be concise and practical. Flag anything risky.`;
+Be concise and helpful. If a task has any precautions, mention them.`;
 
   openChatGpt(prompt);
 }
