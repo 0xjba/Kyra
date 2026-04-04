@@ -24,7 +24,7 @@
 
 <br />
 
-<p align="center"><img src="src/assets/screenshot.png" width="720" alt="Kyra" /></p>
+<p align="center"><img src="src/assets/screenshot.jpg" width="720" alt="Kyra" /></p>
 
 ## Features
 
