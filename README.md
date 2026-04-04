@@ -44,7 +44,7 @@
 3. Launch Kyra — the onboarding will guide you through setup
 
 > [!NOTE]
-> Kyra is not yet notarized by Apple. On first launch, right-click the app and select **Open**, then click **Open** again in the dialog.
+> Kyra is not yet notarized by Apple. On first launch macOS may show "Kyra is damaged." To fix this, go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. Or run `xattr -cr /Applications/Kyra.app` in Terminal.
 
 ## Build from source
 

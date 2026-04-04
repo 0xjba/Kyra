@@ -57,7 +57,12 @@ jobs:
 
             **Requirements:** macOS 11+ · Apple Silicon (M1/M2/M3/M4)
 
-            > **Note:** This release is not yet notarized by Apple. On first launch, right-click the app → Open → Open.
+            > **Note:** This release is not yet notarized by Apple. On first launch macOS may show "Kyra is damaged." To fix this:
+            > 1. Open **System Settings → Privacy & Security**
+            > 2. Scroll down and click **Open Anyway** next to the Kyra message
+            > 3. Enter your password when prompted
+            >
+            > Or run `xattr -cr /Applications/Kyra.app` in Terminal.
           releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin
