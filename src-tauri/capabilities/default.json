@@ -21,7 +21,9 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://github.com/*" }
+        { "url": "https://github.com/*" },
+        { "url": "https://chat.openai.com/*" },
+        { "url": "https://chatgpt.com/*" }
       ]
     }
   ]

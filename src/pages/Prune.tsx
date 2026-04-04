@@ -5,6 +5,8 @@ import { formatSize } from "../utils/format";
 import { revealInFinder, pickFolder, getSystemStats, type ArtifactEntry } from "../lib/tauri";
 import { pickEquivalenceCard, type EquivalenceCard } from "../utils/equivalenceCards";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import { askAiPrune, canAskAiPrune } from "../utils/askAi";
+import AskAiCoachMark from "../components/AskAiCoachMark";
 import "../styles/prune.css";
 
 /* ── Category colors for storage bar (mapped to backend artifact_type strings) ── */
@@ -628,14 +630,29 @@ function ListView() {
         <span className="module-footer-info">
           {selectedPaths.size} of {artifacts.length} items selected
         </span>
-        <button
-          className="btn btn-primary"
-          style={{ minWidth: 120 }}
-          disabled={selectedPaths.size === 0}
-          onClick={() => setShowConfirm(true)}
-        >
-          Prune {selectedPaths.size > 0 ? formatSize(selectedSize) : ""}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span
+            className="tooltip-wrap"
+            data-tooltip={selectedPaths.size > 0 && !canAskAiPrune(artifacts, selectedPaths) ? "Select fewer items to Ask AI" : undefined}
+          >
+            <AskAiCoachMark />
+            <button
+              className="btn"
+              disabled={selectedPaths.size === 0 || !canAskAiPrune(artifacts, selectedPaths)}
+              onClick={() => askAiPrune(artifacts, selectedPaths)}
+            >
+              Ask AI
+            </button>
+          </span>
+          <button
+            className="btn btn-primary"
+            style={{ minWidth: 120 }}
+            disabled={selectedPaths.size === 0}
+            onClick={() => setShowConfirm(true)}
+          >
+            Prune {selectedPaths.size > 0 ? formatSize(selectedSize) : ""}
+          </button>
+        </div>
       </div>
 
       <DeleteConfirmDialog

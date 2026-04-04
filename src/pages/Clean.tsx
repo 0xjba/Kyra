@@ -21,6 +21,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCleanStore } from "../stores/cleanStore";
+import { askAiClean, canAskAiClean } from "../utils/askAi";
+import AskAiCoachMark from "../components/AskAiCoachMark";
 import { checkRunningProcesses, getAppIcon, getSystemStats, type RunningApp } from "../lib/tauri";
 import { formatSize } from "../utils/format";
 import { pickEquivalenceCard, type EquivalenceCard } from "../utils/equivalenceCards";
@@ -711,14 +713,29 @@ function ResultsView() {
         <span className="module-footer-info">
           {selectedIds.size} of {selectableIds.size} items selected
         </span>
-        <button
-          className="btn btn-primary"
-          style={{ minWidth: 120 }}
-          disabled={selectedIds.size === 0}
-          onClick={() => setShowConfirm(true)}
-        >
-          Clean {selectedSize > 0 ? formatSize(selectedSize) : ""}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span
+            className="tooltip-wrap"
+            data-tooltip={selectedIds.size > 0 && !canAskAiClean(items, selectedIds) ? "Select fewer items to Ask AI" : undefined}
+          >
+            <AskAiCoachMark />
+            <button
+              className="btn"
+              disabled={selectedIds.size === 0 || !canAskAiClean(items, selectedIds)}
+              onClick={() => askAiClean(items, selectedIds)}
+            >
+              Ask AI
+            </button>
+          </span>
+          <button
+            className="btn btn-primary"
+            style={{ minWidth: 120 }}
+            disabled={selectedIds.size === 0}
+            onClick={() => setShowConfirm(true)}
+          >
+            Clean {selectedSize > 0 ? formatSize(selectedSize) : ""}
+          </button>
+        </div>
       </div>
 
       <DeleteConfirmDialog

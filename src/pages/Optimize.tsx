@@ -2,6 +2,8 @@ import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useOptimizeStore } from "../stores/optimizeStore";
 import { ShieldAlert } from "lucide-react";
 import type { OptTask } from "../lib/tauri";
+import { askAiOptimize, canAskAiOptimize } from "../utils/askAi";
+import AskAiCoachMark from "../components/AskAiCoachMark";
 import "../styles/optimize.css";
 
 type Category = "safe" | "restart" | "admin";
@@ -392,13 +394,28 @@ export default function Optimize() {
         <span className="module-footer-info">
           {selectedCount} of {tasks.length} tasks selected
         </span>
-        <button
-          className="btn btn-primary"
-          onClick={handleRunSelected}
-          disabled={running || selectedCount === 0}
-        >
-          Run Selected
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <span
+            className="tooltip-wrap"
+            data-tooltip={selectedCount > 0 && !canAskAiOptimize(tasks, enabledIds) ? "Select fewer items to Ask AI" : undefined}
+          >
+            <AskAiCoachMark />
+            <button
+              className="btn"
+              disabled={selectedCount === 0 || !canAskAiOptimize(tasks, enabledIds)}
+              onClick={() => askAiOptimize(tasks, enabledIds)}
+            >
+              Ask AI
+            </button>
+          </span>
+          <button
+            className="btn btn-primary"
+            onClick={handleRunSelected}
+            disabled={running || selectedCount === 0}
+          >
+            Run Selected
+          </button>
+        </div>
       </div>
 
       {/* Admin warning dialog */}

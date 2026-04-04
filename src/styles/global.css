@@ -327,6 +327,78 @@ body {
 /* Extra noise grain on glass surfaces (cards, dialogs) */
 .module-card::after,
 .btn-primary::after,
+/* ── Tooltip (above element) ── */
+.tooltip-wrap {
+  position: relative;
+}
+.tooltip-wrap[data-tooltip]::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.tooltip-wrap[data-tooltip]:hover::before {
+  opacity: 1;
+}
+
+/* ── Coach mark (one-time hint bubble) ── */
+.coach-mark {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  min-width: 200px;
+  padding: 10px 22px 10px 12px;
+  border-radius: 10px;
+  background: rgba(30, 30, 30, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  line-height: 1.45;
+  z-index: 100;
+  animation: coach-in 0.25s ease;
+}
+.coach-mark::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 24px;
+  border: 6px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+.coach-mark-close {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+.coach-mark-close:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+@keyframes coach-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .delete-dialog::after {
   content: "";
   position: absolute;
