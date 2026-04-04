@@ -32,7 +32,17 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --target aarch64-apple-darwin
+        run: npx tauri build --target aarch64-apple-darwin --verbose
+
+      - name: List build output
+        if: always()
+        run: |
+          echo "=== Full target tree ==="
+          find src-tauri/target/aarch64-apple-darwin/release/bundle -type f 2>/dev/null || echo "No bundle directory found"
+          echo "=== Any .dmg anywhere ==="
+          find src-tauri/target -name "*.dmg" 2>/dev/null || echo "No .dmg"
+          echo "=== Any .app anywhere ==="
+          find src-tauri/target -name "*.app" -type d 2>/dev/null || echo "No .app"
 
       - name: Prepare release assets
         run: |

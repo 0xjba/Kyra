@@ -1,7 +1,7 @@
 {
   "productName": "Kyra",
   "version": "0.2.0",
-  "identifier": "com.kyra.app",
+  "identifier": "com.kyra.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
