@@ -42,7 +42,22 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "Kyra v__VERSION__"
-          releaseBody: "See [CHANGELOG.md](https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md) for details."
+          releaseBody: |
+            Nine lives for your storage.
+
+            **What's included:**
+            - **Clean** — Remove system caches, logs, browser data, and orphaned app files
+            - **Prune** — Bulk-delete developer artifacts (node_modules, target, __pycache__)
+            - **Installers** — Find leftover .dmg, .pkg, and .iso files
+            - **Uninstall** — Fully remove apps with all associated files
+            - **Optimize** — System maintenance tasks (DNS flush, LaunchServices rebuild, etc.)
+            - **Analyze** — Treemap disk visualizer, large file finder, duplicate detector
+            - **Status** — Real-time CPU, memory, disk, and network monitoring
+            - **Ask AI** — Get advice from ChatGPT on what's safe to delete
+
+            **Requirements:** macOS 11+ · Apple Silicon (M1/M2/M3/M4)
+
+            > **Note:** This release is not yet notarized by Apple. On first launch, right-click the app → Open → Open.
           releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin
