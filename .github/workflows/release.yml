@@ -25,16 +25,16 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: v__VERSION__
-          releaseName: "Kyra v__VERSION__"
-          releaseBody: "See [CHANGELOG.md](https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md) for details."
-          releaseDraft: true
-          prerelease: false
-          args: --target aarch64-apple-darwin
+      - name: Debug - Build manually first
+        run: npx tauri build --target aarch64-apple-darwin --verbose 2>&1 || true
+
+      - name: Debug - List bundle output
+        run: |
+          echo "=== Listing target dir ==="
+          find src-tauri/target/aarch64-apple-darwin/release/bundle -type f 2>/dev/null || echo "No bundle dir found"
+          echo "=== Listing release dir ==="
+          ls -la src-tauri/target/aarch64-apple-darwin/release/ 2>/dev/null | head -20
+          echo "=== Checking for any .dmg ==="
+          find src-tauri/target -name "*.dmg" 2>/dev/null || echo "No .dmg found"
+          echo "=== Checking for any .app ==="
+          find src-tauri/target -name "*.app" -type d 2>/dev/null || echo "No .app found"
