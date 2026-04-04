@@ -5,8 +5,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 use sysinfo::System;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
 pub fn run() {
@@ -37,40 +35,6 @@ pub fn run() {
                     let _: () = msg_send![&*ns_win, setCollectionBehavior: new_behavior];
                 }
             }
-
-            let show_item = MenuItemBuilder::with_id("show", "Show Kyra").build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-            let menu = MenuBuilder::new(app)
-                .item(&show_item)
-                .item(&quit_item)
-                .build()?;
-
-            TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().cloned().unwrap())
-                .tooltip("Kyra")
-                .menu(&menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click { .. } = event {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                })
-                .build(app)?;
 
             Ok(())
         })
