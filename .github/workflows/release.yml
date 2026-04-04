@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14
@@ -25,16 +28,52 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Debug - Build manually first
-        run: npx tauri build --target aarch64-apple-darwin --verbose 2>&1 || true
+      - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --target aarch64-apple-darwin
 
-      - name: Debug - List bundle output
+      - name: Prepare release assets
         run: |
-          echo "=== Listing target dir ==="
-          find src-tauri/target/aarch64-apple-darwin/release/bundle -type f 2>/dev/null || echo "No bundle dir found"
-          echo "=== Listing release dir ==="
-          ls -la src-tauri/target/aarch64-apple-darwin/release/ 2>/dev/null | head -20
-          echo "=== Checking for any .dmg ==="
-          find src-tauri/target -name "*.dmg" 2>/dev/null || echo "No .dmg found"
-          echo "=== Checking for any .app ==="
-          find src-tauri/target -name "*.app" -type d 2>/dev/null || echo "No .app found"
+          BUNDLE_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          mkdir -p release
+          cp "$BUNDLE_DIR/dmg/"*.dmg release/
+          cp "$BUNDLE_DIR/macos/"*.tar.gz release/
+          cp "$BUNDLE_DIR/macos/"*.tar.gz.sig release/
+          ls -la release/
+
+      - name: Generate updater manifest
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          SIG=$(cat release/*.tar.gz.sig)
+          TAR=$(basename release/*.tar.gz)
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${TAR}"
+
+          cat > release/latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "notes": "Release ${TAG}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIG}",
+                "url": "${URL}"
+              }
+            }
+          }
+          EOF
+
+          cat release/latest.json
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          body: "See [CHANGELOG.md](https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md) for details."
+          files: |
+            release/*.dmg
+            release/*.tar.gz
+            release/*.tar.gz.sig
+            release/latest.json
