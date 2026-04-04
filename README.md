@@ -1,25 +1,30 @@
-<p align="center">
-  <img src="Logo.png" width="80" alt="Kyra" />
-</p>
+<div align="center">
+  <img src="AppIcon.png" width="180" alt="Kyra" />
 
-<h1 align="center">Kyra</h1>
+  <h1>Kyra</h1>
 
-<p align="center">
-  <strong>Nine lives for your storage.</strong><br />
-  A fast, beautiful macOS app to clean junk, reclaim disk space, and keep your Mac running smoothly.
-</p>
+  <p><strong>Nine lives for your storage.</strong></p>
 
-<p align="center">
-  <a href="https://github.com/0xjba/Kyra/releases/latest">Download</a> &nbsp;&middot;&nbsp;
-  <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a> &nbsp;&middot;&nbsp;
-  <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">License</a>
-</p>
+  <p>A fast, beautiful macOS app that cleans junk, reclaims disk space,<br />and keeps your Mac running smoothly.</p>
 
----
+  <p>
+    <a href="https://github.com/0xjba/Kyra/releases/latest"><img src="https://img.shields.io/github/v/release/0xjba/Kyra?style=flat-square&color=blue&label=download" alt="Download" /></a>
+    <img src="https://img.shields.io/badge/platform-macOS-000?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
+    <img src="https://img.shields.io/badge/Apple_Silicon-M1%2FM2%2FM3%2FM4-000?style=flat-square&logo=apple&logoColor=white" alt="Apple Silicon" />
+    <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE"><img src="https://img.shields.io/github/license/0xjba/Kyra?style=flat-square" alt="License" /></a>
+    <img src="https://img.shields.io/github/stars/0xjba/Kyra?style=flat-square&color=yellow" alt="Stars" />
+  </p>
 
-## What is Kyra?
+  <p>
+    <a href="https://github.com/0xjba/Kyra/releases/latest">Download</a> &nbsp;&middot;&nbsp;
+    <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a> &nbsp;&middot;&nbsp;
+    <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">License</a>
+  </p>
+</div>
 
-Kyra is a native macOS app that helps you find and remove files you don't need — system caches, old logs, leftover installers, forgotten developer artifacts, and more. It's built with Tauri and Rust, so it's lightweight and fast.
+<br />
+
+<p align="center"><img src="src/assets/screenshot.png" width="720" alt="Kyra" /></p>
 
 ## Features
 
@@ -32,37 +37,43 @@ Kyra is a native macOS app that helps you find and remove files you don't need �
 - **Status** — Real-time CPU, memory, disk, and network monitoring
 - **Ask AI** — Not sure if something is safe to delete? Ask AI opens ChatGPT with your scan results for a second opinion
 
-## Requirements
-
-- macOS 13 Ventura or later
-- Apple Silicon (M1 / M2 / M3 / M4)
-
 ## Install
 
-1. Download the latest `.dmg` from [Releases](https://github.com/0xjba/Kyra/releases/latest)
+1. Download the latest `.dmg` from [**Releases**](https://github.com/0xjba/Kyra/releases/latest)
 2. Open the `.dmg` and drag Kyra to your Applications folder
-3. Launch Kyra — the onboarding will guide you through granting Full Disk Access
+3. Launch Kyra — the onboarding will guide you through setup
 
-> **Note:** Kyra is not yet notarized by Apple. On first launch, you may need to right-click the app and select "Open", then click "Open" again in the dialog.
+> [!NOTE]
+> Kyra is not yet notarized by Apple. On first launch, right-click the app and select **Open**, then click **Open** again in the dialog.
 
 ## Build from source
 
 ```bash
-# Clone
 git clone https://github.com/0xjba/Kyra.git
 cd Kyra
-
-# Install dependencies
 npm install
-
-# Run in development
 npm run tauri dev
-
-# Build for production
-npm run tauri build -- --target aarch64-apple-darwin
 ```
 
 Requires [Node.js](https://nodejs.org/) 22+ and [Rust](https://rustup.rs/).
+
+<details>
+<summary>Production build</summary>
+
+```bash
+npm run tauri build -- --target aarch64-apple-darwin
+```
+
+</details>
+
+## Tech
+
+<p>
+  <img src="https://img.shields.io/badge/Tauri-24C8D8?style=flat-square&logo=tauri&logoColor=white" alt="Tauri" />
+  <img src="https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+</p>
 
 ## License
 
