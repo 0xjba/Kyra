@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: macos-14
+  release:
+    runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -25,65 +25,24 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
-      - name: Install dependencies
-        run: npm install
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
 
-      - name: Build Tauri app
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --target aarch64-apple-darwin --bundles dmg,updater --verbose
-
-      - name: List build output
-        if: always()
-        run: |
-          echo "=== Full target tree ==="
-          find src-tauri/target/aarch64-apple-darwin/release/bundle -type f 2>/dev/null || echo "No bundle directory found"
-          echo "=== Any .dmg anywhere ==="
-          find src-tauri/target -name "*.dmg" 2>/dev/null || echo "No .dmg"
-          echo "=== Any .app anywhere ==="
-          find src-tauri/target -name "*.app" -type d 2>/dev/null || echo "No .app"
-
-      - name: Prepare release assets
-        run: |
-          BUNDLE_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle"
-          mkdir -p release
-          cp "$BUNDLE_DIR/dmg/"*.dmg release/
-          cp "$BUNDLE_DIR/macos/"*.tar.gz release/
-          cp "$BUNDLE_DIR/macos/"*.tar.gz.sig release/
-          ls -la release/
-
-      - name: Generate updater manifest
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          SIG=$(cat release/*.tar.gz.sig)
-          TAR=$(basename release/*.tar.gz)
-          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${TAR}"
-
-          cat > release/latest.json << EOF
-          {
-            "version": "${VERSION}",
-            "notes": "Release ${TAG}",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${SIG}",
-                "url": "${URL}"
-              }
-            }
-          }
-          EOF
-
-          cat release/latest.json
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
         with:
-          draft: true
-          body: "See [CHANGELOG.md](https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md) for details."
-          files: |
-            release/*.dmg
-            release/*.tar.gz
-            release/*.tar.gz.sig
-            release/latest.json
+          tagName: v__VERSION__
+          releaseName: "Kyra v__VERSION__"
+          releaseBody: "See [CHANGELOG.md](https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md) for details."
+          releaseDraft: true
+          prerelease: false
+          args: --target aarch64-apple-darwin
