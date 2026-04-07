@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kyra - Your Mac, without the baggage</title>
+  <meta name="description" content="Reclaim gigabytes, remove leftover junk, and keep your Mac running clean. Free, open source, and built for Apple Silicon." />
+  <meta property="og:title" content="Kyra - Your Mac, without the baggage" />
+  <meta property="og:description" content="Reclaim gigabytes, remove leftover junk, and keep your Mac running clean." />
+  <meta property="og:image" content="https://raw.githubusercontent.com/0xjba/Kyra/main/src/assets/screenshot.jpg" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #09090b;
+      --card: rgba(255, 255, 255, 0.04);
+      --card-hover: rgba(255, 255, 255, 0.07);
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+      --text-1: rgba(255, 255, 255, 0.9);
+      --text-2: rgba(255, 255, 255, 0.55);
+      --text-3: rgba(255, 255, 255, 0.3);
+      --accent: #3A7BFF;
+      --green: #2AC852;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text-1);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* Grain */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 180px;
+    }
+
+    /* Ambient glow */
+    .glow {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      overflow: hidden;
+    }
+    .glow::before {
+      content: "";
+      position: absolute;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      height: 900px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(58, 123, 255, 0.08) 0%, rgba(142, 92, 246, 0.04) 40%, transparent 70%);
+      filter: blur(100px);
+    }
+
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Nav ── */
+    .site-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 14px 24px;
+      background: rgba(9, 9, 11, 0.8);
+      backdrop-filter: blur(16px) saturate(150%);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      border-bottom: 1px solid var(--border);
+    }
+    .site-nav .wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: var(--text-1);
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .nav-left img { width: 24px; height: 24px; border-radius: 5px; }
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .nav-right a {
+      color: var(--text-2);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.15s;
+    }
+    .nav-right a:hover { color: var(--text-1); }
+    .nav-cta {
+      padding: 6px 14px !important;
+      background: rgba(255,255,255,0.08) !important;
+      border: 1px solid var(--border-hover) !important;
+      border-radius: 7px !important;
+      color: var(--text-1) !important;
+      font-weight: 500 !important;
+      transition: background 0.15s !important;
+    }
+    .nav-cta:hover { background: rgba(255,255,255,0.12) !important; }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 180px 0 60px;
+      text-align: center;
+    }
+    .hero-icon {
+      width: 80px;
+      height: 80px;
+      border-radius: 18px;
+      margin-bottom: 28px;
+    }
+    .hero h1 {
+      font-size: 52px;
+      font-weight: 700;
+      letter-spacing: -0.035em;
+      line-height: 1.05;
+      margin-bottom: 20px;
+    }
+    .hero-sub {
+      font-size: 18px;
+      color: var(--text-2);
+      max-width: 440px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: white;
+      color: #000;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 10px;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .hero-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 30px rgba(255,255,255,0.1);
+    }
+    .hero-cta svg { width: 15px; height: 15px; }
+    .hero-meta {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--text-3);
+    }
+
+    /* ── Screenshot ── */
+    .shot {
+      margin: 56px auto 0;
+      max-width: 720px;
+      position: relative;
+    }
+    .shot img {
+      width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+    }
+
+    /* ── Reframe ── */
+    .reframe {
+      padding: 120px 0;
+      text-align: center;
+    }
+    .reframe p {
+      font-size: 24px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: var(--text-2);
+      max-width: 540px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+    .reframe strong {
+      color: var(--text-1);
+      font-weight: 600;
+    }
+
+    /* ── Pillars ── */
+    .pillars {
+      padding: 0 0 120px;
+    }
+    .pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .pillar {
+      padding: 40px 32px;
+      background: var(--bg);
+      text-align: center;
+    }
+    .pillar-num {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 4px;
+    }
+    .pillar-label {
+      font-size: 13px;
+      color: var(--text-2);
+    }
+
+    /* ── Features ── */
+    .features {
+      padding: 0 0 120px;
+    }
+    .features-header {
+      text-align: center;
+      margin-bottom: 64px;
+    }
+    .features-header h2 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.035em;
+      margin-bottom: 12px;
+    }
+    .features-header p {
+      font-size: 16px;
+      color: var(--text-2);
+    }
+
+    .f-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-auto-rows: auto;
+      gap: 10px;
+    }
+
+    .f-card {
+      padding: 32px 28px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s, transform 0.3s;
+    }
+    .f-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+
+    /* Gradient glow at top of each card */
+    .f-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      border-radius: 20px 20px 0 0;
+      opacity: 0.035;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .f-card:hover::before {
+      opacity: 0.06;
+    }
+
+    .f-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .f-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .f-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      position: relative;
+      z-index: 1;
+    }
+    .f-card p {
+      font-size: 14px;
+      color: var(--text-2);
+      line-height: 1.6;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Hero card — spans 2 cols */
+    .f-hero {
+      grid-column: span 2;
+      padding: 40px 36px;
+    }
+    .f-hero h3 { font-size: 20px; }
+    .f-hero p { font-size: 15px; max-width: 440px; }
+
+    /* Color themes */
+    .f-red::before { background: linear-gradient(180deg, #FD4841, transparent); }
+    .f-red .f-icon { background: rgba(253, 72, 65, 0.12); color: #FD4841; }
+
+    .f-blue::before { background: linear-gradient(180deg, #3A7BFF, transparent); }
+    .f-blue .f-icon { background: rgba(58, 123, 255, 0.12); color: #3A7BFF; }
+
+    .f-orange::before { background: linear-gradient(180deg, #FD8C34, transparent); }
+    .f-orange .f-icon { background: rgba(253, 140, 52, 0.12); color: #FD8C34; }
+
+    .f-green::before { background: linear-gradient(180deg, #2AC852, transparent); }
+    .f-green .f-icon { background: rgba(42, 200, 82, 0.12); color: #2AC852; }
+
+    .f-yellow::before { background: linear-gradient(180deg, #FDD225, transparent); }
+    .f-yellow .f-icon { background: rgba(253, 210, 37, 0.12); color: #FDD225; }
+
+    .f-purple::before { background: linear-gradient(180deg, #8E5CF6, transparent); }
+    .f-purple .f-icon { background: rgba(142, 92, 246, 0.12); color: #8E5CF6; }
+
+    .f-teal::before { background: linear-gradient(180deg, #13D1BB, transparent); }
+    .f-teal .f-icon { background: rgba(19, 209, 187, 0.12); color: #13D1BB; }
+
+    .f-cyan::before { background: linear-gradient(180deg, #22B8F0, transparent); }
+    .f-cyan .f-icon { background: rgba(34, 184, 240, 0.12); color: #22B8F0; }
+
+    /* ── FAQ ── */
+    .faq {
+      padding: 80px 0 100px;
+      border-top: 1px solid var(--border);
+    }
+    .faq h2 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+    .faq-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px 48px;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .faq-item h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .faq-item p {
+      font-size: 13px;
+      color: var(--text-2);
+      line-height: 1.6;
+    }
+
+    /* ── Final CTA ── */
+    .final {
+      padding: 80px 0 100px;
+      text-align: center;
+    }
+    .final h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+    .final p {
+      font-size: 15px;
+      color: var(--text-2);
+      margin-bottom: 28px;
+    }
+    .final .hero-cta {
+      padding: 12px 28px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      padding: 48px 0 32px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .footer-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .footer-brand img {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+    }
+    .footer-brand span {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-1);
+      letter-spacing: -0.01em;
+    }
+    .footer-nav {
+      display: flex;
+      gap: 32px;
+    }
+    .footer-nav a {
+      font-size: 13px;
+      color: var(--text-2);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-nav a:hover { color: var(--text-1); }
+    .footer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 20px;
+    }
+    .footer-bottom span,
+    .footer-bottom a {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.4);
+      text-decoration: none;
+    }
+    .footer-bottom a:hover { color: var(--text-2); }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 36px; }
+      .hero-sub { font-size: 16px; }
+      .pillars-grid { grid-template-columns: 1fr; }
+      .f-grid { grid-template-columns: 1fr; }
+      .f-hero { grid-column: span 1; }
+      .faq-grid { grid-template-columns: 1fr; }
+      .nav-right a:not(.nav-cta) { display: none; }
+      .footer-top { flex-direction: column; gap: 16px; align-items: center; }
+      .footer-nav { gap: 20px; }
+      .footer-bottom { flex-direction: column; gap: 8px; text-align: center; }
+      .reframe p { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <nav class="site-nav">
+    <div class="wrap">
+      <a href="#" class="nav-left">
+        <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" alt="" />
+        Kyra
+      </a>
+      <div class="nav-right">
+        <a href="https://github.com/0xjba/Kyra">GitHub</a>
+        <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/0xjba/Kyra/releases/latest" class="nav-cta">Download</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="wrap">
+      <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" alt="Kyra" class="hero-icon" />
+      <h1>Your Mac, without<br />the baggage.</h1>
+      <p class="hero-sub">Reclaim gigabytes of hidden junk, remove apps completely, and keep everything running clean.</p>
+      <a href="https://github.com/0xjba/Kyra/releases/latest" class="hero-cta">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        Download for Mac
+      </a>
+      <p class="hero-meta">Free and open source &middot; macOS 11+ &middot; Apple Silicon</p>
+
+      <div class="shot">
+        <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/src/assets/screenshot.jpg" alt="Kyra dashboard" />
+      </div>
+    </div>
+  </section>
+
+  <!-- Reframe -->
+  <section class="reframe">
+    <div class="wrap">
+      <p>It's not about cleaning your Mac.<br /><strong>It's about never worrying about storage again.</strong></p>
+    </div>
+  </section>
+
+  <!-- Pillars -->
+  <section class="pillars">
+    <div class="wrap">
+      <div class="pillars-grid">
+        <div class="pillar">
+          <div class="pillar-num">8</div>
+          <div class="pillar-label">Modules, one app</div>
+        </div>
+        <div class="pillar">
+          <div class="pillar-num">30+</div>
+          <div class="pillar-label">Types of junk detected</div>
+        </div>
+        <div class="pillar">
+          <div class="pillar-num">0</div>
+          <div class="pillar-label">Subscriptions needed</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="wrap">
+      <div class="features-header">
+        <h2>One app. Everything<br />your Mac needs.</h2>
+        <p>Clean, optimize, monitor, and manage. Without the bloat.</p>
+      </div>
+
+      <div class="f-grid">
+        <!-- Row 1: Hero + side card -->
+        <div class="f-card f-hero f-red">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </div>
+          <h3>Clean</h3>
+          <p>System caches, logs, browser leftovers, and orphaned files. One scan, one click, gigabytes back.</p>
+        </div>
+        <div class="f-card f-blue">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3h6m-6 0v3m6-3v3M4 21h16a1 1 0 001-1V8a1 1 0 00-1-1H4a1 1 0 00-1 1v12a1 1 0 001 1zm5-7h6"/></svg>
+          </div>
+          <h3>Uninstall</h3>
+          <p>Remove apps the way Apple should let you. Every hidden support file, cache, and preference gone.</p>
+        </div>
+
+        <!-- Row 2: Three equal cards -->
+        <div class="f-card f-orange">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+          </div>
+          <h3>Prune</h3>
+          <p>Developer? Find every node_modules, target, and __pycache__. Bulk-delete in seconds.</p>
+        </div>
+        <div class="f-card f-green">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3"/></svg>
+          </div>
+          <h3>Installers</h3>
+          <p>Those .dmg and .pkg files piling up in Downloads? Found and cleaned.</p>
+        </div>
+        <div class="f-card f-yellow">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <h3>Optimize</h3>
+          <p>DNS flush, LaunchServices rebuild, database vacuum. Maintenance that actually fixes things.</p>
+        </div>
+
+        <!-- Row 3: Side card + Hero -->
+        <div class="f-card f-purple">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          </div>
+          <h3>Analyze</h3>
+          <p>See where your storage goes. Treemap, large files, duplicates. All visual.</p>
+        </div>
+        <div class="f-card f-hero f-cyan">
+          <div class="f-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          </div>
+          <h3>Ask AI</h3>
+          <p>Not sure if something is safe to delete? One click sends your scan results to ChatGPT for a second opinion. Before you touch anything.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq">
+    <div class="wrap">
+      <h2>Questions you might have.</h2>
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h3>Is it really free?</h3>
+          <p>Yes. Kyra is free and open source under the MIT license. No trials, no subscriptions, no "premium" tier.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Is it safe?</h3>
+          <p>Kyra moves files to Trash by default, so nothing is permanently deleted. You can always recover. The code is fully open on GitHub.</p>
+        </div>
+        <div class="faq-item">
+          <h3>What Macs does it support?</h3>
+          <p>Any Mac with Apple Silicon (M1, M2, M3, M4) running macOS 11 Big Sur or later.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Why does macOS say it's damaged?</h3>
+          <p>Kyra isn't notarized by Apple yet. Go to System Settings, Privacy & Security, and click "Open Anyway." We're working on getting it signed.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="final">
+    <div class="wrap">
+      <h2>Give your Mac some breathing room.</h2>
+      <p>Download Kyra. It takes less than a minute.</p>
+      <a href="https://github.com/0xjba/Kyra/releases/latest" class="hero-cta">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        Download for Mac
+      </a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="wrap">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" alt="Kyra" />
+          <span>Kyra</span>
+        </div>
+        <nav class="footer-nav">
+          <a href="https://github.com/0xjba/Kyra/releases/latest">Download</a>
+          <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://github.com/0xjba/Kyra">GitHub</a>
+          <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">License</a>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+        <span>Copyright &copy; 2025 Jobin Ayathil. All rights reserved.</span>
+        <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">MIT License</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
