@@ -47,6 +47,87 @@ fn is_launchd_plist(path: &str) -> bool {
         || path.contains("/PrivilegedHelperTools/")
 }
 
+/// Reads `CFBundleExecutable` from the app's Info.plist to get the exact
+/// executable name launchd will use for the process. This is the most
+/// reliable identifier for process matching — much better than the
+/// display name (e.g. "Visual Studio Code" ships an executable called
+/// "Code", and "zoom.us" vs display "Zoom").
+fn read_bundle_executable_name(app_path: &str) -> Option<String> {
+    let plist_path = Path::new(app_path).join("Contents/Info.plist");
+    let plist = plist::Value::from_file(&plist_path).ok()?;
+    let dict = plist.as_dictionary()?;
+    let exec = dict.get("CFBundleExecutable")?.as_string()?;
+    if exec.is_empty() {
+        None
+    } else {
+        Some(exec.to_string())
+    }
+}
+
+/// Check whether any process with exactly the given name is currently
+/// running under this user. Relies on sysinfo rather than shelling out to
+/// pgrep so we avoid an extra fork per check.
+fn is_process_running(name: &str) -> bool {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    sys.processes()
+        .values()
+        .any(|p| p.name().to_string_lossy() == name)
+}
+
+/// Best-effort force-quit of an app before its bundle is removed. Runs
+/// three escalating steps and stops at the first one that leaves no
+/// matching process behind:
+///
+/// 1. `launchctl`-style graceful SIGTERM via the `kill` binary.
+/// 2. SIGKILL if the process is still alive after a short grace period.
+/// 3. AppleScript `tell application "X" to quit` as a final fallback.
+///
+/// If `CFBundleExecutable` is readable, that exact name is used for
+/// matching (avoids false positives on display names like "zoom.us" vs
+/// "Zoom"). Returns `true` if the process is confirmed gone afterward.
+fn try_force_quit(app_path: &str, display_name: &str, dry_run: bool) -> bool {
+    if dry_run {
+        return true;
+    }
+
+    let target = read_bundle_executable_name(app_path).unwrap_or_else(|| display_name.to_string());
+    if target.is_empty() {
+        return true;
+    }
+
+    if !is_process_running(&target) {
+        return true;
+    }
+
+    shared::log_operation("UNINSTALL", &target, "force quit: SIGTERM");
+    let _ = Command::new("/usr/bin/pkill").args(["-x", &target]).output();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    if !is_process_running(&target) {
+        return true;
+    }
+
+    shared::log_operation("UNINSTALL", &target, "force quit: SIGKILL");
+    let _ = Command::new("/usr/bin/pkill")
+        .args(["-9", "-x", &target])
+        .output();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    if !is_process_running(&target) {
+        return true;
+    }
+
+    shared::log_operation("UNINSTALL", &target, "force quit: AppleScript");
+    let escaped = applescript_escape(display_name);
+    let script = format!("tell application \"{}\" to quit", escaped);
+    let _ = Command::new("osascript").arg("-e").arg(&script).output();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    !is_process_running(&target)
+}
+
 /// Escape a string for safe inclusion inside an AppleScript double-quoted
 /// literal. AppleScript escapes `\\` and `"` by prefixing with `\`.
 fn applescript_escape(s: &str) -> String {
@@ -327,6 +408,13 @@ where
         .unwrap_or("")
         .to_string();
     try_remove_login_item(&app_display_name, dry_run);
+
+    // Force-quit the app if it's running. brew uninstall, file deletion,
+    // and launchctl unload all fail (or leave zombies) if the bundle's
+    // process is still alive. Uses CFBundleExecutable for exact matching
+    // so display-name variants (e.g. "Zoom" vs "zoom.us", "Visual Studio
+    // Code" vs "Code") don't cause false negatives.
+    try_force_quit(app_path, &app_display_name, dry_run);
 
     // If this app is a Homebrew cask, let brew handle the payload + zap
     // stanzas first. The file-deletion loop below still runs afterwards to
