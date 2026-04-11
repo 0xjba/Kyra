@@ -311,6 +311,115 @@ fn scan_xcode_device_support() -> Option<ScanItem> {
     })
 }
 
+/// Special scan: find per-user LaunchAgents whose referenced program
+/// no longer exists on disk. Each `.plist` under `~/Library/LaunchAgents`
+/// nominates a binary via `Program` or `ProgramArguments[0]`; if that
+/// binary is gone, the agent is a dead stub left behind by an
+/// uninstalled app or a broken installer. We only touch the per-user
+/// agents directory — system-wide LaunchDaemons require root and are
+/// out of scope.
+fn scan_orphaned_launch_agents() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let agents_dir = home.join("Library/LaunchAgents");
+    if !agents_dir.is_dir() {
+        return None;
+    }
+
+    let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    let entries = match std::fs::read_dir(&agents_dir) {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+
+    for entry in entries.flatten() {
+        let plist_path = entry.path();
+        if plist_path.is_symlink() || !plist_path.is_file() {
+            continue;
+        }
+        let name = match plist_path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        if !name.ends_with(".plist") {
+            continue;
+        }
+        // Skip any Apple-owned agents that somehow land here.
+        if name.starts_with("com.apple.") {
+            continue;
+        }
+        // Respect whitelist
+        let path_str = plist_path.to_string_lossy().to_string();
+        if is_whitelisted(&path_str, &settings.whitelist) {
+            continue;
+        }
+
+        // Parse the plist and pull out the referenced binary.
+        let plist = match plist::Value::from_file(&plist_path) {
+            Ok(v) => v,
+            Err(_) => continue, // malformed plist — leave it alone
+        };
+        let dict = match plist.as_dictionary() {
+            Some(d) => d,
+            None => continue,
+        };
+
+        let program_path: Option<String> = if let Some(prog) =
+            dict.get("Program").and_then(|v| v.as_string())
+        {
+            Some(prog.to_string())
+        } else if let Some(args) = dict.get("ProgramArguments").and_then(|v| v.as_array()) {
+            args.first().and_then(|v| v.as_string()).map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        let Some(program) = program_path else {
+            continue;
+        };
+
+        // Expand `~` just in case — LaunchAgents typically use absolute
+        // paths but we'll be defensive.
+        let expanded = if let Some(rest) = program.strip_prefix("~/") {
+            home.join(rest)
+        } else {
+            PathBuf::from(&program)
+        };
+
+        if expanded.exists() {
+            continue;
+        }
+
+        let size = plist_path.metadata().map(|m| m.len()).unwrap_or(0);
+        paths.push(PathInfo {
+            path: path_str,
+            size,
+            is_dir: false,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Orphaned LaunchAgents",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "orphan_launch_agents".into(),
+        category: "Orphaned Data".into(),
+        label: "Orphaned LaunchAgents".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Chromium-based browsers that keep versioned framework snapshots
 /// under `~/Library/Application Support/<root>/Snapshots/<version>/`.
 /// Only the most recent snapshot is actively used by the running
@@ -780,6 +889,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(browser_snaps) = scan_browser_old_snapshots() {
         results.push(browser_snaps);
+    }
+    if let Some(orphan_agents) = scan_orphaned_launch_agents() {
+        results.push(orphan_agents);
     }
 
     results
