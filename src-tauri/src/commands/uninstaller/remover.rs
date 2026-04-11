@@ -199,6 +199,35 @@ fn try_defaults_delete(bundle_id: &str) {
     shared::log_operation("UNINSTALL", bundle_id, "defaults delete");
 }
 
+/// Inspect the app's `Info.plist` to see if it declares a need for the
+/// Local Network permission — either via `NSLocalNetworkUsageDescription`
+/// (explicit usage string) or by registering Bonjour services with
+/// `NSBonjourServices`. On macOS 15+ this permission is tracked in
+/// `/private/var/db/tcc.db` under a name that may not be cleared when the
+/// bundle is removed, so the user can end up with a zombie permission
+/// entry in System Settings → Privacy & Security → Local Network.
+///
+/// Must run *before* the bundle is deleted — once `Info.plist` is gone we
+/// have no way to recover these keys.
+fn declares_local_network_usage(app_path: &str) -> bool {
+    let plist_path = Path::new(app_path).join("Contents/Info.plist");
+    let plist = match plist::Value::from_file(&plist_path) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let dict = match plist.as_dictionary() {
+        Some(d) => d,
+        None => return false,
+    };
+    if dict.contains_key("NSLocalNetworkUsageDescription") {
+        return true;
+    }
+    if dict.contains_key("NSBonjourServices") {
+        return true;
+    }
+    false
+}
+
 /// Scan `/Library/SystemExtensions` for any `.systemextension` bundle whose
 /// on-disk path contains the app's bundle identifier. System extensions
 /// (network filters, camera sensors, endpoint security agents, etc.) are
@@ -466,6 +495,10 @@ where
         .to_string();
     try_remove_login_item(&app_display_name, dry_run);
 
+    // Inspect Info.plist *before* deletion so we can warn about macOS 15+
+    // Local Network permissions that may outlive the bundle.
+    let has_local_network = declares_local_network_usage(app_path);
+
     // Force-quit the app if it's running. brew uninstall, file deletion,
     // and launchctl unload all fail (or leave zombies) if the bundle's
     // process is still alive. Uses CFBundleExecutable for exact matching
@@ -617,6 +650,23 @@ where
     // on-disk anyway).
     if !dry_run && !bundle_id.is_empty() {
         try_defaults_delete(bundle_id);
+    }
+
+    // Warn about Local Network permissions. TCC.db entries for this
+    // permission are keyed by bundle id and survive bundle removal on
+    // macOS 15+, leaving a stale entry in System Settings.
+    if has_local_network {
+        let name_for_msg = if app_display_name.is_empty() {
+            bundle_id
+        } else {
+            app_display_name.as_str()
+        };
+        let msg = format!(
+            "Warning: {} requested Local Network access. On macOS 15+ this permission may remain listed in System Settings → Privacy & Security → Local Network.",
+            name_for_msg
+        );
+        shared::log_operation("UNINSTALL", bundle_id, "local network permission advisory");
+        errors.push(msg);
     }
 
     // Detect orphaned system extensions that the SystemExtension framework
