@@ -419,16 +419,10 @@ pub fn all_rules() -> Vec<CleanRule> {
             label: "Xcode Archives".into(),
             paths: vec!["~/Library/Developer/Xcode/Archives".into()],
         },
-        CleanRule {
-            id: "dev_xcode_device_support".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Xcode Device Support".into(),
-            paths: vec![
-                "~/Library/Developer/Xcode/iOS DeviceSupport".into(),
-                "~/Library/Developer/Xcode/watchOS DeviceSupport".into(),
-            ],
-        },
+        // Xcode Device Support is handled by a special scan
+        // (`scan_xcode_device_support`) that preserves the N most recent
+        // versions — re-downloading ~2 GB of device symbols blocks debugging
+        // of real hardware until it completes.
         CleanRule {
             id: "dev_xcode_simulators".into(),
             max_age_days: None,

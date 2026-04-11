@@ -231,6 +231,86 @@ fn scan_tm_failed_backups() -> Option<ScanItem> {
     })
 }
 
+/// Number of Xcode DeviceSupport versions to preserve per platform.
+/// Symbol bundles for real-device debugging can be ~2 GB each and
+/// redownload automatically when you attach a device; keeping the
+/// most recent few avoids blocking debugging of active hardware.
+const XCODE_DEVICE_SUPPORT_KEEP: usize = 3;
+
+/// Special scan: enumerate `~/Library/Developer/Xcode/*DeviceSupport/*`
+/// subdirectories, sort by modified time descending, and flag all but
+/// the `XCODE_DEVICE_SUPPORT_KEEP` most recent for deletion.
+fn scan_xcode_device_support() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let roots = [
+        home.join("Library/Developer/Xcode/iOS DeviceSupport"),
+        home.join("Library/Developer/Xcode/watchOS DeviceSupport"),
+        home.join("Library/Developer/Xcode/tvOS DeviceSupport"),
+        home.join("Library/Developer/Xcode/visionOS DeviceSupport"),
+    ];
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for root in &roots {
+        if !root.is_dir() {
+            continue;
+        }
+
+        // Collect (path, modified_time) for each version subdir.
+        let mut versions: Vec<(PathBuf, SystemTime)> = Vec::new();
+        let entries = match std::fs::read_dir(root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() || p.is_symlink() {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            versions.push((p, modified));
+        }
+
+        // Sort newest first so the top N are preserved.
+        versions.sort_by(|a, b| b.1.cmp(&a.1));
+
+        for (path, _) in versions.into_iter().skip(XCODE_DEVICE_SUPPORT_KEEP) {
+            let size = deletable_dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+            paths.push(PathInfo {
+                path: path.to_string_lossy().to_string(),
+                size,
+                is_dir: true,
+            });
+            total_size += size;
+        }
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Xcode Device Support (old versions)",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_xcode_device_support".into(),
+        category: "Developer Tools".into(),
+        label: "Xcode Device Support (old versions)".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Special scan: find incomplete download files in ~/Downloads.
 fn scan_incomplete_downloads() -> Option<ScanItem> {
     let downloads = dirs::home_dir()?.join("Downloads");
@@ -421,6 +501,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(tm_failed) = scan_tm_failed_backups() {
         results.push(tm_failed);
+    }
+    if let Some(xcode_ds) = scan_xcode_device_support() {
+        results.push(xcode_ds);
     }
 
     results
