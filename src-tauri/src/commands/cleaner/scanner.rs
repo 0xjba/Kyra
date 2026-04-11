@@ -311,6 +311,114 @@ fn scan_xcode_device_support() -> Option<ScanItem> {
     })
 }
 
+/// Number of JetBrains Toolbox IDE builds to preserve per product.
+/// Toolbox keeps older builds around for rollback, but only the most
+/// recent is actively used; each old build is typically 1–2 GB.
+const JETBRAINS_TOOLBOX_KEEP: usize = 1;
+
+/// Special scan: surface old JetBrains Toolbox IDE builds beyond the
+/// most recent one per product. Toolbox stores each product under
+/// `~/Library/Application Support/JetBrains/Toolbox/apps/<Product>/ch-0/<build>/`
+/// and the active build is whichever a running IDE launcher points at.
+/// We sort by mtime and preserve the top `JETBRAINS_TOOLBOX_KEEP`.
+fn scan_jetbrains_toolbox_old_builds() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let apps_root = home.join("Library/Application Support/JetBrains/Toolbox/apps");
+    if !apps_root.is_dir() {
+        return None;
+    }
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    let products = match std::fs::read_dir(&apps_root) {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+
+    for product_entry in products.flatten() {
+        let product_path = product_entry.path();
+        if !product_path.is_dir() || product_path.is_symlink() {
+            continue;
+        }
+
+        // Each product has a channel subdir (typically ch-0). Walk any
+        // channels we find so this works for users with release/EAP
+        // channels installed side-by-side.
+        let channels = match std::fs::read_dir(&product_path) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for channel_entry in channels.flatten() {
+            let channel_path = channel_entry.path();
+            if !channel_path.is_dir() || channel_path.is_symlink() {
+                continue;
+            }
+
+            // Collect build subdirectories with their mtime.
+            let mut builds: Vec<(PathBuf, SystemTime)> = Vec::new();
+            let build_entries = match std::fs::read_dir(&channel_path) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for build_entry in build_entries.flatten() {
+                let build_path = build_entry.path();
+                if !build_path.is_dir() || build_path.is_symlink() {
+                    continue;
+                }
+                // Skip non-build metadata files like `.history.json`.
+                let name = match build_path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if name.starts_with('.') {
+                    continue;
+                }
+                let modified = build_entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                builds.push((build_path, modified));
+            }
+
+            // Sort newest first, preserve the top N.
+            builds.sort_by(|a, b| b.1.cmp(&a.1));
+
+            for (path, _) in builds.into_iter().skip(JETBRAINS_TOOLBOX_KEEP) {
+                let size = deletable_dir_size(&path);
+                if size == 0 {
+                    continue;
+                }
+                paths.push(PathInfo {
+                    path: path.to_string_lossy().to_string(),
+                    size,
+                    is_dir: true,
+                });
+                total_size += size;
+            }
+        }
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "JetBrains Toolbox (old builds)",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_jetbrains_toolbox_old".into(),
+        category: "Developer Tools".into(),
+        label: "JetBrains Toolbox (old builds)".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Returns true if any Xcode simulator runtime is currently booted,
 /// determined via `xcrun simctl list devices booted`. When a simulator
 /// is booted we must not touch its dyld shared cache — the running
@@ -572,6 +680,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(xcode_sim) = scan_xcode_simulator_caches() {
         results.push(xcode_sim);
+    }
+    if let Some(jb_old) = scan_jetbrains_toolbox_old_builds() {
+        results.push(jb_old);
     }
 
     results
