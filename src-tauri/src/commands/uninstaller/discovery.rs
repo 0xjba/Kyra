@@ -115,12 +115,18 @@ fn scan_caskroom(caskroom: &Path) -> Vec<AppInfo> {
     apps
 }
 
-/// Scans /Applications, ~/Applications, Homebrew Caskrooms, and Setapp for installed apps.
+/// Scans /Applications, /System/Applications, ~/Applications, Homebrew
+/// Caskrooms, and Setapp for installed apps. System apps are surfaced with
+/// `is_system = true` so the UI can display them but prevent removal.
 pub fn scan_apps() -> Vec<AppInfo> {
     let mut apps = Vec::new();
 
-    // System applications
+    // User-installed applications
     apps.extend(scan_dir(Path::new("/Applications")));
+
+    // macOS built-in applications (surfaced read-only)
+    apps.extend(scan_dir(Path::new("/System/Applications")));
+    apps.extend(scan_dir(Path::new("/System/Applications/Utilities")));
 
     // User applications
     if let Some(home) = dirs::home_dir() {
