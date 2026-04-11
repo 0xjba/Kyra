@@ -78,6 +78,41 @@ fn tmutil_delete(path: &str) -> Result<(), String> {
     }
 }
 
+/// Translate an `std::io::Error` from a delete operation into a short
+/// human-readable diagnostic. macOS returns the same `PermissionDenied`
+/// kind for SIP protection, per-file immutable flags, root ownership,
+/// and access-control list restrictions, so the raw message ("Operation
+/// not permitted") is rarely actionable. Where possible we map raw OS
+/// error codes to a specific hint the user can act on.
+fn classify_delete_error(err: &std::io::Error) -> String {
+    use std::io::ErrorKind;
+
+    let base = err.to_string();
+    let hint: Option<&'static str> = match err.raw_os_error() {
+        Some(1) => Some("operation not permitted — path may be SIP-protected, immutable (chflags uchg/schg), or owned by root"),
+        Some(13) => Some("access denied — check the file's ACL and your user's write permission on the parent directory"),
+        Some(16) => Some("file in use by a running process — quit the owning app and retry"),
+        Some(30) => Some("read-only filesystem"),
+        Some(66) => Some("directory not empty — a protected user-data subdir (Service Worker / IndexedDB / …) was preserved"),
+        Some(35) => Some("resource temporarily unavailable — another process holds a lock"),
+        _ => None,
+    };
+
+    if let Some(hint) = hint {
+        return format!("{} ({})", base, hint);
+    }
+
+    match err.kind() {
+        ErrorKind::PermissionDenied => format!(
+            "{} (permission denied — may be SIP-protected or owned by root)",
+            base
+        ),
+        ErrorKind::NotFound => format!("{} (already removed)", base),
+        ErrorKind::ReadOnlyFilesystem => format!("{} (read-only filesystem)", base),
+        _ => base,
+    }
+}
+
 /// Extract the `YYYY-MM-DD-HHMMSS` date portion from a local snapshot
 /// identifier like `com.apple.TimeMachine.2025-11-02-120000.local`.
 /// Returns `None` if the input doesn't match the expected shape.
@@ -175,7 +210,7 @@ fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<String>) {
                 shared::log_operation("CLEAN", &path.to_string_lossy(), action);
             }
             Err(e) => {
-                errs.push(format!("{}: {}", path.display(), e));
+                errs.push(format!("{}: {}", path.display(), classify_delete_error(&e)));
             }
         }
     }
@@ -300,8 +335,13 @@ where
                             shared::log_operation("CLEAN", &path_info.path, action);
                         }
                         Err(e) => {
-                            shared::log_operation("CLEAN", &path_info.path, &format!("ERROR: {}", e));
-                            errors.push(format!("{}: {}", path_info.path, e));
+                            let diagnosis = classify_delete_error(&e);
+                            shared::log_operation(
+                                "CLEAN",
+                                &path_info.path,
+                                &format!("ERROR: {}", diagnosis),
+                            );
+                            errors.push(format!("{}: {}", path_info.path, diagnosis));
                         }
                     }
                 }
