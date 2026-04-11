@@ -47,6 +47,26 @@ fn is_launchd_plist(path: &str) -> bool {
         || path.contains("/PrivilegedHelperTools/")
 }
 
+/// Path to macOS's Launch Services registration tool.
+const LSREGISTER: &str =
+    "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";
+
+/// Best-effort `lsregister -u <app>` to remove the .app bundle from the
+/// Launch Services database before it's deleted. Without this, stale
+/// entries can linger for days in "Open with…" menus, Spotlight results,
+/// and the default-application mappings. Failures are ignored — lsregister
+/// is advisory; the file deletion proceeds either way.
+fn try_lsregister_unregister(app_path: &str) {
+    if !app_path.ends_with(".app") {
+        return;
+    }
+    if !Path::new(LSREGISTER).exists() {
+        return;
+    }
+    let _ = Command::new(LSREGISTER).arg("-u").arg(app_path).output();
+    shared::log_operation("UNINSTALL", app_path, "lsregister -u");
+}
+
 /// Best-effort `launchctl unload` (or `bootout`) on a job plist before it
 /// gets deleted. Stopping the service avoids "resource busy" errors and
 /// prevents launchd from respawning the binary we just removed. Failures
@@ -305,6 +325,10 @@ where
             // delete the file, otherwise launchd may hold a reference
             // to a now-missing binary or immediately respawn it.
             try_launchctl_unload(path_str);
+
+            // Drop the app bundle from the Launch Services database so
+            // it stops showing up in "Open with…" menus and Spotlight.
+            try_lsregister_unregister(path_str);
 
             let delete_result = if permanent {
                 if path.is_dir() {
