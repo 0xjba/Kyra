@@ -1036,6 +1036,11 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
             // Skip whitelisted paths
             let expanded_str = expanded.to_string_lossy().to_string();
             if is_whitelisted(&expanded_str, &settings.whitelist) {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &expanded_str,
+                    &format!("skipped: on user whitelist (rule: {})", rule.label),
+                );
                 continue;
             }
 
@@ -1403,6 +1408,11 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
 
             // Skip containermanagerd-protected sandbox stubs
             if is_protected_container_stub(&path) {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &path.to_string_lossy(),
+                    "skipped: containermanagerd-protected sandbox stub",
+                );
                 continue;
             }
 
@@ -1420,6 +1430,11 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
             // Skip whitelisted paths
             let path_str = path.to_string_lossy().to_string();
             if is_whitelisted(&path_str, &settings.whitelist) {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &path_str,
+                    "skipped: on user whitelist (orphan candidate)",
+                );
                 continue;
             }
 

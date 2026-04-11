@@ -255,12 +255,16 @@ where
             // still goes through the normal validation.
             if !is_tm_snapshot_rule {
                 if !is_safe_path(&path_info.path) {
-                    errors.push(format!("Skipped protected path: {}", path_info.path));
+                    let reason = "skipped: protected path (SIP / system directory)";
+                    shared::log_operation("CLEAN", &path_info.path, reason);
+                    errors.push(format!("{}: {}", path_info.path, reason));
                     continue;
                 }
 
                 if is_whitelisted(&path_info.path, &whitelist_set) {
-                    errors.push(format!("Skipped whitelisted path: {}", path_info.path));
+                    let reason = "skipped: on user whitelist";
+                    shared::log_operation("CLEAN", &path_info.path, reason);
+                    errors.push(format!("{}: {}", path_info.path, reason));
                     continue;
                 }
             }
