@@ -199,6 +199,28 @@ fn try_defaults_delete(bundle_id: &str) {
     shared::log_operation("UNINSTALL", bundle_id, "defaults delete");
 }
 
+/// Returns true if the given path is a macOS-managed app container stub
+/// that `containermanagerd` protects via the `com.apple.provenance` xattr.
+/// These directories are located under `~/Library/Containers/<bundle>/`
+/// and are marked by the presence of a
+/// `.com.apple.containermanagerd.metadata.plist` file. Removing them via
+/// `rm -rf` fails by design — even with admin privileges — because the
+/// xattr triggers a kernel-level block.
+///
+/// User data inside the container will already have been deleted via
+/// per-file entries by the time we reach the directory itself, so the
+/// leftover stub is harmless and should not be reported as an error.
+fn is_protected_container_stub(path: &str) -> bool {
+    if !path.contains("/Library/Containers/") {
+        return false;
+    }
+    let p = Path::new(path);
+    if !p.is_dir() {
+        return false;
+    }
+    p.join(".com.apple.containermanagerd.metadata.plist").exists()
+}
+
 /// Inspect the app's `Info.plist` to see if it declares a need for the
 /// Local Network permission — either via `NSLocalNetworkUsageDescription`
 /// (explicit usage string) or by registering Bonjour services with
@@ -565,6 +587,27 @@ where
         }
 
         if !path.exists() {
+            on_progress(&UninstallProgress {
+                current_item: path_str.to_string(),
+                items_done: i + 1,
+                items_total,
+                bytes_freed,
+            });
+            continue;
+        }
+
+        // macOS-managed container stubs can't be removed via rm -rf because
+        // containermanagerd protects them with the com.apple.provenance
+        // xattr. Any user data inside will have been deleted via per-file
+        // entries before we reach this point, so we skip the stub itself
+        // silently — attempting would just trigger a pointless admin prompt
+        // that still ends in failure.
+        if is_protected_container_stub(path_str) {
+            shared::log_operation(
+                "UNINSTALL",
+                path_str,
+                "SKIPPED: protected container stub",
+            );
             on_progress(&UninstallProgress {
                 current_item: path_str.to_string(),
                 items_done: i + 1,
