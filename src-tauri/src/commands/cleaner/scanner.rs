@@ -92,6 +92,145 @@ fn scan_ds_store_files() -> Option<ScanItem> {
     })
 }
 
+/// Minimum age (in hours) before an incomplete Time Machine backup is
+/// considered cleanup-eligible. A three-day window keeps legitimate
+/// retry/resume scenarios out of the scan results.
+const TM_INPROGRESS_MIN_AGE_HOURS: u64 = 72;
+
+/// Returns true if Time Machine is configured on this machine (the
+/// `com.apple.TimeMachine` domain exists and has an `AutoBackup` key).
+/// Used to short-circuit the scan early on systems without TM.
+fn tm_is_configured() -> bool {
+    let out = std::process::Command::new("/usr/bin/defaults")
+        .args(["read", "/Library/Preferences/com.apple.TimeMachine", "AutoBackup"])
+        .output();
+    match out {
+        Ok(o) => o.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Returns true if a Time Machine backup is currently running via
+/// `tmutil status`. Skipping during active backups avoids racing with
+/// backupd mid-write.
+fn tm_is_running() -> bool {
+    let out = std::process::Command::new("/usr/bin/tmutil").arg("status").output();
+    match out {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout.contains("Running = 1")
+        }
+        _ => false,
+    }
+}
+
+/// Special scan: find abandoned Time Machine in-progress backup bundles
+/// older than `TM_INPROGRESS_MIN_AGE_HOURS`. Walks the top-level
+/// `/Volumes` looking for TM target volumes (identified by a
+/// `Backups.backupdb` root) and collects `*.inProgress` /
+/// `*.inprogress` directories at a bounded depth.
+///
+/// Gates applied, in order:
+/// - TM must be configured on this machine
+/// - TM must not currently be running (active backup)
+/// - Each found in-progress dir must be older than the safety window
+///
+/// The scanner only *reports* these paths; the executor runs the actual
+/// deletion through `tmutil delete` so the TM catalogue is kept
+/// consistent.
+fn scan_tm_failed_backups() -> Option<ScanItem> {
+    if !tm_is_configured() || tm_is_running() {
+        return None;
+    }
+
+    let volumes_root = Path::new("/Volumes");
+    if !volumes_root.is_dir() {
+        return None;
+    }
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(TM_INPROGRESS_MIN_AGE_HOURS * 3600))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+
+    fn walk_inprogress(
+        dir: &Path,
+        depth: usize,
+        cutoff: SystemTime,
+        paths: &mut Vec<PathInfo>,
+        total: &mut u64,
+    ) {
+        if depth == 0 {
+            return;
+        }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let lower = name.to_lowercase();
+            if lower.ends_with(".inprogress") {
+                if let Ok(meta) = path.metadata() {
+                    let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                    if modified < cutoff {
+                        let size = deletable_dir_size(&path);
+                        if size > 0 {
+                            paths.push(PathInfo {
+                                path: path.to_string_lossy().to_string(),
+                                size,
+                                is_dir: true,
+                            });
+                            *total += size;
+                        }
+                    }
+                }
+                continue; // don't descend into the in-progress dir itself
+            }
+            walk_inprogress(&path, depth - 1, cutoff, paths, total);
+        }
+    }
+
+    let volumes = match std::fs::read_dir(volumes_root) {
+        Ok(v) => v,
+        Err(_) => return None,
+    };
+    for vol_entry in volumes.flatten() {
+        let vol_path = vol_entry.path();
+        if !vol_path.is_dir() || vol_path.is_symlink() {
+            continue;
+        }
+        let backupdb = vol_path.join("Backups.backupdb");
+        if !backupdb.is_dir() {
+            continue;
+        }
+        walk_inprogress(&backupdb, 3, cutoff, &mut paths, &mut total_size);
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Time Machine Failed Backups",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "special_tm_failed_backups".into(),
+        category: "Maintenance".into(),
+        label: "Time Machine Failed Backups".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Special scan: find incomplete download files in ~/Downloads.
 fn scan_incomplete_downloads() -> Option<ScanItem> {
     let downloads = dirs::home_dir()?.join("Downloads");
@@ -279,6 +418,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(incomplete) = scan_incomplete_downloads() {
         results.push(incomplete);
+    }
+    if let Some(tm_failed) = scan_tm_failed_backups() {
+        results.push(tm_failed);
     }
 
     results

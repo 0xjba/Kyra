@@ -1,10 +1,30 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use super::{is_safe_path, CleanProgress, CleanResult, ScanItem};
 use crate::commands::shared;
 use crate::commands::utils::dir_size;
+
+/// Delete a Time Machine in-progress backup bundle via `tmutil delete`,
+/// which walks the TM catalogue so the backup database stays consistent.
+/// Plain `rm -rf` leaves orphaned index entries and can corrupt subsequent
+/// incremental backups, so we never fall back to filesystem deletion for
+/// these paths.
+fn tmutil_delete(path: &str) -> Result<(), String> {
+    let output = Command::new("/usr/bin/tmutil")
+        .arg("delete")
+        .arg(path)
+        .output()
+        .map_err(|e| format!("tmutil spawn failed: {}", e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(stderr.trim().to_string())
+    }
+}
 
 /// Returns true if `path` (or any parent) is covered by a whitelisted entry.
 fn is_whitelisted(path: &str, whitelist: &HashSet<&str>) -> bool {
@@ -90,6 +110,11 @@ where
     for (i, item) in items.iter().enumerate() {
         let mut item_had_success = false;
 
+        // Time Machine failed backups must be deleted through tmutil so the
+        // TM catalogue stays consistent — we never touch .inProgress dirs
+        // with filesystem calls.
+        let is_tm_rule = item.rule_id == "special_tm_failed_backups";
+
         for path_info in &item.paths {
             if !is_safe_path(&path_info.path) {
                 errors.push(format!("Skipped protected path: {}", path_info.path));
@@ -104,6 +129,22 @@ where
             if dry_run {
                 bytes_freed += path_info.size;
                 item_had_success = true;
+            } else if is_tm_rule {
+                match tmutil_delete(&path_info.path) {
+                    Ok(()) => {
+                        bytes_freed += path_info.size;
+                        item_had_success = true;
+                        shared::log_operation("CLEAN", &path_info.path, "tmutil delete");
+                    }
+                    Err(e) => {
+                        shared::log_operation(
+                            "CLEAN",
+                            &path_info.path,
+                            &format!("tmutil delete failed: {}", e),
+                        );
+                        errors.push(format!("{}: {}", path_info.path, e));
+                    }
+                }
             } else {
                 let path = Path::new(&path_info.path);
 
