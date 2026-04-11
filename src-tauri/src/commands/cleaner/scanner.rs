@@ -53,21 +53,54 @@ fn walk_ds_store(
 }
 
 /// Special scan: find .DS_Store files throughout the home directory.
+/// The skip list excludes directories where walking is expensive
+/// (package caches, build output, SCM history, VM images) or where
+/// .DS_Store entries are not user-visible and therefore not worth
+/// reporting. Raised to 2000 files because large multi-repo setups
+/// routinely exceed the old 500-file cap and users expect a single
+/// sweep to reach the entire home tree.
 fn scan_ds_store_files() -> Option<ScanItem> {
     let home = dirs::home_dir()?;
     let mut paths = Vec::new();
     let mut total_size = 0u64;
     let mut count = 0usize;
-    let max_files = 500;
+    let max_files = 2000;
 
     let skip_dirs: &[&str] = &[
+        // Trash and SCM history — large, noisy, not worth touching
         ".Trash",
-        "node_modules",
         ".git",
+        ".hg",
+        ".svn",
+        // Package managers and language-specific caches
+        "node_modules",
+        "bower_components",
+        ".npm",
+        ".yarn",
+        ".pnpm-store",
+        ".cargo",
+        ".rustup",
+        ".gradle",
+        ".m2",
+        ".ivy2",
+        "vendor",
+        // Build output directories
+        "target",
+        "build",
+        "dist",
+        ".next",
+        ".nuxt",
+        ".turbo",
+        // macOS Library internals — already cleaned by other rules
         "Library/Caches",
         "Library/Developer",
-        ".npm",
-        "target",
+        "Library/Containers",
+        "Library/Group Containers",
+        // APFS filesystem metadata
+        ".Spotlight-V100",
+        ".DocumentRevisions-V100",
+        ".fseventsd",
+        ".TemporaryItems",
     ];
 
     walk_ds_store(&home, &mut paths, &mut total_size, &mut count, max_files, skip_dirs);
