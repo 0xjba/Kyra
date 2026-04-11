@@ -47,6 +47,49 @@ fn is_launchd_plist(path: &str) -> bool {
         || path.contains("/PrivilegedHelperTools/")
 }
 
+/// Escape a string for safe inclusion inside an AppleScript double-quoted
+/// literal. AppleScript escapes `\\` and `"` by prefixing with `\`.
+fn applescript_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Best-effort removal of the app from macOS Login Items. Uses
+/// `osascript` + System Events to walk the current user's login-items
+/// list in reverse and delete any entry whose name matches `app_name`.
+/// Iterating in reverse avoids index shifting as items are removed.
+///
+/// This covers apps that registered themselves via the classic
+/// LSSharedFileList API. Modern SMAppService-registered helpers are
+/// already picked up through the LaunchAgents sweep in discovery.
+///
+/// The first invocation of System Events from a new app triggers a
+/// macOS Automation permission prompt; failures are logged but do not
+/// block the rest of the uninstall.
+fn try_remove_login_item(app_name: &str, dry_run: bool) {
+    if app_name.is_empty() || dry_run {
+        return;
+    }
+    let escaped = applescript_escape(app_name);
+    let script = format!(
+        "tell application \"System Events\"\n\
+            try\n\
+                set itemCount to count of login items\n\
+                repeat with i from itemCount to 1 by -1\n\
+                    try\n\
+                        if name of login item i is \"{}\" then\n\
+                            delete login item i\n\
+                        end if\n\
+                    end try\n\
+                end repeat\n\
+            end try\n\
+        end tell",
+        escaped
+    );
+
+    let _ = Command::new("osascript").arg("-e").arg(&script).output();
+    shared::log_operation("UNINSTALL", app_name, "login item removed");
+}
+
 /// Best-effort `defaults delete <bundle_id>` and
 /// `defaults -currentHost delete <bundle_id>` to flush cfprefsd's
 /// in-memory preference cache. Without this flush, cfprefsd may
@@ -274,6 +317,16 @@ where
     let mut items_removed: usize = 0;
     let mut errors: Vec<String> = Vec::new();
     let mut deleted_paths: Vec<String> = Vec::new();
+
+    // Strip any login-items entry for this app before we start deleting
+    // files. The display name is the app bundle's file stem — e.g. the
+    // `/Applications/Foo.app` bundle shows up in Login Items as "Foo".
+    let app_display_name = Path::new(app_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    try_remove_login_item(&app_display_name, dry_run);
 
     // If this app is a Homebrew cask, let brew handle the payload + zap
     // stanzas first. The file-deletion loop below still runs afterwards to
