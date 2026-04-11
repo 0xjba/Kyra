@@ -76,10 +76,17 @@ fn scan_ds_store_files() -> Option<ScanItem> {
         return None;
     }
 
+    let label = format!(".DS_Store Files ({})", count);
+    crate::commands::shared::log_operation(
+        "SCAN",
+        &label,
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
     Some(ScanItem {
         rule_id: "maint_ds_store".into(),
         category: "Maintenance".into(),
-        label: format!(".DS_Store Files ({})", count),
+        label,
         paths,
         total_size,
     })
@@ -114,6 +121,12 @@ fn scan_incomplete_downloads() -> Option<ScanItem> {
     if paths.is_empty() {
         return None;
     }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Incomplete Downloads",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
 
     Some(ScanItem {
         rule_id: "maint_incomplete_downloads".into(),
@@ -207,11 +220,20 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
                 // Age-filtered scanning: only include files older than the threshold
                 if expanded.is_dir() {
                     let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days);
+                    let before_count = found_paths.len();
                     for p in old_paths {
                         if !is_whitelisted(&p.path, &settings.whitelist) {
                             total_size += p.size;
                             found_paths.push(p);
                         }
+                    }
+                    let added = found_paths.len() - before_count;
+                    if added > 0 {
+                        crate::commands::shared::log_operation(
+                            "SCAN",
+                            &rule.label,
+                            &format!("age-filter>{} days: {} paths from {}", max_age_days, added, expanded.display()),
+                        );
                     }
                 }
             } else {
@@ -236,6 +258,11 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
         }
 
         if !found_paths.is_empty() {
+            crate::commands::shared::log_operation(
+                "SCAN",
+                &rule.label,
+                &format!("{} bytes ({} paths)", total_size, found_paths.len()),
+            );
             results.push(ScanItem {
                 rule_id: rule.id.clone(),
                 category: rule.category.clone(),
@@ -506,6 +533,12 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
             }
 
             let rule_id = format!("orphan_{}", name_lower.replace('.', "_"));
+
+            crate::commands::shared::log_operation(
+                "SCAN",
+                &name,
+                &format!("{} bytes (orphaned)", size),
+            );
 
             items.push(ScanItem {
                 rule_id,
