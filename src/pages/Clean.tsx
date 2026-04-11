@@ -959,6 +959,16 @@ function CleaningView() {
           : currentLabel}
       </div>
 
+      {isDone && result && result.errors.length > 0 && (
+        <div style={{
+          fontSize: 11,
+          color: "rgba(255,255,255,0.4)",
+          marginTop: 4,
+        }}>
+          {result.errors.length} file{result.errors.length !== 1 ? "s" : ""} couldn't be removed (in use or protected)
+        </div>
+      )}
+
       {isDone && card && (
         <div className={`clean-equiv-card${showCard ? " visible" : ""}`}>
           <div className="clean-equiv-icon">
