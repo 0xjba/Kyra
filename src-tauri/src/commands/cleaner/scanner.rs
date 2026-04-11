@@ -311,6 +311,134 @@ fn scan_xcode_device_support() -> Option<ScanItem> {
     })
 }
 
+/// File extensions that indicate a virtual-machine disk image.
+const VM_IMAGE_EXTENSIONS: &[&str] =
+    &["qcow2", "img", "vmdk", "vhd", "vhdx", "vdi", "raw", "dmg"];
+
+/// Bundle IDs used by Claude Desktop releases. If any of these are
+/// installed (or Spotlight can find them anywhere), we leave the VM
+/// data alone — it's still owned by a live app.
+const CLAUDE_DESKTOP_BUNDLE_IDS: &[&str] =
+    &["com.anthropic.claudefordesktop", "com.anthropic.claude"];
+
+/// Returns true if a Claude Desktop bundle is present anywhere on disk.
+fn claude_desktop_installed(installed_ids: &HashSet<String>) -> bool {
+    for id in CLAUDE_DESKTOP_BUNDLE_IDS {
+        if installed_ids.contains(*id) {
+            return true;
+        }
+        if mdfind_has_bundle_id(id) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Walk a directory tree looking for files whose extension matches
+/// `VM_IMAGE_EXTENSIONS`. Results accumulate into `out`; walk stops
+/// after `max_results` to keep pathological trees bounded.
+fn find_vm_disk_images(root: &Path, out: &mut Vec<PathBuf>, max_results: usize) {
+    if out.len() >= max_results {
+        return;
+    }
+    let entries = match std::fs::read_dir(root) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        if out.len() >= max_results {
+            return;
+        }
+        let path = entry.path();
+        if path.is_symlink() {
+            continue;
+        }
+        if path.is_dir() {
+            find_vm_disk_images(&path, out, max_results);
+            continue;
+        }
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            let lower = ext.to_lowercase();
+            if VM_IMAGE_EXTENSIONS.iter().any(|e| *e == lower) {
+                out.push(path);
+            }
+        }
+    }
+}
+
+/// Special scan: Claude Desktop virtual-machine disk images left behind
+/// after the app is uninstalled. Claude Desktop uses VMs for its
+/// sandboxed compute environments and their disk images can exceed a
+/// few GB each; uninstalling the app does not always reap them.
+///
+/// We only surface images when:
+/// - Claude Desktop is NOT installed anywhere Spotlight can find it
+/// - The image file is at least 100 MB (smaller files are usually
+///   config/metadata, not VM disks)
+/// - The file is outside any whitelisted path
+fn scan_orphaned_claude_vms() -> Option<ScanItem> {
+    let installed_ids = collect_installed_bundle_ids();
+    if claude_desktop_installed(&installed_ids) {
+        return None;
+    }
+
+    let home = dirs::home_dir()?;
+    let roots = [
+        home.join("Library/Application Support/Claude"),
+        home.join("Library/Containers/com.anthropic.claudefordesktop"),
+        home.join("Library/Containers/com.anthropic.claude"),
+        home.join("Library/Caches/com.anthropic.claudefordesktop"),
+        home.join("Library/Caches/com.anthropic.claude"),
+    ];
+
+    let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for root in &roots {
+        if root.is_dir() {
+            find_vm_disk_images(root, &mut candidates, 50);
+        }
+    }
+
+    const MIN_VM_IMAGE_SIZE: u64 = 100 * 1024 * 1024; // 100 MB
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+    for path in candidates {
+        let path_str = path.to_string_lossy().to_string();
+        if is_whitelisted(&path_str, &settings.whitelist) {
+            continue;
+        }
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        if size < MIN_VM_IMAGE_SIZE {
+            continue;
+        }
+        paths.push(PathInfo {
+            path: path_str,
+            size,
+            is_dir: false,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Orphaned Claude Desktop VM disks",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "orphan_claude_desktop_vm".into(),
+        category: "Orphaned Data".into(),
+        label: "Orphaned Claude Desktop VM disks".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Special scan: find per-user LaunchAgents whose referenced program
 /// no longer exists on disk. Each `.plist` under `~/Library/LaunchAgents`
 /// nominates a binary via `Program` or `ProgramArguments[0]`; if that
@@ -892,6 +1020,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(orphan_agents) = scan_orphaned_launch_agents() {
         results.push(orphan_agents);
+    }
+    if let Some(claude_vms) = scan_orphaned_claude_vms() {
+        results.push(claude_vms);
     }
 
     results
