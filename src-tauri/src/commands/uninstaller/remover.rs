@@ -35,6 +35,50 @@ fn is_system_app(path: &str) -> bool {
     path.starts_with("/System/Applications/")
 }
 
+/// Returns true if a path looks like a launchd job definition we should
+/// try to unload before deleting — i.e. a .plist under a LaunchAgents,
+/// LaunchDaemons, or PrivilegedHelperTools directory.
+fn is_launchd_plist(path: &str) -> bool {
+    if !path.ends_with(".plist") {
+        return false;
+    }
+    path.contains("/LaunchAgents/")
+        || path.contains("/LaunchDaemons/")
+        || path.contains("/PrivilegedHelperTools/")
+}
+
+/// Best-effort `launchctl unload` (or `bootout`) on a job plist before it
+/// gets deleted. Stopping the service avoids "resource busy" errors and
+/// prevents launchd from respawning the binary we just removed. Failures
+/// are logged but never propagated — if unload fails we still proceed
+/// with the delete, because some jobs simply aren't loaded.
+///
+/// LaunchDaemons live in /Library and need admin to unload; we route
+/// those through osascript. User LaunchAgents unload without escalation.
+fn try_launchctl_unload(path: &str) {
+    if !is_launchd_plist(path) {
+        return;
+    }
+
+    let needs_admin = path.starts_with("/Library/LaunchDaemons/")
+        || path.starts_with("/Library/PrivilegedHelperTools/");
+
+    if needs_admin {
+        let script = format!(
+            "do shell script \"/bin/launchctl unload {} 2>/dev/null || true\" with administrator privileges",
+            shell_escape(path)
+        );
+        let _ = Command::new("osascript").arg("-e").arg(&script).output();
+    } else {
+        let _ = Command::new("/bin/launchctl")
+            .arg("unload")
+            .arg(path)
+            .output();
+    }
+
+    shared::log_operation("UNINSTALL", path, "launchctl unload");
+}
+
 /// Attempt privileged deletion via osascript (triggers macOS admin password prompt).
 /// Used as a fallback when normal deletion fails with Permission denied.
 fn privileged_delete(path: &str, permanent: bool) -> Result<(), std::io::Error> {
@@ -257,6 +301,11 @@ where
             items_removed += 1;
             deleted_paths.push(path_str.to_string());
         } else {
+            // Stop any launchd service that owns this plist before we
+            // delete the file, otherwise launchd may hold a reference
+            // to a now-missing binary or immediately respawn it.
+            try_launchctl_unload(path_str);
+
             let delete_result = if permanent {
                 if path.is_dir() {
                     fs::remove_dir_all(path)
