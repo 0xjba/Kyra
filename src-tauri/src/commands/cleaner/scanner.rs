@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use super::{CleanRule, PathInfo, ScanItem};
-use crate::commands::utils::dir_size;
+use crate::commands::utils::deletable_dir_size;
 
 // ── Special Scan Functions ───────────────────────────────────────────
 
@@ -158,7 +158,7 @@ fn scan_with_age_filter(dir: &Path, max_age_days: u32) -> (Vec<PathInfo>, u64) {
                 let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 if modified < cutoff {
                     let size = if path.is_dir() {
-                        dir_size(&path)
+                        deletable_dir_size(&path)
                     } else {
                         meta.len()
                     };
@@ -217,7 +217,7 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
             } else {
                 // Standard scanning: include the entire path
                 let size = if expanded.is_dir() {
-                    dir_size(&expanded)
+                    deletable_dir_size(&expanded)
                 } else {
                     expanded.metadata().map(|m| m.len()).unwrap_or(0)
                 };
@@ -422,7 +422,7 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
 
             // Calculate size, skip tiny entries
             let size = if path.is_dir() {
-                dir_size(&path)
+                deletable_dir_size(&path)
             } else {
                 path.metadata().map(|m| m.len()).unwrap_or(0)
             };
