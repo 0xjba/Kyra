@@ -112,7 +112,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
 
       const filePaths = Array.from(selectedFilePaths);
       const dryRun = useSettingsStore.getState().settings.dry_run;
-      const result = await executeUninstall(selectedApp.path, filePaths, dryRun, permanent);
+      const result = await executeUninstall(selectedApp.path, filePaths, selectedApp.brew_cask, dryRun, permanent);
       if (!dryRun && result.bytes_freed > 0) {
         addBytesFreed(result.bytes_freed).catch(() => {});
       }
@@ -159,7 +159,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
         }
 
         try {
-          const result = await executeUninstall(app.path, filePaths, dryRun, permanent);
+          const result = await executeUninstall(app.path, filePaths, app.brew_cask, dryRun, permanent);
           totalRemoved += result.items_removed;
           totalFreed += result.bytes_freed;
           allDeletedPaths.push(...result.deleted_paths);

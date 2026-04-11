@@ -189,6 +189,7 @@ export interface AppInfo {
   size: number;
   is_system: boolean;
   is_data_sensitive: boolean;
+  brew_cask: string | null;
 }
 
 export interface AssociatedFile {
@@ -233,12 +234,14 @@ export async function getAssociatedFiles(
 export async function executeUninstall(
   appPath: string,
   filePaths: string[],
+  brewCask: string | null,
   dryRun: boolean,
   permanent: boolean
 ): Promise<UninstallResult> {
   return invoke<UninstallResult>("execute_uninstall", {
     appPath,
     filePaths,
+    brewCask,
     dryRun,
     permanent,
   });

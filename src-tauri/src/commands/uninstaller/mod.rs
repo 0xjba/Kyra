@@ -68,12 +68,20 @@ pub async fn execute_uninstall(
     app: tauri::AppHandle,
     app_path: String,
     file_paths: Vec<String>,
+    brew_cask: Option<String>,
     dry_run: bool,
     permanent: bool,
 ) -> Result<UninstallResult, String> {
-    let result = remover::remove_app_and_files(&app_path, &file_paths, dry_run, permanent, |progress| {
-        let _ = app.emit("uninstall-progress", progress);
-    });
+    let result = remover::remove_app_and_files(
+        &app_path,
+        &file_paths,
+        brew_cask,
+        dry_run,
+        permanent,
+        |progress| {
+            let _ = app.emit("uninstall-progress", progress);
+        },
+    );
 
     Ok(result)
 }

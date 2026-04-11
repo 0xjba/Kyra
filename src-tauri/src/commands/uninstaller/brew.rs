@@ -158,19 +158,68 @@ pub fn detect_cask(app_path: &str) -> Option<String> {
     None
 }
 
+/// Resolve the brew executable path on Apple Silicon or Intel Homebrew.
+fn brew_binary() -> Option<&'static str> {
+    if Path::new("/opt/homebrew/bin/brew").exists() {
+        Some("/opt/homebrew/bin/brew")
+    } else if Path::new("/usr/local/bin/brew").exists() {
+        Some("/usr/local/bin/brew")
+    } else {
+        None
+    }
+}
+
+/// Uninstalls a Homebrew cask with `brew uninstall --cask --zap <cask>`.
+/// The `--zap` flag removes the payload plus any `zap` stanzas defined by
+/// the cask (caches, preferences, launch agents, etc.), which gets us
+/// closer to a complete uninstall than deleting the .app bundle alone.
+///
+/// On success, returns the raw stdout/stderr concatenation for logging.
+/// On failure, returns a human-readable error message.
+///
+/// Respects `dry_run` by short-circuiting without invoking brew.
+pub fn uninstall_cask(cask: &str, dry_run: bool) -> Result<String, String> {
+    if !is_valid_cask_token(cask) {
+        return Err(format!("invalid cask token: {}", cask));
+    }
+    if dry_run {
+        return Ok(format!("[dry-run] would brew uninstall --cask --zap {}", cask));
+    }
+    let brew = brew_binary().ok_or_else(|| "Homebrew not installed".to_string())?;
+
+    let output = Command::new(brew)
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("NONINTERACTIVE", "1")
+        .args(["uninstall", "--cask", "--zap", cask])
+        .output()
+        .map_err(|e| format!("failed to run brew: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if output.status.success() {
+        Ok(format!("{}{}", stdout, stderr))
+    } else {
+        Err(format!(
+            "brew uninstall --cask --zap {} failed: {}",
+            cask,
+            stderr.trim()
+        ))
+    }
+}
+
 /// Returns true if the given cask token is currently recorded as installed
 /// by `brew list --cask`. Used as a final sanity check before invoking
 /// `brew uninstall` so we never pass a stale or hand-constructed token.
 #[allow(dead_code)]
 pub fn is_cask_installed(cask: &str) -> bool {
-    if !is_valid_cask_token(cask) || !is_homebrew_available() {
+    if !is_valid_cask_token(cask) {
         return false;
     }
-
-    let brew = if Path::new("/opt/homebrew/bin/brew").exists() {
-        "/opt/homebrew/bin/brew"
-    } else {
-        "/usr/local/bin/brew"
+    let brew = match brew_binary() {
+        Some(b) => b,
+        None => return false,
     };
 
     let output = match Command::new(brew)

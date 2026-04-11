@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use super::{UninstallProgress, UninstallResult};
+use super::{brew, UninstallProgress, UninstallResult};
 use crate::commands::shared;
 use crate::commands::utils::{canonicalize_for_safety, dir_size};
 
@@ -156,9 +156,16 @@ fn is_safe_path(path: &str) -> bool {
 
 /// Removes the app bundle and selected associated files.
 /// Calls `on_progress` after each item is processed.
+///
+/// If `brew_cask` is Some, the cask is uninstalled first with
+/// `brew uninstall --cask --zap`, which typically removes both the bundle
+/// and any caches/launch agents the cask declares in its zap stanza.
+/// After that the normal file-deletion loop still runs to pick up any
+/// associated files the cask didn't know about.
 pub fn remove_app_and_files<F>(
     app_path: &str,
     file_paths: &[String],
+    brew_cask: Option<String>,
     dry_run: bool,
     permanent: bool,
     mut on_progress: F,
@@ -171,9 +178,46 @@ where
     let mut errors: Vec<String> = Vec::new();
     let mut deleted_paths: Vec<String> = Vec::new();
 
+    // If this app is a Homebrew cask, let brew handle the payload + zap
+    // stanzas first. The file-deletion loop below still runs afterwards to
+    // clean up anything brew didn't know about (user caches, orphaned
+    // launch agents, etc.).
+    let brew_handled_app = if let Some(cask) = brew_cask.as_deref() {
+        match brew::uninstall_cask(cask, dry_run) {
+            Ok(log_line) => {
+                shared::log_operation(
+                    "UNINSTALL",
+                    app_path,
+                    &format!("brew --zap {}: {}", cask, log_line.lines().next().unwrap_or("ok")),
+                );
+                // If the bundle is already gone, count it as removed now.
+                let path = Path::new(app_path);
+                let app_gone = !path.exists() && fs::symlink_metadata(path).is_err();
+                if app_gone {
+                    deleted_paths.push(app_path.to_string());
+                    items_removed += 1;
+                }
+                app_gone
+            }
+            Err(e) => {
+                shared::log_operation(
+                    "UNINSTALL",
+                    app_path,
+                    &format!("brew --zap {} failed: {}", cask, e),
+                );
+                errors.push(format!("brew uninstall failed: {}", e));
+                false
+            }
+        }
+    } else {
+        false
+    };
+
     // Collect all paths to delete: associated files first, then the app bundle
     let mut all_paths: Vec<&str> = file_paths.iter().map(|s| s.as_str()).collect();
-    all_paths.push(app_path);
+    if !brew_handled_app {
+        all_paths.push(app_path);
+    }
 
     let items_total = all_paths.len();
 
