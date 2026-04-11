@@ -311,6 +311,100 @@ fn scan_xcode_device_support() -> Option<ScanItem> {
     })
 }
 
+/// Chromium-based browsers that keep versioned framework snapshots
+/// under `~/Library/Application Support/<root>/Snapshots/<version>/`.
+/// Only the most recent snapshot is actively used by the running
+/// browser; older ones are retained for rollback and crashpad
+/// symbolication.
+const BROWSER_SNAPSHOT_ROOTS: &[&str] = &[
+    "Google/Chrome",
+    "Google/Chrome Canary",
+    "Google/Chrome Beta",
+    "Google/Chrome Dev",
+    "Microsoft Edge",
+    "Microsoft Edge Beta",
+    "Microsoft Edge Dev",
+    "Microsoft Edge Canary",
+    "BraveSoftware/Brave-Browser",
+    "BraveSoftware/Brave-Browser-Beta",
+    "BraveSoftware/Brave-Browser-Nightly",
+    "Chromium",
+    "Vivaldi",
+    "com.operasoftware.Opera",
+    "Arc",
+];
+
+/// Number of browser framework snapshots to preserve per browser.
+const BROWSER_SNAPSHOT_KEEP: usize = 1;
+
+/// Special scan: enumerate `Snapshots/<version>/` directories under
+/// each known Chromium-based browser's profile root and flag all but
+/// the most recent for deletion.
+fn scan_browser_old_snapshots() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let app_support = home.join("Library/Application Support");
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for rel in BROWSER_SNAPSHOT_ROOTS {
+        let snapshots_dir = app_support.join(rel).join("Snapshots");
+        if !snapshots_dir.is_dir() {
+            continue;
+        }
+
+        let mut versions: Vec<(PathBuf, SystemTime)> = Vec::new();
+        let entries = match std::fs::read_dir(&snapshots_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() || p.is_symlink() {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            versions.push((p, modified));
+        }
+
+        versions.sort_by(|a, b| b.1.cmp(&a.1));
+
+        for (path, _) in versions.into_iter().skip(BROWSER_SNAPSHOT_KEEP) {
+            let size = deletable_dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+            paths.push(PathInfo {
+                path: path.to_string_lossy().to_string(),
+                size,
+                is_dir: true,
+            });
+            total_size += size;
+        }
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Browser framework snapshots (old)",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "browser_old_snapshots".into(),
+        category: "Browsers".into(),
+        label: "Browser framework snapshots (old)".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Number of JetBrains Toolbox IDE builds to preserve per product.
 /// Toolbox keeps older builds around for rollback, but only the most
 /// recent is actively used; each old build is typically 1–2 GB.
@@ -683,6 +777,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(jb_old) = scan_jetbrains_toolbox_old_builds() {
         results.push(jb_old);
+    }
+    if let Some(browser_snaps) = scan_browser_old_snapshots() {
+        results.push(browser_snaps);
     }
 
     results
