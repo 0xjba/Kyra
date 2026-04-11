@@ -199,6 +199,63 @@ fn try_defaults_delete(bundle_id: &str) {
     shared::log_operation("UNINSTALL", bundle_id, "defaults delete");
 }
 
+/// Scan `/Library/SystemExtensions` for any `.systemextension` bundle whose
+/// on-disk path contains the app's bundle identifier. System extensions
+/// (network filters, camera sensors, endpoint security agents, etc.) are
+/// activated through the SystemExtension framework and cannot be removed
+/// by deleting the .app alone — they stay active until the user manually
+/// approves a deactivation request in System Settings → Privacy & Security.
+///
+/// This returns `true` if an orphaned extension is likely to remain after
+/// the uninstall so the caller can surface a warning. The bundle id is
+/// validated against a strict charset to prevent glob/path injection.
+fn has_system_extensions(bundle_id: &str) -> bool {
+    if bundle_id.is_empty() {
+        return false;
+    }
+    let valid = bundle_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
+    if !valid {
+        return false;
+    }
+
+    let root = Path::new("/Library/SystemExtensions");
+    if !root.is_dir() {
+        return false;
+    }
+
+    // walkdir-style manual recursion with a depth cap of 3 to mirror the
+    // reference behavior (staging/<uuid>/<bundle>.systemextension). Anything
+    // deeper isn't relevant and we want to bound the work.
+    fn walk(dir: &Path, depth: usize, bundle_id: &str) -> bool {
+        if depth == 0 {
+            return false;
+        }
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return false,
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            if name.ends_with(".systemextension") {
+                if path.to_string_lossy().contains(bundle_id) {
+                    return true;
+                }
+            }
+
+            if path.is_dir() && walk(&path, depth - 1, bundle_id) {
+                return true;
+            }
+        }
+        false
+    }
+
+    walk(root, 3, bundle_id)
+}
+
 /// Path to macOS's Launch Services registration tool.
 const LSREGISTER: &str =
     "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";
@@ -560,6 +617,24 @@ where
     // on-disk anyway).
     if !dry_run && !bundle_id.is_empty() {
         try_defaults_delete(bundle_id);
+    }
+
+    // Detect orphaned system extensions that the SystemExtension framework
+    // still owns. These cannot be removed by file deletion — the user must
+    // approve a deactivation in System Settings. Surface the situation as a
+    // non-fatal advisory so the caller can show it to the user.
+    if !bundle_id.is_empty() && has_system_extensions(bundle_id) {
+        let name_for_msg = if app_display_name.is_empty() {
+            bundle_id
+        } else {
+            app_display_name.as_str()
+        };
+        let msg = format!(
+            "Warning: {} installed a system extension that may remain active. Open System Settings → General → Login Items & Extensions to review it.",
+            name_for_msg
+        );
+        shared::log_operation("UNINSTALL", bundle_id, "system extension detected (advisory)");
+        errors.push(msg);
     }
 
     UninstallResult {
