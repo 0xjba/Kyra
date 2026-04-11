@@ -827,10 +827,31 @@ const ORPHAN_SCAN_DIRS: &[&str] = &[
     "Library/Application Support",
     "Library/Caches",
     "Library/Preferences",
+    "Library/Preferences/ByHost",
     "Library/Saved Application State",
     "Library/WebKit",
     "Library/HTTPStorages",
+    "Library/Containers",
+    "Library/Group Containers",
+    "Library/LaunchAgents",
+    "Library/Logs",
+    "Library/Cookies",
+    "Library/Internet Plug-Ins",
+    "Library/Autosave Information",
+    "Library/Application Scripts",
 ];
+
+/// Returns true if a `~/Library/Containers/<bundle>/` directory is a
+/// containermanagerd-protected sandbox stub. macOS restores these on
+/// next launch and attempting to remove them triggers an admin password
+/// prompt that still ends in failure, so the orphan scanner must not
+/// surface them.
+fn is_protected_container_stub(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    path.join(".com.apple.containermanagerd.metadata.plist").exists()
+}
 
 /// Scan .app bundles in a directory and extract their CFBundleIdentifier values.
 fn scan_apps_in_dir(dir: &Path, ids: &mut HashSet<String>) {
@@ -1008,6 +1029,11 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
 
             // Skip if it matches an installed app
             if matches_installed_app(&name_lower, &installed_ids) {
+                continue;
+            }
+
+            // Skip containermanagerd-protected sandbox stubs
+            if is_protected_container_stub(&path) {
                 continue;
             }
 
