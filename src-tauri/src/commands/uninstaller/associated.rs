@@ -306,6 +306,202 @@ fn find_receipt_files(bundle_id: &str) -> Vec<AssociatedFile> {
     results
 }
 
+/// Discover files that well-known IDEs and development toolchains drop
+/// outside the standard ~/Library tree — things we'd never find through a
+/// generic bundle-id / app-name sweep because the folder names don't
+/// correspond to either. Each branch is gated on a specific
+/// bundle-id or app-name match so nothing runs unless we're actually
+/// uninstalling that toolchain.
+fn find_toolchain_specific(
+    bundle_id: &str,
+    app_name: &str,
+    home: &Path,
+) -> Vec<AssociatedFile> {
+    let mut out: Vec<AssociatedFile> = Vec::new();
+    let bundle_lower = bundle_id.to_lowercase();
+    let name_lower = app_name.to_lowercase();
+
+    // Helper to push a path if it exists and is non-empty.
+    let push_path = |path: PathBuf, category: &str, results: &mut Vec<AssociatedFile>| {
+        if !path.exists() {
+            return;
+        }
+        let size = path_size(&path);
+        if size == 0 {
+            return;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        if results.iter().any(|r| r.path == path_str) {
+            return;
+        }
+        results.push(AssociatedFile {
+            path: path_str,
+            category: category.to_string(),
+            size,
+            is_dir: path.is_dir(),
+        });
+    };
+
+    // Huawei DevEco-Studio (HarmonyOS)
+    if name_lower.contains("deveco") || bundle_lower.contains("huawei.deveco") {
+        for rel in &[
+            "DevEcoStudioProjects",
+            "DevEco-Studio",
+            "Library/Application Support/Huawei",
+            "Library/Caches/Huawei",
+            "Library/Logs/Huawei",
+            "Library/Huawei",
+            "Huawei",
+            "HarmonyOS",
+            ".huawei",
+            ".ohos",
+        ] {
+            push_path(home.join(rel), "App Data", &mut out);
+        }
+    }
+
+    // Android Studio — projects dir, SDK, ~/.android cache.
+    let is_android_studio = (name_lower.contains("android") && name_lower.contains("studio"))
+        || bundle_lower.contains("google.android.studio")
+        || bundle_lower.contains("jetbrains.android");
+    if is_android_studio {
+        for rel in &["AndroidStudioProjects", "Library/Android", ".android"] {
+            push_path(home.join(rel), "App Data", &mut out);
+        }
+        let google_support = home.join("Library/Application Support/Google");
+        if google_support.is_dir() {
+            if let Ok(entries) = fs::read_dir(&google_support) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with("AndroidStudio") {
+                        push_path(entry.path(), "App Data", &mut out);
+                    }
+                }
+            }
+        }
+    }
+
+    // Xcode — Developer dir is the big one, plus legacy ~/.Xcode.
+    if name_lower.contains("xcode") || bundle_lower.contains("apple.dt.xcode") {
+        push_path(home.join("Library/Developer"), "App Data", &mut out);
+        push_path(home.join(".Xcode"), "App Data", &mut out);
+    }
+
+    // JetBrains IDEs — settings and caches are stored per-product under
+    // ~/Library/Application Support/JetBrains/<ProductName><Version>.
+    let jetbrains_products = [
+        "IntelliJIdea", "PyCharm", "WebStorm", "GoLand", "RubyMine", "PhpStorm",
+        "CLion", "DataGrip", "Rider", "AppCode", "DataSpell", "Fleet",
+    ];
+    let is_jetbrains = bundle_lower.contains("jetbrains")
+        || jetbrains_products
+            .iter()
+            .any(|p| name_lower.contains(&p.to_lowercase()));
+    if is_jetbrains {
+        for rel in &[
+            "Library/Application Support/JetBrains",
+            "Library/Caches/JetBrains",
+            "Library/Logs/JetBrains",
+        ] {
+            let base = home.join(rel);
+            if !base.is_dir() {
+                continue;
+            }
+            if let Ok(entries) = fs::read_dir(&base) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let entry_lower =
+                        entry.file_name().to_string_lossy().to_lowercase();
+                    let matches = jetbrains_products.iter().any(|p| {
+                        let prod_lower = p.to_lowercase();
+                        name_lower.contains(&prod_lower)
+                            && entry_lower.starts_with(&prod_lower)
+                    });
+                    if matches {
+                        push_path(entry.path(), "App Data", &mut out);
+                    }
+                }
+            }
+        }
+    }
+
+    // Unity / Unreal / Godot game engines.
+    if name_lower.contains("unity") {
+        push_path(home.join("Library/Unity"), "App Data", &mut out);
+    }
+    if name_lower.contains("unreal") {
+        push_path(
+            home.join("Library/Application Support/Epic"),
+            "App Data",
+            &mut out,
+        );
+    }
+    if name_lower.contains("godot") {
+        push_path(
+            home.join("Library/Application Support/Godot"),
+            "App Data",
+            &mut out,
+        );
+    }
+
+    // VS Code and its ShipIt updater cache.
+    if bundle_lower.contains("microsoft.vscode") {
+        push_path(home.join(".vscode"), "App Data", &mut out);
+        push_path(
+            home.join("Library/Caches/com.microsoft.VSCode.ShipIt"),
+            "Caches",
+            &mut out,
+        );
+        push_path(
+            home.join("Library/Caches/com.microsoft.VSCodeInsiders.ShipIt"),
+            "Caches",
+            &mut out,
+        );
+    }
+
+    // Docker Desktop leaves a ~/.docker config dir around.
+    if name_lower.contains("docker") {
+        push_path(home.join(".docker"), "App Data", &mut out);
+    }
+
+    // Maestro Studio — mobile test runner.
+    if bundle_lower == "com.maestro.studio" || name_lower.contains("maestro studio") {
+        push_path(home.join(".mobiledev"), "App Data", &mut out);
+    }
+
+    // Raycast — spawns multiple container bundles under variant names,
+    // plus settings under ~/Library/Caches.
+    if bundle_lower == "com.raycast.macos" {
+        for rel in &[
+            "Library/Application Support",
+            "Library/Application Scripts",
+            "Library/Containers",
+        ] {
+            let base = home.join(rel);
+            if !base.is_dir() {
+                continue;
+            }
+            if let Ok(entries) = fs::read_dir(&base) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let entry_lower =
+                        entry.file_name().to_string_lossy().to_lowercase();
+                    if entry_lower.contains("raycast") {
+                        push_path(entry.path(), "App Data", &mut out);
+                    }
+                }
+            }
+        }
+        // Explicit known-leftover container dirs.
+        for leftover in &[
+            "Library/Containers/com.raycast.macos.BrowserExtension",
+            "Library/Containers/com.raycast.macos.RaycastAppIntents",
+        ] {
+            push_path(home.join(leftover), "Containers", &mut out);
+        }
+    }
+
+    out
+}
+
 /// Searches ~/Library subdirectories for files associated with the given app.
 pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<AssociatedFile> {
     let home = match dirs::home_dir() {
@@ -561,6 +757,15 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
                     });
                 }
             }
+        }
+    }
+
+    // Specialized toolchain cleanup: IDE projects, SDKs, and engine
+    // state folders that don't live under ~/Library/Application Support
+    // and don't match the bundle id at all.
+    for item in find_toolchain_specific(bundle_id, app_name, &home) {
+        if !results.iter().any(|r| r.path == item.path) {
+            results.push(item);
         }
     }
 
