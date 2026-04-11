@@ -47,6 +47,34 @@ fn is_launchd_plist(path: &str) -> bool {
         || path.contains("/PrivilegedHelperTools/")
 }
 
+/// Best-effort `defaults delete <bundle_id>` and
+/// `defaults -currentHost delete <bundle_id>` to flush cfprefsd's
+/// in-memory preference cache. Without this flush, cfprefsd may
+/// re-create the preference file on disk from its cached values
+/// seconds after we deleted it, leaving the app's settings behind
+/// for the next install to inherit.
+///
+/// Validates the bundle id against a strict alphanumeric/./-/_ charset
+/// so no shell metacharacters can leak into the command arguments.
+fn try_defaults_delete(bundle_id: &str) {
+    if bundle_id.is_empty() {
+        return;
+    }
+    let valid = bundle_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
+    if !valid {
+        return;
+    }
+    let _ = Command::new("/usr/bin/defaults")
+        .args(["delete", bundle_id])
+        .output();
+    let _ = Command::new("/usr/bin/defaults")
+        .args(["-currentHost", "delete", bundle_id])
+        .output();
+    shared::log_operation("UNINSTALL", bundle_id, "defaults delete");
+}
+
 /// Path to macOS's Launch Services registration tool.
 const LSREGISTER: &str =
     "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";
@@ -226,9 +254,14 @@ fn is_safe_path(path: &str) -> bool {
 /// and any caches/launch agents the cask declares in its zap stanza.
 /// After that the normal file-deletion loop still runs to pick up any
 /// associated files the cask didn't know about.
+///
+/// If `bundle_id` is non-empty, `defaults delete` is invoked after the
+/// file-deletion loop so cfprefsd drops its in-memory cache of the app's
+/// preferences before it can rewrite them to disk.
 pub fn remove_app_and_files<F>(
     app_path: &str,
     file_paths: &[String],
+    bundle_id: &str,
     brew_cask: Option<String>,
     dry_run: bool,
     permanent: bool,
@@ -378,6 +411,14 @@ where
             items_total,
             bytes_freed,
         });
+    }
+
+    // Flush cfprefsd's preference cache so it doesn't re-create the
+    // bundle's .plist after we just removed it. Only runs if the file
+    // loop actually did work (skip for pure dry-run which did nothing
+    // on-disk anyway).
+    if !dry_run && !bundle_id.is_empty() {
+        try_defaults_delete(bundle_id);
     }
 
     UninstallResult {

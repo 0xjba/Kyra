@@ -68,6 +68,7 @@ pub async fn execute_uninstall(
     app: tauri::AppHandle,
     app_path: String,
     file_paths: Vec<String>,
+    bundle_id: String,
     brew_cask: Option<String>,
     dry_run: bool,
     permanent: bool,
@@ -75,6 +76,7 @@ pub async fn execute_uninstall(
     let result = remover::remove_app_and_files(
         &app_path,
         &file_paths,
+        &bundle_id,
         brew_cask,
         dry_run,
         permanent,

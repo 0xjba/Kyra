@@ -234,6 +234,7 @@ export async function getAssociatedFiles(
 export async function executeUninstall(
   appPath: string,
   filePaths: string[],
+  bundleId: string,
   brewCask: string | null,
   dryRun: boolean,
   permanent: boolean
@@ -241,6 +242,7 @@ export async function executeUninstall(
   return invoke<UninstallResult>("execute_uninstall", {
     appPath,
     filePaths,
+    bundleId,
     brewCask,
     dryRun,
     permanent,

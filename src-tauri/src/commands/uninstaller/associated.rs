@@ -340,6 +340,37 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
                     });
                 }
             }
+
+            // Sweep ~/Library/Preferences/ByHost for machine-specific
+            // variants. These are named `<bundle_id>.<host_uuid>.plist`
+            // and aren't caught by the bundle-id equality check above.
+            let byhost_dir = prefs_dir.join("ByHost");
+            if byhost_dir.exists() {
+                if let Ok(entries) = fs::read_dir(&byhost_dir) {
+                    let prefix = format!("{}.", bundle_id);
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if !name.starts_with(&prefix) || !name.ends_with(".plist") {
+                            continue;
+                        }
+                        let path = entry.path();
+                        let size = path_size(&path);
+                        if size == 0 {
+                            continue;
+                        }
+                        let path_str = path.to_string_lossy().to_string();
+                        if results.iter().any(|r| r.path == path_str) {
+                            continue;
+                        }
+                        results.push(AssociatedFile {
+                            path: path_str,
+                            category: "Preferences".to_string(),
+                            size,
+                            is_dir: false,
+                        });
+                    }
+                }
+            }
         }
     }
 
