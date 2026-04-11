@@ -173,35 +173,77 @@ pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
     let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-    let app_rules: Vec<(&str, &[&str])> = vec![
-        ("Safari", &["safari_cache"]),
-        ("Google Chrome", &["chrome_cache"]),
-        ("Firefox", &["firefox_cache"]),
-        ("Microsoft Edge", &["edge_cache"]),
-        ("Brave Browser", &["brave_cache"]),
-        ("Arc", &["arc_cache"]),
-        ("Opera", &["opera_cache"]),
-        ("Vivaldi", &["vivaldi_cache"]),
-        ("Discord", &["comm_discord"]),
-        ("Slack", &["comm_slack"]),
-        ("Spotify", &["media_spotify"]),
-        ("zoom.us", &["comm_zoom"]),
-        ("Microsoft Teams", &["comm_teams"]),
-        ("Code Helper", &["dev_vscode_cache"]),
-        ("Telegram", &["comm_telegram"]),
-        ("WhatsApp", &["comm_whatsapp"]),
-        ("WeChat", &["comm_wechat"]),
-        ("Skype", &["comm_skype"]),
-        ("Signal", &["comm_signal"]),
-        ("Figma", &["design_figma"]),
-        ("Sketch", &["design_sketch"]),
-        ("Steam", &["game_steam"]),
-        ("OBS", &["media_obs"]),
-        ("IINA", &["media_iina"]),
-        ("VLC", &["media_vlc"]),
-        ("Notion", &["notes_notion"]),
-        ("Obsidian", &["notes_obsidian"]),
-        ("Mail", &["system_mail_downloads"]),
+    // (display_name, exact_process_names, guarded_rule_ids)
+    //
+    // Process names are matched exactly against the executable name reported
+    // by sysinfo. Substring matching is intentionally avoided because it
+    // produces false positives (e.g. "Safari" matching "SafariBookmarksSyncAgent",
+    // "Mail" matching "MailCompositionService") and false negatives when the
+    // executable name differs from the display name (e.g. Docker's backend
+    // process is "com.docker.backend", not "Docker").
+    let app_rules: Vec<(&str, &[&str], &[&str])> = vec![
+        ("Safari", &["Safari"], &["safari_cache"]),
+        (
+            "Google Chrome",
+            &["Google Chrome", "Google Chrome Helper"],
+            &["chrome_cache"],
+        ),
+        ("Firefox", &["firefox", "Firefox"], &["firefox_cache"]),
+        (
+            "Microsoft Edge",
+            &["Microsoft Edge", "Microsoft Edge Helper"],
+            &["edge_cache"],
+        ),
+        (
+            "Brave Browser",
+            &["Brave Browser", "Brave Browser Helper"],
+            &["brave_cache"],
+        ),
+        ("Arc", &["Arc"], &["arc_cache"]),
+        ("Opera", &["Opera"], &["opera_cache"]),
+        ("Vivaldi", &["Vivaldi"], &["vivaldi_cache"]),
+        ("Discord", &["Discord", "Discord Helper"], &["comm_discord"]),
+        ("Slack", &["Slack", "Slack Helper"], &["comm_slack"]),
+        (
+            "Spotify",
+            &["Spotify", "Spotify Helper"],
+            &["media_spotify"],
+        ),
+        ("Zoom", &["zoom.us", "CptHost"], &["comm_zoom"]),
+        (
+            "Microsoft Teams",
+            &["Microsoft Teams", "MSTeams", "Teams"],
+            &["comm_teams"],
+        ),
+        (
+            "Visual Studio Code",
+            &["Code", "Code Helper"],
+            &["dev_vscode_cache"],
+        ),
+        ("Telegram", &["Telegram"], &["comm_telegram"]),
+        ("WhatsApp", &["WhatsApp"], &["comm_whatsapp"]),
+        ("WeChat", &["WeChat"], &["comm_wechat"]),
+        ("Skype", &["Skype"], &["comm_skype"]),
+        ("Signal", &["Signal"], &["comm_signal"]),
+        ("Figma", &["Figma"], &["design_figma"]),
+        ("Sketch", &["Sketch"], &["design_sketch"]),
+        ("Steam", &["Steam", "steam_osx"], &["game_steam"]),
+        ("OBS", &["OBS", "obs"], &["media_obs"]),
+        ("IINA", &["IINA"], &["media_iina"]),
+        ("VLC", &["VLC"], &["media_vlc"]),
+        ("Notion", &["Notion", "Notion Helper"], &["notes_notion"]),
+        ("Obsidian", &["Obsidian"], &["notes_obsidian"]),
+        ("Mail", &["Mail"], &["system_mail_downloads"]),
+        (
+            "Docker",
+            &[
+                "Docker Desktop",
+                "Docker",
+                "com.docker.backend",
+                "com.docker.build",
+            ],
+            &["dev_docker_buildx"],
+        ),
     ];
 
     let process_names: Vec<String> = sys
@@ -212,7 +254,7 @@ pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
 
     let mut running: Vec<RunningApp> = Vec::new();
 
-    for (app_name, rules) in &app_rules {
+    for (app_name, proc_names, rules) in &app_rules {
         let matching_rules: Vec<String> = rules
             .iter()
             .filter(|r| rule_ids.contains(&r.to_string()))
@@ -223,7 +265,9 @@ pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
             continue;
         }
 
-        let is_running = process_names.iter().any(|pn| pn.contains(app_name));
+        let is_running = process_names
+            .iter()
+            .any(|pn| proc_names.iter().any(|target| pn == target));
 
         if is_running {
             running.push(RunningApp {
