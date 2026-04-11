@@ -64,9 +64,23 @@ const PROTECTED_PATHS: &[&str] = &[
 ];
 
 /// Returns true if a path is safe to delete (not in the protected list).
+///
+/// Performs textual validation, blocks directory traversal (`..`) and control
+/// characters, and additionally resolves symlinks so that a user-writable path
+/// pointing into a protected system location is rejected.
 pub fn is_safe_path(path: &str) -> bool {
+    let canonical = match crate::commands::utils::canonicalize_for_safety(path) {
+        Some(p) => p,
+        None => return false,
+    };
+    let canonical_str = canonical.to_string_lossy();
+
     for protected in PROTECTED_PATHS {
-        if path == *protected || path.starts_with(&format!("{}/", protected)) {
+        let prefix = format!("{}/", protected);
+        if path == *protected || path.starts_with(&prefix) {
+            return false;
+        }
+        if canonical_str == *protected || canonical_str.starts_with(&prefix) {
             return false;
         }
     }

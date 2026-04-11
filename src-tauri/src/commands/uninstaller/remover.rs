@@ -4,7 +4,7 @@ use std::process::Command;
 
 use super::{UninstallProgress, UninstallResult};
 use crate::commands::shared;
-use crate::commands::utils::dir_size;
+use crate::commands::utils::{canonicalize_for_safety, dir_size};
 
 /// Paths that must never be deleted.
 const PROTECTED_PATHS: &[&str] = &[
@@ -85,18 +85,29 @@ fn shell_escape(path: &str) -> String {
 /// Allows deleting individual .app bundles inside /Applications (e.g. /Applications/Foo.app)
 /// but blocks deleting /Applications itself or its non-.app contents.
 /// Also blocks system applications under /System/Applications/.
+///
+/// Rejects empty paths, control characters, and `..` traversal components.
+/// Additionally resolves symlinks so that a user-writable path which points
+/// into a protected system location (e.g. a symlink to /System) is blocked
+/// even if the literal string looks safe.
 fn is_safe_path(path: &str) -> bool {
     if is_system_app(path) {
         return false;
     }
-    // Block exact protected system paths and their children
+
+    let canonical = match canonicalize_for_safety(path) {
+        Some(p) => p,
+        None => return false,
+    };
+    let canonical_str = canonical.to_string_lossy();
+
+    // Block exact protected system paths and their children (literal form).
     for protected in PROTECTED_PATHS {
         if path == *protected {
             return false;
         }
         // Special case: allow /Applications/*.app but block /Applications itself
         if *protected == "/Applications" && path.starts_with("/Applications/") {
-            // Only allow .app bundles directly in /Applications
             let remainder = &path["/Applications/".len()..];
             if remainder.contains('/') {
                 // It's a path inside an app bundle — allow
@@ -108,6 +119,20 @@ fn is_safe_path(path: &str) -> bool {
             continue;
         }
         if path.starts_with(&format!("{}/", protected)) {
+            return false;
+        }
+    }
+
+    // Also check the canonical (symlink-resolved) form against protected
+    // system roots. The /Applications exception does not apply here — a
+    // legitimate .app bundle resolves either to itself or into a Homebrew
+    // Caskroom, neither of which is a protected system directory.
+    for protected in PROTECTED_PATHS {
+        if *protected == "/Applications" {
+            continue;
+        }
+        let prefix = format!("{}/", protected);
+        if canonical_str == *protected || canonical_str.starts_with(&prefix) {
             return false;
         }
     }

@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// Return the physical allocated size of a file, in bytes.
 ///
@@ -73,6 +73,40 @@ pub fn deletable_dir_size(path: &Path) -> u64 {
         }
     }
     total
+}
+
+/// Validate a path string and return its canonical form if it's well-formed.
+///
+/// Rejects:
+/// - Empty strings
+/// - Paths containing control characters (NUL, newlines, etc.)
+/// - Paths containing `..` traversal components
+///
+/// If the path exists on disk, returns its canonical form (symlinks resolved)
+/// so callers can detect symlink-escape attacks where a user-writable path
+/// points into a protected system location. If the path does not exist,
+/// returns the cleaned input path unchanged — non-existent paths can't be
+/// deleted anyway, so symlink resolution isn't needed.
+///
+/// Returns `None` if the path is malformed or cannot be canonicalized.
+pub fn canonicalize_for_safety(path: &str) -> Option<PathBuf> {
+    if path.is_empty() {
+        return None;
+    }
+    if path.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    let p = Path::new(path);
+    for component in p.components() {
+        if matches!(component, Component::ParentDir) {
+            return None;
+        }
+    }
+    if p.exists() {
+        fs::canonicalize(p).ok()
+    } else {
+        Some(p.to_path_buf())
+    }
 }
 
 /// Get the size of a path — file size for files, recursive size for directories.
