@@ -3,6 +3,15 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+/// Return the physical allocated size of a file, in bytes.
+///
+/// Uses `st_blocks * 512` so that sparse files (APFS clones, disk images,
+/// VM storage) report their true on-disk footprint rather than the
+/// logical length, matching `du` and Finder's "Size on disk".
+fn physical_size(meta: &fs::Metadata) -> u64 {
+    meta.blocks().saturating_mul(512)
+}
+
 /// Calculate the total size of a directory recursively, skipping symlinks.
 pub fn dir_size(path: &Path) -> u64 {
     let mut total: u64 = 0;
@@ -17,7 +26,7 @@ pub fn dir_size(path: &Path) -> u64 {
                 if p.is_dir() {
                     stack.push(p);
                 } else {
-                    total += fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    total += fs::metadata(&p).map(|m| physical_size(&m)).unwrap_or(0);
                 }
             }
         }
@@ -58,7 +67,7 @@ pub fn deletable_dir_size(path: &Path) -> u64 {
                 if p.is_dir() {
                     stack.push(p);
                 } else {
-                    total += fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    total += fs::metadata(&p).map(|m| physical_size(&m)).unwrap_or(0);
                 }
             }
         }
@@ -71,6 +80,6 @@ pub fn path_size(path: &Path) -> u64 {
     if path.is_dir() {
         dir_size(path)
     } else {
-        fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+        fs::metadata(path).map(|m| physical_size(&m)).unwrap_or(0)
     }
 }
