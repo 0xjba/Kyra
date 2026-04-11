@@ -853,6 +853,29 @@ fn is_protected_container_stub(path: &Path) -> bool {
     path.join(".com.apple.containermanagerd.metadata.plist").exists()
 }
 
+/// Ask Spotlight whether any bundle with the given identifier exists
+/// anywhere on disk. Used as a fallback for the orphan scanner so we
+/// don't flag data belonging to an app installed outside the standard
+/// `/Applications`, `/System/Applications`, and `~/Applications`
+/// locations (e.g. command-line installers, homebrew casks pointed at
+/// unusual prefixes, user-side `open` targets, mounted DMGs the user
+/// runs directly). Returns `false` if Spotlight is disabled or the
+/// command isn't available — the orphan scanner already applies other
+/// safety gates, so a failed lookup just defaults to "not found".
+fn mdfind_has_bundle_id(bundle_id: &str) -> bool {
+    // Protect against shell metacharacters in the bundle ID by passing
+    // it as a single argument via process::Command. mdfind's query
+    // language uses single-quoted strings — embed the id verbatim.
+    let query = format!("kMDItemCFBundleIdentifier == '{}'", bundle_id);
+    let out = std::process::Command::new("/usr/bin/mdfind")
+        .arg(&query)
+        .output();
+    match out {
+        Ok(o) if o.status.success() => !o.stdout.is_empty(),
+        _ => false,
+    }
+}
+
 /// Scan .app bundles in a directory and extract their CFBundleIdentifier values.
 fn scan_apps_in_dir(dir: &Path, ids: &mut HashSet<String>) {
     let entries = match std::fs::read_dir(dir) {
@@ -1034,6 +1057,17 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
 
             // Skip containermanagerd-protected sandbox stubs
             if is_protected_container_stub(&path) {
+                continue;
+            }
+
+            // Spotlight fallback: apps installed outside the three
+            // standard Applications directories won't be in our
+            // `installed_ids` set. Before flagging their data as
+            // orphaned, ask mdfind whether any bundle with this ID
+            // exists anywhere on disk. `stripped` already has the
+            // `.plist` / `.savedstate` / `.binarycookies` suffixes
+            // removed so it's the pure bundle ID.
+            if mdfind_has_bundle_id(stripped) {
                 continue;
             }
 
