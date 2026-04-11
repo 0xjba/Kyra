@@ -78,6 +78,42 @@ fn tmutil_delete(path: &str) -> Result<(), String> {
     }
 }
 
+/// Extract the `YYYY-MM-DD-HHMMSS` date portion from a local snapshot
+/// identifier like `com.apple.TimeMachine.2025-11-02-120000.local`.
+/// Returns `None` if the input doesn't match the expected shape.
+fn extract_snapshot_date(full_name: &str) -> Option<String> {
+    let after_prefix = full_name.strip_prefix("com.apple.TimeMachine.")?;
+    let without_suffix = after_prefix.strip_suffix(".local")?;
+    if without_suffix.is_empty() {
+        return None;
+    }
+    Some(without_suffix.to_string())
+}
+
+/// Delete a single APFS local Time Machine snapshot via
+/// `tmutil deletelocalsnapshots <date>`. The scanner encodes snapshots
+/// as `tmutil://<full-identifier>`; this helper decodes the scheme,
+/// extracts the date portion, and issues the tmutil call.
+fn tmutil_delete_local_snapshot(pseudo_path: &str) -> Result<(), String> {
+    let identifier = pseudo_path
+        .strip_prefix("tmutil://")
+        .ok_or_else(|| "invalid snapshot identifier".to_string())?;
+    let date = extract_snapshot_date(identifier)
+        .ok_or_else(|| format!("unrecognised snapshot identifier: {}", identifier))?;
+
+    let output = Command::new("/usr/bin/tmutil")
+        .arg("deletelocalsnapshots")
+        .arg(&date)
+        .output()
+        .map_err(|e| format!("tmutil spawn failed: {}", e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(stderr.trim().to_string())
+    }
+}
+
 /// Returns true if `path` (or any parent) is covered by a whitelisted entry.
 fn is_whitelisted(path: &str, whitelist: &HashSet<&str>) -> bool {
     // O(1) exact match
@@ -173,23 +209,31 @@ where
         // Time Machine failed backups must be deleted through tmutil so the
         // TM catalogue stays consistent — we never touch .inProgress dirs
         // with filesystem calls.
-        let is_tm_rule = item.rule_id == "special_tm_failed_backups";
+        let is_tm_failed_rule = item.rule_id == "special_tm_failed_backups";
+        // APFS local snapshots are removed via tmutil deletelocalsnapshots.
+        // Paths for this rule are pseudo-URIs of the form `tmutil://<id>`.
+        let is_tm_snapshot_rule = item.rule_id == "special_tm_local_snapshots";
 
         for path_info in &item.paths {
-            if !is_safe_path(&path_info.path) {
-                errors.push(format!("Skipped protected path: {}", path_info.path));
-                continue;
-            }
+            // Skip safe-path / whitelist checks for the snapshot pseudo-URIs
+            // because they are not real filesystem paths. Every other path
+            // still goes through the normal validation.
+            if !is_tm_snapshot_rule {
+                if !is_safe_path(&path_info.path) {
+                    errors.push(format!("Skipped protected path: {}", path_info.path));
+                    continue;
+                }
 
-            if is_whitelisted(&path_info.path, &whitelist_set) {
-                errors.push(format!("Skipped whitelisted path: {}", path_info.path));
-                continue;
+                if is_whitelisted(&path_info.path, &whitelist_set) {
+                    errors.push(format!("Skipped whitelisted path: {}", path_info.path));
+                    continue;
+                }
             }
 
             if dry_run {
                 bytes_freed += path_info.size;
                 item_had_success = true;
-            } else if is_tm_rule {
+            } else if is_tm_failed_rule {
                 match tmutil_delete(&path_info.path) {
                     Ok(()) => {
                         bytes_freed += path_info.size;
@@ -201,6 +245,26 @@ where
                             "CLEAN",
                             &path_info.path,
                             &format!("tmutil delete failed: {}", e),
+                        );
+                        errors.push(format!("{}: {}", path_info.path, e));
+                    }
+                }
+            } else if is_tm_snapshot_rule {
+                match tmutil_delete_local_snapshot(&path_info.path) {
+                    Ok(()) => {
+                        bytes_freed += path_info.size;
+                        item_had_success = true;
+                        shared::log_operation(
+                            "CLEAN",
+                            &path_info.path,
+                            "tmutil deletelocalsnapshots",
+                        );
+                    }
+                    Err(e) => {
+                        shared::log_operation(
+                            "CLEAN",
+                            &path_info.path,
+                            &format!("tmutil deletelocalsnapshots failed: {}", e),
                         );
                         errors.push(format!("{}: {}", path_info.path, e));
                     }

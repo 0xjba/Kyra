@@ -344,6 +344,73 @@ fn scan_xcode_device_support() -> Option<ScanItem> {
     })
 }
 
+/// Special scan: report APFS local Time Machine snapshots. macOS keeps
+/// these automatically and they auto-expire after ~24 hours, but users
+/// who are short on space can reclaim them manually. Since APFS is
+/// copy-on-write, the actual reclaimable bytes per snapshot are not
+/// cheaply computable — we surface the snapshots with a nominal
+/// placeholder size so the UI has something to display, and the
+/// executor shells out to `tmutil deletelocalsnapshots` per entry.
+fn scan_tm_local_snapshots() -> Option<ScanItem> {
+    // Skip entirely if Time Machine isn't configured on this host.
+    if !tm_is_configured() {
+        return None;
+    }
+
+    let out = std::process::Command::new("/usr/bin/tmutil")
+        .args(["listlocalsnapshots", "/"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Expected line format: `com.apple.TimeMachine.2025-11-02-120000.local`
+    // We preserve the full identifier in the path so the executor can
+    // extract the date portion unambiguously.
+    let snapshot_names: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| l.starts_with("com.apple.TimeMachine."))
+        .map(|l| l.to_string())
+        .collect();
+
+    if snapshot_names.is_empty() {
+        return None;
+    }
+
+    // Nominal per-snapshot size so the UI shows a non-zero value. A
+    // typical APFS local snapshot reclaims tens to hundreds of MB, but
+    // the actual reclaim is not cheaply computable — this is a hint,
+    // not a promise.
+    const NOMINAL_SNAPSHOT_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+
+    let paths: Vec<PathInfo> = snapshot_names
+        .iter()
+        .map(|name| PathInfo {
+            path: format!("tmutil://{}", name),
+            size: NOMINAL_SNAPSHOT_SIZE,
+            is_dir: false,
+        })
+        .collect();
+    let total_size = NOMINAL_SNAPSHOT_SIZE * paths.len() as u64;
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Time Machine Local Snapshots",
+        &format!("{} snapshots (nominal {} bytes)", paths.len(), total_size),
+    );
+
+    Some(ScanItem {
+        rule_id: "special_tm_local_snapshots".into(),
+        category: "Maintenance".into(),
+        label: format!("Time Machine Local Snapshots ({})", paths.len()),
+        paths,
+        total_size,
+    })
+}
+
 /// File extensions that indicate a virtual-machine disk image.
 const VM_IMAGE_EXTENSIONS: &[&str] =
     &["qcow2", "img", "vmdk", "vhd", "vhdx", "vdi", "raw", "dmg"];
@@ -1056,6 +1123,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(claude_vms) = scan_orphaned_claude_vms() {
         results.push(claude_vms);
+    }
+    if let Some(tm_snaps) = scan_tm_local_snapshots() {
+        results.push(tm_snaps);
     }
 
     results
