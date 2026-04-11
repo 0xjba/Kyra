@@ -34,8 +34,38 @@ pub fn dir_size(path: &Path) -> u64 {
     total
 }
 
+/// Directory basenames that hold live user-data (PWA offline storage,
+/// localStorage, IndexedDB, etc.) and must NEVER be walked into for
+/// size accounting or deletion by the cleaner. Chromium-based apps
+/// (Chrome, Edge, Brave, VS Code, Slack, Discord, Teams, Signal,
+/// Cursor, Claude Desktop, …) all use these exact directory names
+/// under their profile root. Clearing them would log users out of
+/// PWAs, destroy offline data, and wipe extension state.
+pub const PROTECTED_USER_DATA_COMPONENTS: &[&str] = &[
+    "Service Worker",
+    "IndexedDB",
+    "Local Storage",
+    "Session Storage",
+    "databases",
+    "Local Extension Settings",
+    "Sync Extension Settings",
+    "Extension State",
+    "Extension Rules",
+    "Extension Scripts",
+    "File System",
+];
+
+/// Returns true if the given directory name is a protected user-data
+/// component that the cleaner must never walk into or delete.
+pub fn is_protected_user_data_component(name: &str) -> bool {
+    PROTECTED_USER_DATA_COMPONENTS.iter().any(|p| *p == name)
+}
+
 /// Calculate the total size of deletable files in a directory recursively.
-/// Skips symlinks and files the current user cannot delete.
+/// Skips symlinks, files the current user cannot delete, and any
+/// subdirectory whose name is a protected user-data component (see
+/// `PROTECTED_USER_DATA_COMPONENTS`). This matches the behavior of the
+/// cleaner executor, so scan sizes reflect what will actually be freed.
 pub fn deletable_dir_size(path: &Path) -> u64 {
     let uid = unsafe { libc::getuid() };
     let mut total: u64 = 0;
@@ -65,6 +95,12 @@ pub fn deletable_dir_size(path: &Path) -> u64 {
                     continue;
                 }
                 if p.is_dir() {
+                    // Skip protected user-data subdirs (PWA / SW / IndexedDB)
+                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                        if is_protected_user_data_component(name) {
+                            continue;
+                        }
+                    }
                     stack.push(p);
                 } else {
                     total += fs::metadata(&p).map(|m| physical_size(&m)).unwrap_or(0);

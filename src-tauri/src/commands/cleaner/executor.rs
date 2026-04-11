@@ -5,7 +5,59 @@ use std::process::Command;
 
 use super::{is_safe_path, CleanProgress, CleanResult, ScanItem};
 use crate::commands::shared;
-use crate::commands::utils::dir_size;
+use crate::commands::utils::{dir_size, is_protected_user_data_component};
+
+/// Recursively delete a directory tree while preserving any subdirectory
+/// whose name is a protected user-data component (Service Worker,
+/// IndexedDB, Local Storage, …). If any protected subdirs are
+/// preserved, the root directory itself is left in place; otherwise
+/// the root is removed. Returns `Ok(true)` if the root was removed,
+/// `Ok(false)` if protected content kept it alive.
+fn safe_remove_dir_all(path: &Path) -> std::io::Result<bool> {
+    // If the root itself is a protected component, refuse outright.
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if is_protected_user_data_component(name) {
+            return Ok(false);
+        }
+    }
+
+    let entries = match fs::read_dir(path) {
+        Ok(e) => e,
+        Err(e) => return Err(e),
+    };
+
+    let mut preserved_any = false;
+    for entry in entries.flatten() {
+        let child = entry.path();
+
+        if child.is_symlink() {
+            // Remove the symlink itself, never follow.
+            let _ = fs::remove_file(&child);
+            continue;
+        }
+
+        if child.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if is_protected_user_data_component(&name) {
+                preserved_any = true;
+                continue;
+            }
+            match safe_remove_dir_all(&child)? {
+                true => {} // child fully removed
+                false => preserved_any = true,
+            }
+        } else {
+            fs::remove_file(&child)?;
+        }
+    }
+
+    if preserved_any {
+        Ok(false)
+    } else {
+        fs::remove_dir(path)?;
+        Ok(true)
+    }
+}
 
 /// Delete a Time Machine in-progress backup bundle via `tmutil delete`,
 /// which walks the TM catalogue so the backup database stays consistent.
@@ -56,6 +108,14 @@ fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<String>) {
             continue;
         }
 
+        // Defense-in-depth: never clear a protected user-data component
+        // even if it somehow ends up at the top level of a container dir.
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if is_protected_user_data_component(name) {
+                continue;
+            }
+        }
+
         let size = if path.is_dir() {
             dir_size(&path)
         } else {
@@ -64,7 +124,7 @@ fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<String>) {
 
         let result = if permanent {
             if path.is_dir() {
-                fs::remove_dir_all(&path)
+                safe_remove_dir_all(&path).map(|_| ())
             } else {
                 fs::remove_file(&path)
             }
@@ -161,7 +221,7 @@ where
                 } else {
                     let delete_result = if permanent {
                         if path_info.is_dir {
-                            fs::remove_dir_all(path)
+                            safe_remove_dir_all(path).map(|_| ())
                         } else {
                             fs::remove_file(path)
                         }
