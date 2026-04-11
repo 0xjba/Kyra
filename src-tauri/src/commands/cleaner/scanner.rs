@@ -311,6 +311,71 @@ fn scan_xcode_device_support() -> Option<ScanItem> {
     })
 }
 
+/// Returns true if any Xcode simulator runtime is currently booted,
+/// determined via `xcrun simctl list devices booted`. When a simulator
+/// is booted we must not touch its dyld shared cache — the running
+/// runtime mmap's those files and clearing them crashes the simulator
+/// in non-obvious ways (missing frameworks, symbol lookup failures).
+fn xcode_simulator_is_booted() -> bool {
+    let out = std::process::Command::new("/usr/bin/xcrun")
+        .args(["simctl", "list", "devices", "booted"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            // When no devices are booted simctl prints "-- Unavailable: …"
+            // sections or just the header; an active boot shows a line
+            // containing "(Booted)".
+            stdout.contains("(Booted)")
+        }
+        _ => false,
+    }
+}
+
+/// Special scan: Xcode simulator caches, gated on no booted simulators.
+/// Returns `None` if Xcode command-line tools aren't present, the cache
+/// is empty, or any simulator is currently running.
+fn scan_xcode_simulator_caches() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let cache = home.join("Library/Developer/CoreSimulator/Caches");
+    if !cache.is_dir() {
+        return None;
+    }
+
+    if xcode_simulator_is_booted() {
+        crate::commands::shared::log_operation(
+            "SCAN",
+            "Xcode Simulator Caches",
+            "skipped: simulator currently booted",
+        );
+        return None;
+    }
+
+    let size = deletable_dir_size(&cache);
+    if size == 0 {
+        return None;
+    }
+
+    let path_str = cache.to_string_lossy().to_string();
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Xcode Simulator Caches",
+        &format!("{} bytes", size),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_xcode_simulators".into(),
+        category: "Developer Tools".into(),
+        label: "Xcode Simulator Caches".into(),
+        paths: vec![PathInfo {
+            path: path_str,
+            size,
+            is_dir: true,
+        }],
+        total_size: size,
+    })
+}
+
 /// Special scan: find incomplete download files in ~/Downloads.
 fn scan_incomplete_downloads() -> Option<ScanItem> {
     let downloads = dirs::home_dir()?.join("Downloads");
@@ -504,6 +569,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     }
     if let Some(xcode_ds) = scan_xcode_device_support() {
         results.push(xcode_ds);
+    }
+    if let Some(xcode_sim) = scan_xcode_simulator_caches() {
+        results.push(xcode_sim);
     }
 
     results

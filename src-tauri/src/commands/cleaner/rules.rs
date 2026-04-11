@@ -423,13 +423,11 @@ pub fn all_rules() -> Vec<CleanRule> {
         // (`scan_xcode_device_support`) that preserves the N most recent
         // versions — re-downloading ~2 GB of device symbols blocks debugging
         // of real hardware until it completes.
-        CleanRule {
-            id: "dev_xcode_simulators".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Xcode Simulator Caches".into(),
-            paths: vec!["~/Library/Developer/CoreSimulator/Caches".into()],
-        },
+        // Xcode Simulator Caches are handled by a special scan
+        // (`scan_xcode_simulator_caches`) that skips cleanup when any
+        // simulator runtime is currently booted — clearing the dyld
+        // shared cache out from under a running simulator produces
+        // hard-to-diagnose crashes.
         CleanRule {
             id: "dev_xcode_docsets".into(),
             max_age_days: None,
