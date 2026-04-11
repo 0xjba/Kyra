@@ -260,10 +260,29 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
 // ── Orphaned App Data Detection ───────────────────────────────────────
 
 /// Patterns that must never be flagged as orphaned (sensitive / system data).
+/// Matched as substrings against the lowercased directory name.
 const ORPHAN_NEVER_DELETE: &[&str] = &[
+    // Password managers
     "1password", "bitwarden", "lastpass", "keepass", "dashlane", "enpass",
     "keychain", "ssh", "gpg", "gnupg", "security",
-    "com.apple.", // Never flag Apple data
+    // Apple system data
+    "com.apple.",
+    // Browsers (vendor + product names) — their user profiles live under
+    // these directories and contain sessions, extensions, wallets, passwords.
+    "google", "chrome", "chromium",
+    "mozilla", "firefox",
+    "bravesoftware", "brave",
+    "microsoft edge", "microsoft",
+    "company.thebrowser", "arc",
+    "operasoftware", "opera",
+    "vivaldi",
+    "safari",
+    "tor browser", "tor",
+    // Crypto wallets (native apps / extension data locations)
+    "metamask", "phantom", "rainbow", "trust wallet", "coinbase wallet",
+    "exodus", "electrum", "ledger", "trezor", "wallet",
+    // Common dev / secrets directories
+    "aws", "gcloud", "azure", "kube", "docker",
 ];
 
 /// Maximum number of orphaned items to return.
@@ -324,22 +343,42 @@ fn collect_installed_bundle_ids() -> HashSet<String> {
 }
 
 /// Check if a directory entry name matches any installed bundle ID.
-/// Returns true if the name matches or is a prefix of any bundle ID.
+/// Returns true if the name looks like it could belong to an installed app.
+///
+/// This is intentionally permissive — a false positive just means we don't
+/// flag the folder as orphaned, but a false negative could cause us to delete
+/// live app data (browser profiles, extensions, crypto wallets, etc).
 fn matches_installed_app(name_lower: &str, installed_ids: &HashSet<String>) -> bool {
-    // Direct match
+    // Direct match: "com.google.chrome" == "com.google.chrome"
     if installed_ids.contains(name_lower) {
         return true;
     }
 
-    // Check if entry name is a prefix of any installed ID
-    // e.g. "com.example" matches "com.example.app.helper"
     for id in installed_ids {
+        // Prefix match: "com.example" is an ancestor of "com.example.helper"
         if id.starts_with(name_lower) && id[name_lower.len()..].starts_with('.') {
             return true;
         }
-        // Also check if any installed ID is a prefix of this entry
         if name_lower.starts_with(id.as_str()) && name_lower[id.len()..].starts_with('.') {
             return true;
+        }
+
+        // Middle-component match: directory "Google" should match bundle
+        // "com.google.Chrome" because "google" is a component of the bundle ID.
+        // This catches vendor/product folders like "Google", "Mozilla",
+        // "BraveSoftware", "Firefox" that don't map 1:1 to the bundle ID.
+        for component in id.split('.') {
+            if component.is_empty() || component == "com" || component == "org" || component == "net" || component == "io" {
+                continue;
+            }
+            if component == name_lower {
+                return true;
+            }
+            // Also match if the directory name contains the component
+            // (e.g. "BraveSoftware" should match "brave")
+            if name_lower.contains(component) || component.contains(name_lower) {
+                return true;
+            }
         }
     }
 
@@ -365,6 +404,29 @@ fn is_old_enough(path: &Path) -> bool {
         .duration_since(modified)
         .unwrap_or_default();
     age.as_secs() > ORPHAN_MIN_AGE_DAYS * 24 * 60 * 60
+}
+
+/// Returns true if a directory/file name looks like a reverse-DNS bundle ID
+/// (e.g. `com.google.Chrome`, `org.mozilla.firefox`, `net.whatsapp.WhatsApp`).
+///
+/// This is the primary safety filter for the orphan scanner: we only consider
+/// entries that look like bundle IDs as orphan candidates. Vendor directories
+/// like `Google`, `Firefox`, `BraveSoftware`, `Arc` — which contain live user
+/// data (extensions, crypto wallets, sessions) — are invisible to the scanner
+/// because their names do not match any bundle-ID prefix.
+fn looks_like_bundle_id(name_lower: &str) -> bool {
+    // Must contain at least one dot (reverse-DNS format)
+    if !name_lower.contains('.') {
+        return false;
+    }
+    // Must start with a known reverse-DNS TLD prefix
+    const BUNDLE_PREFIXES: &[&str] = &[
+        "com.", "org.", "net.", "io.", "co.", "ai.", "dev.", "app.", "me.",
+        "edu.", "gov.", "biz.", "info.", "xyz.", "tv.", "us.", "uk.", "de.",
+        "fr.", "jp.", "cn.", "ru.", "it.", "es.", "nl.", "br.", "au.", "ca.",
+        "ch.", "at.", "se.", "no.", "fi.", "pl.", "eu.",
+    ];
+    BUNDLE_PREFIXES.iter().any(|p| name_lower.starts_with(p))
 }
 
 /// Scan for orphaned application data from uninstalled apps.
@@ -399,7 +461,19 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
             };
             let name_lower = name.to_lowercase();
 
-            // Skip protected patterns
+            // PRIMARY SAFETY: only consider entries that look like bundle IDs.
+            // Vendor folders like "Google", "Firefox", "BraveSoftware" are
+            // invisible to this scanner — they contain live user data and
+            // must never be flagged as orphaned.
+            let stripped = name_lower
+                .trim_end_matches(".savedstate")
+                .trim_end_matches(".binarycookies")
+                .trim_end_matches(".plist");
+            if !looks_like_bundle_id(stripped) {
+                continue;
+            }
+
+            // Skip protected patterns (defense in depth)
             if is_orphan_protected(&name_lower) {
                 continue;
             }
