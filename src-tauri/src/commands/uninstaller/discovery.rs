@@ -4,11 +4,92 @@ use std::path::Path;
 use super::AppInfo;
 use crate::commands::utils::path_size;
 
-/// Patterns that indicate a data-sensitive app (password managers, VPNs, crypto tools).
+/// Patterns that indicate a data-sensitive app — password managers, crypto
+/// wallets, 2FA authenticators, VPN clients, and encryption tools. Matched
+/// as a case-insensitive substring against either the bundle identifier or
+/// the display name. The UI surfaces a warning before uninstalling these
+/// so users don't accidentally destroy irrecoverable credentials or keys.
 const DATA_SENSITIVE_PATTERNS: &[&str] = &[
-    "1password", "bitwarden", "lastpass", "keepass", "dashlane", "enpass",
-    "keychain", "nordvpn", "expressvpn", "tunnelblick", "wireguard",
-    "pgp", "gpg", "ssh",
+    // Password managers
+    "1password",
+    "agilebits",
+    "bitwarden",
+    "lastpass",
+    "dashlane",
+    "keepass",
+    "keepassxc",
+    "enpass",
+    "nordpass",
+    "keeper",
+    "roboform",
+    "padloc",
+    "strongbox",
+    "passky",
+    "proton pass",
+    "protonpass",
+    // 2FA / authenticator apps
+    "authy",
+    "yubico",
+    "yubikey",
+    "raivo",
+    "step two",
+    "2fas",
+    "tofu",
+    "ente auth",
+    // Crypto wallets (desktop)
+    "metamask",
+    "phantom",
+    "exodus",
+    "electrum",
+    "ledger live",
+    "trezor",
+    "atomic wallet",
+    "trust wallet",
+    "coinbase wallet",
+    "rainbow",
+    "frame",
+    "rabby",
+    "keplr",
+    "xdefi",
+    "zerion",
+    "monero",
+    "bitcoin core",
+    "litecoin",
+    "wasabi wallet",
+    "sparrow",
+    // VPN clients
+    "nordvpn",
+    "expressvpn",
+    "protonvpn",
+    "surfshark",
+    "windscribe",
+    "mullvad",
+    "privateinternetaccess",
+    "private internet access",
+    "tunnelblick",
+    "wireguard",
+    "openvpn",
+    "tailscale",
+    "zerotier",
+    "cloudflare warp",
+    "1.1.1.1",
+    "hotspot shield",
+    "ivpn",
+    // Encryption & keys
+    "veracrypt",
+    "cryptomator",
+    "boxcryptor",
+    "gpgtools",
+    "gpg suite",
+    "pgp",
+    "gpg",
+    "ssh",
+    "keychain",
+    // SSH / terminal with saved credentials
+    "termius",
+    "royal tsx",
+    "secure shellfish",
+    "core tunnel",
 ];
 
 /// Returns true if the bundle_id or app name suggests a data-sensitive app.
