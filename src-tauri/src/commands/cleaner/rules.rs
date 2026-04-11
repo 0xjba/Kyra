@@ -434,7 +434,13 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Developer Tools".into(),
             label: "Xcode Documentation".into(),
             paths: vec![
+                // Legacy docset format (Xcode ≤ 11)
                 "~/Library/Developer/Shared/Documentation/DocSets".into(),
+                // Modern offline documentation (Xcode 12+)
+                "~/Library/Developer/Xcode/DocumentationCache".into(),
+                "~/Library/Developer/Xcode/UserData/Documentation".into(),
+                "~/Library/Caches/com.apple.dt.Xcode/Downloads/Documentation".into(),
+                "~/Library/Caches/com.apple.dt.Xcode.DocumentationIndexing".into(),
             ],
         },
         CleanRule {
