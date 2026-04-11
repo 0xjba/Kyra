@@ -446,15 +446,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             ],
         },
         CleanRule {
-            id: "dev_docker_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Docker Cache".into(),
-            paths: vec![
-                "~/Library/Containers/com.docker.docker/Data/vms".into(),
-            ],
-        },
-        CleanRule {
             id: "dev_docker_buildx".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
