@@ -1,4 +1,5 @@
 pub mod associated;
+pub mod brew;
 pub mod discovery;
 pub mod remover;
 
@@ -14,6 +15,9 @@ pub struct AppInfo {
     pub size: u64,
     pub is_system: bool,
     pub is_data_sensitive: bool,
+    /// Homebrew cask token if the app was installed via `brew install --cask`,
+    /// otherwise `None`. Used to drive brew-aware uninstall.
+    pub brew_cask: Option<String>,
 }
 
 /// A file or directory associated with an application.

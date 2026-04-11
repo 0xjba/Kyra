@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use super::brew;
 use super::AppInfo;
 use crate::commands::utils::path_size;
 
@@ -137,6 +138,14 @@ fn read_app_info(app_path: &Path) -> Option<AppInfo> {
     let is_system = path_str.starts_with("/System/Applications/");
     let is_data_sensitive = check_data_sensitive(&bundle_id, &name);
 
+    // Homebrew cask detection is skipped for system apps — they're never
+    // brew-managed and the detection does disk I/O we don't need.
+    let brew_cask = if is_system {
+        None
+    } else {
+        brew::detect_cask(&path_str)
+    };
+
     Some(AppInfo {
         bundle_id,
         name,
@@ -145,6 +154,7 @@ fn read_app_info(app_path: &Path) -> Option<AppInfo> {
         size,
         is_system,
         is_data_sensitive,
+        brew_cask,
     })
 }
 
