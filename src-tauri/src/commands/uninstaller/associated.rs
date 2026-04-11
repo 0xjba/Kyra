@@ -8,6 +8,9 @@ use crate::commands::utils::path_size;
 /// Directories under ~/Library to search, with human-readable category names.
 const SEARCH_LOCATIONS: &[(&str, &str)] = &[
     ("Application Support", "App Data"),
+    ("Application Scripts", "App Data"),
+    ("Autosave Information", "App Data"),
+    ("SyncedPreferences", "Preferences"),
     ("Preferences", "Preferences"),
     ("Caches", "Caches"),
     ("Containers", "Containers"),
@@ -19,13 +22,75 @@ const SEARCH_LOCATIONS: &[(&str, &str)] = &[
     ("Cookies", "Cookies"),
     ("Internet Plug-Ins", "Plug-ins"),
     ("Input Methods", "Plug-ins"),
+    ("QuickLook", "Plug-ins"),
+    ("PreferencePanes", "Plug-ins"),
+    ("Services", "Plug-ins"),
+    ("Screen Savers", "Plug-ins"),
+    ("Frameworks", "Frameworks"),
+    ("Spotlight", "Plug-ins"),
+    ("ColorPickers", "Plug-ins"),
+    ("Workflows", "Plug-ins"),
+    ("Address Book Plug-Ins", "Plug-ins"),
+    ("Accessibility", "Plug-ins"),
+    ("Contextual Menu Items", "Plug-ins"),
 ];
 
-/// Checks if a directory entry name matches the bundle ID or app name.
-fn matches_app(entry_name: &str, bundle_id: &str, app_name: &str) -> bool {
+/// Generate the set of lowercase naming variants for an app name, covering
+/// the common inconsistencies between UI display name and on-disk folder
+/// name. e.g. "Maestro Studio" produces {"maestro studio", "maestrostudio",
+/// "maestro-studio", "maestro_studio"}. Also strips common version/channel
+/// suffixes ("Nightly", "Beta", "Developer Edition", …) to add a base-name
+/// variant — a "Zed Nightly" folder is often "zed" under ~/.config.
+fn app_name_variants(app_name: &str) -> Vec<String> {
+    if app_name.is_empty() {
+        return Vec::new();
+    }
+    let mut variants: Vec<String> = Vec::new();
+    let lower = app_name.to_lowercase();
+    variants.push(lower.clone());
+    variants.push(lower.replace(' ', ""));
+    variants.push(lower.replace(' ', "-"));
+    variants.push(lower.replace(' ', "_"));
+
+    // Strip common version/channel suffixes for a base-name match.
+    const VERSION_SUFFIXES: &[&str] = &[
+        " nightly",
+        " beta",
+        " alpha",
+        " dev",
+        " canary",
+        " preview",
+        " insider",
+        " edge",
+        " stable",
+        " release",
+        " rc",
+        " lts",
+        " developer edition",
+        " technology preview",
+    ];
+    for suffix in VERSION_SUFFIXES {
+        if let Some(stripped) = lower.strip_suffix(suffix) {
+            if stripped.len() >= 3 {
+                variants.push(stripped.to_string());
+                variants.push(stripped.replace(' ', ""));
+                variants.push(stripped.replace(' ', "-"));
+            }
+            break;
+        }
+    }
+
+    variants.sort();
+    variants.dedup();
+    variants.retain(|v| !v.is_empty());
+    variants
+}
+
+/// Checks if a directory entry name matches the bundle ID or any of the
+/// pre-computed app-name variants.
+fn matches_app(entry_name: &str, bundle_id: &str, app_name_variants: &[String]) -> bool {
     let entry_lower = entry_name.to_lowercase();
     let bundle_lower = bundle_id.to_lowercase();
-    let name_lower = app_name.to_lowercase();
 
     // Exact bundle ID match (most reliable)
     if !bundle_id.is_empty() && entry_lower == bundle_lower {
@@ -37,9 +102,19 @@ fn matches_app(entry_name: &str, bundle_id: &str, app_name: &str) -> bool {
         return true;
     }
 
-    // App name match (for directories named after the app)
-    if !app_name.is_empty() && entry_lower == name_lower {
-        return true;
+    // App name variant match (handles space/hyphen/underscore/nospace
+    // variations and stripped version-channel suffixes).
+    for variant in app_name_variants {
+        if entry_lower == *variant {
+            return true;
+        }
+        // Some apps name their folder "<variant>.app" or "<variant>.workflow"
+        // — strip a single extension for comparison.
+        if let Some(dot) = entry_lower.rfind('.') {
+            if &entry_lower[..dot] == variant {
+                return true;
+            }
+        }
     }
 
     false
@@ -241,6 +316,8 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
     let library = home.join("Library");
     let mut results = Vec::new();
 
+    let name_variants = app_name_variants(app_name);
+
     for (dir_name, category) in SEARCH_LOCATIONS {
         let search_dir = library.join(dir_name);
         if !search_dir.exists() {
@@ -254,7 +331,7 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
 
         for entry in entries.filter_map(|e| e.ok()) {
             let entry_name = entry.file_name().to_string_lossy().to_string();
-            if !matches_app(&entry_name, bundle_id, app_name) {
+            if !matches_app(&entry_name, bundle_id, &name_variants) {
                 continue;
             }
 
@@ -370,6 +447,179 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
                         });
                     }
                 }
+            }
+        }
+    }
+
+    // Group Containers wildcard: entries here are typically named
+    // `<team_id>.<bundle_id>` or similar, so an exact match won't catch
+    // them. Walk the root and pick up anything whose name contains the
+    // bundle id as a substring.
+    if !bundle_id.is_empty() {
+        let group_containers = library.join("Group Containers");
+        if group_containers.exists() {
+            if let Ok(entries) = fs::read_dir(&group_containers) {
+                let needle = bundle_id.to_lowercase();
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let name = entry.file_name().to_string_lossy().to_lowercase();
+                    if !name.contains(&needle) {
+                        continue;
+                    }
+                    let path = entry.path();
+                    let size = path_size(&path);
+                    if size == 0 {
+                        continue;
+                    }
+                    let path_str = path.to_string_lossy().to_string();
+                    if results.iter().any(|r| r.path == path_str) {
+                        continue;
+                    }
+                    results.push(AssociatedFile {
+                        path: path_str,
+                        category: "Group Containers".to_string(),
+                        size,
+                        is_dir: path.is_dir(),
+                    });
+                }
+            }
+        }
+    }
+
+    // sharedfilelist: recent-documents / most-recently-used lists, stored
+    // per-bundle as `<bundle_id>.sfl4` under
+    // ~/Library/Application Support/com.apple.sharedfilelist/. These aren't
+    // huge but they leak document filenames the user expected to be gone.
+    if !bundle_id.is_empty() {
+        let sfl_root = library.join("Application Support/com.apple.sharedfilelist");
+        if sfl_root.exists() {
+            let target_name = format!("{}.sfl4", bundle_id);
+            let target_name3 = format!("{}.sfl3", bundle_id);
+            fn walk_sfl(
+                dir: &Path,
+                depth: usize,
+                targets: &[&str],
+                results: &mut Vec<AssociatedFile>,
+            ) {
+                if depth == 0 {
+                    return;
+                }
+                let entries = match fs::read_dir(dir) {
+                    Ok(e) => e,
+                    Err(_) => return,
+                };
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        walk_sfl(&path, depth - 1, targets, results);
+                        continue;
+                    }
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !targets.iter().any(|t| name == *t) {
+                        continue;
+                    }
+                    let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+                    if size == 0 {
+                        continue;
+                    }
+                    let path_str = path.to_string_lossy().to_string();
+                    if results.iter().any(|r| r.path == path_str) {
+                        continue;
+                    }
+                    results.push(AssociatedFile {
+                        path: path_str,
+                        category: "App Data".to_string(),
+                        size,
+                        is_dir: false,
+                    });
+                }
+            }
+            walk_sfl(
+                &sfl_root,
+                3,
+                &[target_name.as_str(), target_name3.as_str()],
+                &mut results,
+            );
+        }
+    }
+
+    // NSURLSession per-bundle download cache. Downloads initiated by apps
+    // via NSURLSessionDownloadTask land here and can be megabytes-large.
+    if !bundle_id.is_empty() {
+        let dl_dir = library
+            .join("Caches/com.apple.nsurlsessiond/Downloads")
+            .join(bundle_id);
+        if dl_dir.exists() {
+            let size = path_size(&dl_dir);
+            if size > 0 {
+                let path_str = dl_dir.to_string_lossy().to_string();
+                if !results.iter().any(|r| r.path == path_str) {
+                    results.push(AssociatedFile {
+                        path: path_str,
+                        category: "Caches".to_string(),
+                        size,
+                        is_dir: true,
+                    });
+                }
+            }
+        }
+    }
+
+    // Dotfile / XDG roots outside ~/Library. Apps that originated on
+    // Linux often write config to ~/.config/<name>, ~/.local/share/<name>,
+    // or ~/.<name> instead of (or in addition to) ~/Library/Application Support.
+    if !name_variants.is_empty() {
+        let dot_roots: [(PathBuf, bool); 3] = [
+            (home.join(".config"), false),
+            (home.join(".local/share"), false),
+            (home.clone(), true), // dotfile prefix match
+        ];
+        for (root, dot_prefix) in &dot_roots {
+            if !root.is_dir() {
+                continue;
+            }
+            let entries = match fs::read_dir(root) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let raw = entry.file_name().to_string_lossy().to_string();
+                let check = if *dot_prefix {
+                    // For dotfiles under $HOME, only accept names that
+                    // begin with '.' and strip it for comparison.
+                    if !raw.starts_with('.') {
+                        continue;
+                    }
+                    raw[1..].to_lowercase()
+                } else {
+                    raw.to_lowercase()
+                };
+                if check.is_empty() {
+                    continue;
+                }
+                let hit = name_variants.iter().any(|v| *v == check);
+                // Also accept "<variant>rc" for classic rc-file naming.
+                let rc_hit = !hit
+                    && name_variants
+                        .iter()
+                        .any(|v| check.strip_suffix("rc") == Some(v.as_str()));
+                if !hit && !rc_hit {
+                    continue;
+                }
+                let path = entry.path();
+                let size = path_size(&path);
+                if size == 0 {
+                    continue;
+                }
+                let path_str = path.to_string_lossy().to_string();
+                if results.iter().any(|r| r.path == path_str) {
+                    continue;
+                }
+                results.push(AssociatedFile {
+                    path: path_str,
+                    category: "App Data".to_string(),
+                    size,
+                    is_dir: path.is_dir(),
+                });
             }
         }
     }
