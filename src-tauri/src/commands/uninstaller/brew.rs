@@ -126,13 +126,62 @@ pub fn is_homebrew_available() -> bool {
     Path::new("/opt/homebrew/bin/brew").exists() || Path::new("/usr/local/bin/brew").exists()
 }
 
+/// Stage 4: Query `brew list --cask` for a case-insensitive match on the
+/// app bundle name, then verify the match with `brew info --cask` to
+/// confirm the cask actually owns this app path. This is the slowest
+/// detection path because it shells out twice, so it only runs as a last
+/// resort after the three filesystem-based stages.
+fn detect_via_brew_list(app_path: &Path, bundle_name: &str) -> Option<String> {
+    let name_lower = bundle_name.trim_end_matches(".app").to_lowercase();
+    if name_lower.is_empty() {
+        return None;
+    }
+    let brew = brew_binary()?;
+
+    let list_out = Command::new(brew)
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .args(["list", "--cask"])
+        .output()
+        .ok()?;
+    if !list_out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&list_out.stdout);
+    let cask_name = stdout
+        .lines()
+        .find(|line| line.trim().eq_ignore_ascii_case(&name_lower))?
+        .trim()
+        .to_string();
+    if !is_valid_cask_token(&cask_name) {
+        return None;
+    }
+
+    // Verify this cask actually owns this app path
+    let info_out = Command::new(brew)
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .args(["info", "--cask", &cask_name])
+        .output()
+        .ok()?;
+    if !info_out.status.success() {
+        return None;
+    }
+    let info_str = String::from_utf8_lossy(&info_out.stdout);
+    let app_path_str = app_path.to_string_lossy();
+    if info_str.contains(app_path_str.as_ref()) {
+        Some(cask_name)
+    } else {
+        None
+    }
+}
+
 /// Looks up the Homebrew cask token that manages `app_path`, or `None`
-/// if the app was not installed via Homebrew. Runs three detection
+/// if the app was not installed via Homebrew. Runs four detection
 /// stages in order from fastest/most-deterministic to slowest:
 ///
 /// 1. Canonicalize the path and check whether it resolves into a Caskroom.
 /// 2. Search Caskroom subdirectories for a bundle with the same name.
 /// 3. If the path is a symlink, follow one level and recheck.
+/// 4. Query `brew list --cask` + `brew info --cask` (slowest fallback).
 pub fn detect_cask(app_path: &str) -> Option<String> {
     let path = Path::new(app_path);
     if !path.exists() && fs::symlink_metadata(path).is_err() {
@@ -155,6 +204,10 @@ pub fn detect_cask(app_path: &str) -> Option<String> {
         return Some(token);
     }
 
+    if let Some(token) = detect_via_brew_list(path, &bundle_name) {
+        return Some(token);
+    }
+
     None
 }
 
@@ -174,11 +227,19 @@ fn brew_binary() -> Option<&'static str> {
 /// the cask (caches, preferences, launch agents, etc.), which gets us
 /// closer to a complete uninstall than deleting the .app bundle alone.
 ///
+/// A size-dependent timeout prevents a broken cask script from hanging
+/// the uninstaller indefinitely: 300s default, 600s for apps >5 GB,
+/// 900s for apps >15 GB.
+///
 /// On success, returns the raw stdout/stderr concatenation for logging.
 /// On failure, returns a human-readable error message.
 ///
 /// Respects `dry_run` by short-circuiting without invoking brew.
-pub fn uninstall_cask(cask: &str, dry_run: bool) -> Result<String, String> {
+pub fn uninstall_cask_with_size(
+    cask: &str,
+    dry_run: bool,
+    app_size_bytes: u64,
+) -> Result<String, String> {
     if !is_valid_cask_token(cask) {
         return Err(format!("invalid cask token: {}", cask));
     }
@@ -187,14 +248,46 @@ pub fn uninstall_cask(cask: &str, dry_run: bool) -> Result<String, String> {
     }
     let brew = brew_binary().ok_or_else(|| "Homebrew not installed".to_string())?;
 
-    let output = Command::new(brew)
+    let size_gb = app_size_bytes / (1024 * 1024 * 1024);
+    let timeout_secs: u64 = if size_gb > 15 {
+        900 // 15 min for very large apps (Xcode, Adobe)
+    } else if size_gb > 5 {
+        600 // 10 min for large apps
+    } else {
+        300 // 5 min default
+    };
+
+    let mut child = Command::new(brew)
         .env("HOMEBREW_NO_ENV_HINTS", "1")
         .env("HOMEBREW_NO_AUTO_UPDATE", "1")
         .env("NONINTERACTIVE", "1")
         .args(["uninstall", "--cask", "--zap", cask])
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| format!("failed to run brew: {}", e))?;
 
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "brew uninstall --cask --zap {} timed out after {}s",
+                        cask, timeout_secs
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(e) => return Err(format!("failed to wait on brew: {}", e)),
+        }
+    }
+
+    let output = child.wait_with_output().map_err(|e| format!("failed to read brew output: {}", e))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 

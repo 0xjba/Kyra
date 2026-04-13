@@ -915,6 +915,140 @@ fn scan_xcode_simulator_caches() -> Option<ScanItem> {
     })
 }
 
+/// Special scan: dynamically discover macOS installer apps in /Applications.
+/// Safety gates (matching the reference implementation):
+///   1. Glob `/Applications/Install macOS*.app` — catches future OS names
+///   2. Skip if installer process is currently running (`pgrep -f`)
+///   3. Skip if installer's DTPlatformVersion matches current macOS major
+///   4. Skip if younger than 14 days
+fn scan_macos_installers() -> Option<ScanItem> {
+    let apps_dir = Path::new("/Applications");
+    if !apps_dir.is_dir() {
+        return None;
+    }
+
+    // Get current macOS major version for the version guard
+    let current_major = std::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                ver.split('.').next().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let cutoff = SystemTime::now() - Duration::from_secs(14 * 86400);
+    let mut paths = Vec::new();
+    let mut total_size = 0u64;
+
+    let entries = match std::fs::read_dir(apps_dir) {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+
+        // Only match "Install macOS *.app"
+        if !name.starts_with("Install macOS ") || !name.ends_with(".app") {
+            continue;
+        }
+        if !path.is_dir() {
+            continue;
+        }
+
+        // Gate 1: skip if installer is currently running
+        let pgrep_out = std::process::Command::new("/usr/bin/pgrep")
+            .arg("-f")
+            .arg(&path.to_string_lossy().to_string())
+            .output();
+        if let Ok(o) = pgrep_out {
+            if o.status.success() && !o.stdout.is_empty() {
+                crate::commands::shared::log_operation(
+                    "SCAN", &name, "skipped: installer is currently running",
+                );
+                continue;
+            }
+        }
+
+        // Gate 2: skip if DTPlatformVersion matches current macOS major
+        if !current_major.is_empty() {
+            let info_plist = path.join("Contents/Info.plist");
+            if info_plist.exists() {
+                if let Ok(plist_val) = plist::Value::from_file(&info_plist) {
+                    if let Some(dict) = plist_val.as_dictionary() {
+                        if let Some(ver) = dict.get("DTPlatformVersion").and_then(|v| v.as_string()) {
+                            let installer_major = ver.split('.').next().unwrap_or("");
+                            if installer_major == current_major {
+                                crate::commands::shared::log_operation(
+                                    "SCAN", &name,
+                                    &format!("skipped: matches current macOS version ({})", current_major),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Gate 3: skip if younger than 14 days
+        if let Ok(meta) = path.metadata() {
+            let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            if modified > cutoff {
+                let age_days = SystemTime::now()
+                    .duration_since(modified)
+                    .unwrap_or_default()
+                    .as_secs() / 86400;
+                crate::commands::shared::log_operation(
+                    "SCAN", &name,
+                    &format!("skipped: only {} days old (need 14+)", age_days),
+                );
+                continue;
+            }
+        }
+
+        let size = deletable_dir_size(&path);
+        if size == 0 {
+            continue;
+        }
+
+        paths.push(PathInfo {
+            path: path.to_string_lossy().to_string(),
+            size,
+            is_dir: true,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Old macOS Installers",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "system_macos_installers".into(),
+        category: "System".into(),
+        label: "Old macOS Installers".into(),
+        paths,
+        total_size,
+    })
+}
+
 /// Special scan: find incomplete download files in ~/Downloads.
 fn scan_incomplete_downloads() -> Option<ScanItem> {
     let downloads = dirs::home_dir()?.join("Downloads");
@@ -1104,6 +1238,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     // Special scans (not covered by standard rules)
     if let Some(ds_store) = scan_ds_store_files() {
         results.push(ds_store);
+    }
+    if let Some(installers) = scan_macos_installers() {
+        results.push(installers);
     }
     if let Some(incomplete) = scan_incomplete_downloads() {
         results.push(incomplete);

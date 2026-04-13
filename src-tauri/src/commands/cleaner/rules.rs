@@ -82,19 +82,9 @@ pub fn all_rules() -> Vec<CleanRule> {
                 "/Library/Logs/adobegc.log".into(),
             ],
         },
-        CleanRule {
-            id: "system_macos_installers".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Old macOS Installers".into(),
-            paths: vec![
-                "/Applications/Install macOS Sonoma.app".into(),
-                "/Applications/Install macOS Ventura.app".into(),
-                "/Applications/Install macOS Monterey.app".into(),
-                "/Applications/Install macOS Big Sur.app".into(),
-                "/Applications/Install macOS Catalina.app".into(),
-            ],
-        },
+        // macOS installer apps are handled by scan_macos_installers() in
+        // scanner.rs with dynamic glob, running-installer check, current-OS
+        // version guard, and 14-day age gate.
         // ── User ────────────────────────────────────────────
         CleanRule {
             id: "user_caches".into(),

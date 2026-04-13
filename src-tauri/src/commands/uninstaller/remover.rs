@@ -327,6 +327,86 @@ fn try_lsregister_unregister(app_path: &str) {
     shared::log_operation("UNINSTALL", app_path, "lsregister -u");
 }
 
+/// Post-batch Launch Services rebuild: `lsregister -gc` (garbage collect)
+/// then `lsregister -r -f -domain local -domain user -domain system`
+/// (force re-scan). Falls back to a lighter rebuild (local + user only) if
+/// the full rebuild times out. Failures are non-fatal.
+fn try_lsregister_rebuild() {
+    if !Path::new(LSREGISTER).exists() {
+        return;
+    }
+    // Phase 1: garbage-collect (10s timeout)
+    let _ = Command::new(LSREGISTER)
+        .arg("-gc")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut child| {
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(10);
+            loop {
+                match child.try_wait()? {
+                    Some(_) => return Ok(()),
+                    None if start.elapsed() > timeout => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Ok(());
+                    }
+                    None => std::thread::sleep(std::time::Duration::from_millis(100)),
+                }
+            }
+        });
+
+    // Phase 2: full rebuild (15s timeout, fallback to lighter version)
+    let full_rebuild = Command::new(LSREGISTER)
+        .args(["-r", "-f", "-domain", "local", "-domain", "user", "-domain", "system"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut child| {
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(15);
+            loop {
+                match child.try_wait()? {
+                    Some(status) => return Ok(status.success()),
+                    None if start.elapsed() > timeout => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Ok(false);
+                    }
+                    None => std::thread::sleep(std::time::Duration::from_millis(100)),
+                }
+            }
+        });
+
+    // If full rebuild timed out or failed, try lighter version (local + user only)
+    if let Ok(false) = full_rebuild {
+        shared::log_operation("UNINSTALL", LSREGISTER, "full rebuild timed out, trying lighter version");
+        let _ = Command::new(LSREGISTER)
+            .args(["-r", "-f", "-domain", "local", "-domain", "user"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .and_then(|mut child| {
+                let start = std::time::Instant::now();
+                let timeout = std::time::Duration::from_secs(10);
+                loop {
+                    match child.try_wait()? {
+                        Some(_) => return Ok(()),
+                        None if start.elapsed() > timeout => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Ok(());
+                        }
+                        None => std::thread::sleep(std::time::Duration::from_millis(100)),
+                    }
+                }
+            });
+    }
+
+    shared::log_operation("UNINSTALL", LSREGISTER, "post-batch rebuild");
+}
+
 /// Best-effort `launchctl unload` (or `bootout`) on a job plist before it
 /// gets deleted. Stopping the service avoids "resource busy" errors and
 /// prevents launchd from respawning the binary we just removed. Failures
@@ -532,8 +612,18 @@ where
     // stanzas first. The file-deletion loop below still runs afterwards to
     // clean up anything brew didn't know about (user caches, orphaned
     // launch agents, etc.).
+    // Calculate app size for brew timeout scaling
+    let app_size_bytes = {
+        let p = Path::new(app_path);
+        if p.is_dir() {
+            crate::commands::utils::dir_size(p)
+        } else {
+            p.metadata().map(|m| m.len()).unwrap_or(0)
+        }
+    };
+
     let brew_handled_app = if let Some(cask) = brew_cask.as_deref() {
-        match brew::uninstall_cask(cask, dry_run) {
+        match brew::uninstall_cask_with_size(cask, dry_run, app_size_bytes) {
             Ok(log_line) => {
                 shared::log_operation(
                     "UNINSTALL",
@@ -693,6 +783,15 @@ where
     // on-disk anyway).
     if !dry_run && !bundle_id.is_empty() {
         try_defaults_delete(bundle_id);
+    }
+
+    // Compact and rebuild the LaunchServices database so stale entries
+    // (Spotlight results, "Open with…" menus, default app mappings) are
+    // flushed immediately rather than lingering for days. Per-file
+    // lsregister -u handled individual bundles above; this final pass
+    // garbage-collects and forces a full re-scan.
+    if !dry_run && items_removed > 0 {
+        try_lsregister_rebuild();
     }
 
     // Warn about Local Network permissions. TCC.db entries for this
