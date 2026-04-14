@@ -178,6 +178,33 @@ pub async fn analyze_path(app: tauri::AppHandle, path: String, depth: usize) -> 
         flights.insert(flight_key.clone(), Arc::clone(&result_slot));
     }
 
+    // Drop guard: ensures the flight_key is always removed from IN_FLIGHT_SCANS
+    // and the result_slot is always populated, even if the scan panics or errors.
+    struct FlightGuard {
+        key: String,
+        slot: Arc<Mutex<Option<Result<DirNode, String>>>>,
+    }
+    impl Drop for FlightGuard {
+        fn drop(&mut self) {
+            // If the slot was never populated (panic path), store an error
+            // so any waiters unblock instead of polling forever.
+            {
+                let mut guard = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+                if guard.is_none() {
+                    *guard = Some(Err("scan was cancelled or panicked".to_string()));
+                }
+            }
+            // Always remove from in-flight map so future scans aren't blocked.
+            if let Ok(mut flights) = IN_FLIGHT_SCANS.lock() {
+                flights.remove(&self.key);
+            }
+        }
+    }
+    let _guard = FlightGuard {
+        key: flight_key.clone(),
+        slot: Arc::clone(&result_slot),
+    };
+
     // Gap 7: peek at cached total files for progress estimation
     let estimated_total = cache::peek_total_files(&path, depth);
 
@@ -227,13 +254,10 @@ pub async fn analyze_path(app: tauri::AppHandle, path: String, depth: usize) -> 
         cache::save_to_disk(&disk_path, depth, &disk_node);
     });
 
-    // Publish result to any waiting callers, then remove from in-flight map
+    // Publish result to any waiting callers (guard will clean up in-flight entry on drop)
     {
         let mut guard = result_slot.lock().map_err(|e| e.to_string())?;
         *guard = Some(Ok(result.clone()));
-    }
-    if let Ok(mut flights) = IN_FLIGHT_SCANS.lock() {
-        flights.remove(&flight_key);
     }
 
     Ok(result)

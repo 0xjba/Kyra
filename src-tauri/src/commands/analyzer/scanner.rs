@@ -717,7 +717,7 @@ fn dir_size_du_fallback(path: &Path) -> u64 {
     };
 
     let start = Instant::now();
-    let timeout = Duration::from_secs(10);
+    let timeout = Duration::from_secs(30);
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {

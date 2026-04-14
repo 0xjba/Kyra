@@ -500,6 +500,11 @@ fn scan_orphaned_claude_vms() -> Option<ScanItem> {
     }
 
     const MIN_VM_IMAGE_SIZE: u64 = 100 * 1024 * 1024; // 100 MB
+    const ORPHAN_AGE_DAYS: u64 = 7;
+
+    let age_cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(ORPHAN_AGE_DAYS * 86400))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
 
     let mut paths: Vec<PathInfo> = Vec::new();
     let mut total_size: u64 = 0;
@@ -508,8 +513,19 @@ fn scan_orphaned_claude_vms() -> Option<ScanItem> {
         if is_whitelisted(&path_str, &settings.whitelist) {
             continue;
         }
-        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        let meta = match path.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let size = meta.len();
         if size < MIN_VM_IMAGE_SIZE {
+            continue;
+        }
+        // Only flag VM images that have not been modified for at least
+        // ORPHAN_AGE_DAYS days, avoiding false positives right after
+        // the app is removed.
+        let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        if modified > age_cutoff {
             continue;
         }
         paths.push(PathInfo {

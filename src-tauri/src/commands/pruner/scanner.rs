@@ -28,6 +28,9 @@ fn dir_size_with_timeout(path: &std::path::Path, timeout_secs: u64) -> Option<u6
 const ARTIFACT_DIRS: &[(&str, &str)] = &[
     // JavaScript / Node.js
     ("node_modules", "Node.js"),
+    ("bower_components", "Bower"),
+    (".yarn", "Yarn Cache"),
+    (".pnpm-store", "pnpm Store"),
     ("dist", "Build Output"),
     ("build", "Build Output"),
     (".next", "Next.js"),
@@ -38,7 +41,11 @@ const ARTIFACT_DIRS: &[(&str, &str)] = &[
     (".angular", "Angular Cache"),
     (".svelte-kit", "SvelteKit"),
     (".astro", "Astro Cache"),
+    (".vite", "Vite Cache"),
+    (".nx", "Nx Cache"),
+    (".docusaurus", "Docusaurus Cache"),
     ("coverage", "Test Coverage"),
+    (".nyc_output", "NYC Coverage"),
     (".bun", "Bun Cache"),
     // Rust
     ("target", "Rust"),
@@ -47,16 +54,22 @@ const ARTIFACT_DIRS: &[(&str, &str)] = &[
     (".pytest_cache", "Pytest Cache"),
     ("venv", "Python Virtual Env"),
     (".venv", "Python Virtual Env"),
+    ("virtualenv", "Python Virtual Env"),
     (".mypy_cache", "Mypy Cache"),
     (".tox", "Tox Env"),
     (".nox", "Nox Env"),
     (".ruff_cache", "Ruff Cache"),
+    (".eggs", "Python Eggs"),
+    ("htmlcov", "Python Coverage"),
+    (".ipynb_checkpoints", "Jupyter Checkpoints"),
     // iOS / macOS
     ("Pods", "CocoaPods"),
+    ("Carthage", "Carthage"),
     (".build", "Swift"),
     ("DerivedData", "Xcode Build"),
     // Android / JVM
     (".gradle", "Gradle"),
+    ("out", "Java/Kotlin Build"),
     // PHP / Go / Ruby
     ("vendor", "Vendor Deps"),
     (".bundle", "Ruby Bundler"),
@@ -81,6 +94,8 @@ const ARTIFACT_DIRS: &[(&str, &str)] = &[
     (".stack-work", "Haskell"),
     // OCaml
     ("_opam", "OCaml"),
+    // Infrastructure
+    (".terraform", "Terraform"),
 ];
 
 /// File patterns for egg-info directories (matched by suffix).
@@ -152,12 +167,18 @@ where
                         | ".angular"
                         | ".svelte-kit"
                         | ".astro"
+                        | ".vite"
+                        | ".nx"
+                        | ".docusaurus"
+                        | ".nyc_output"
                         | ".pytest_cache"
                         | ".venv"
                         | ".mypy_cache"
                         | ".tox"
                         | ".nox"
                         | ".ruff_cache"
+                        | ".eggs"
+                        | ".ipynb_checkpoints"
                         | ".gradle"
                         | ".build"
                         | ".cxx"
@@ -167,6 +188,9 @@ where
                         | ".bun"
                         | ".bundle"
                         | ".stack-work"
+                        | ".yarn"
+                        | ".pnpm-store"
+                        | ".terraform"
                 )
             {
                 continue;
@@ -253,10 +277,29 @@ where
                             continue;
                         }
                     }
+                    // node_modules — validate with JS/TS project files
+                    if name == "node_modules"
+                        && !dir.join("package.json").exists()
+                        && !dir.join("package-lock.json").exists()
+                        && !dir.join("yarn.lock").exists()
+                        && !dir.join("pnpm-lock.yaml").exists()
+                        && !dir.join("bun.lockb").exists()
+                    {
+                        continue;
+                    }
+                    // Pods — validate with Podfile (CocoaPods)
+                    if name == "Pods" && !dir.join("Podfile").exists() {
+                        continue;
+                    }
+                    // .build — validate with Package.swift (Swift PM)
+                    if name == ".build" && !dir.join("Package.swift").exists() {
+                        continue;
+                    }
                     if name == "build"
                         && !dir.join("package.json").exists()
                         && !dir.join("build.gradle").exists()
                         && !dir.join("build.gradle.kts").exists()
+                        && !dir.join("Makefile").exists()
                     {
                         continue;
                     }
@@ -283,6 +326,7 @@ where
                         && !dir.join("setup.py").exists()
                         && !dir.join("setup.cfg").exists()
                         && !dir.join("pyproject.toml").exists()
+                        && !dir.join("requirements.txt").exists()
                         && !dir.join("Cargo.toml").exists()
                         && !dir.join("go.mod").exists()
                     {
@@ -380,6 +424,200 @@ where
                     // .bun — validate with package.json or bun.lockb
                     if name == ".bun" && !dir.join("package.json").exists() && !dir.join("bun.lockb").exists() {
                         continue;
+                    }
+                    // venv / .venv / virtualenv — validate with pyvenv.cfg inside or Python project files in parent
+                    if matches!(name.as_str(), "venv" | ".venv" | "virtualenv") {
+                        let has_pyvenv_cfg = path.join("pyvenv.cfg").exists();
+                        let has_python_project = dir.join("requirements.txt").exists()
+                            || dir.join("pyproject.toml").exists()
+                            || dir.join("setup.py").exists()
+                            || dir.join("setup.cfg").exists();
+                        if !has_pyvenv_cfg && !has_python_project {
+                            continue;
+                        }
+                    }
+                    // __pycache__ — validate with .py files in parent
+                    if name == "__pycache__" {
+                        let has_py = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    e.file_name().to_string_lossy().ends_with(".py")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_py {
+                            continue;
+                        }
+                    }
+                    // .pytest_cache — validate with pytest/Python project files in parent
+                    if name == ".pytest_cache"
+                        && !dir.join("pytest.ini").exists()
+                        && !dir.join("setup.cfg").exists()
+                        && !dir.join("pyproject.toml").exists()
+                        && !dir.join("conftest.py").exists()
+                    {
+                        continue;
+                    }
+                    // .mypy_cache — validate with mypy/Python project files in parent
+                    if name == ".mypy_cache"
+                        && !dir.join("mypy.ini").exists()
+                        && !dir.join("setup.cfg").exists()
+                        && !dir.join("pyproject.toml").exists()
+                    {
+                        continue;
+                    }
+                    // .tox — validate with Python project files in parent
+                    if name == ".tox"
+                        && !dir.join("tox.ini").exists()
+                        && !dir.join("pyproject.toml").exists()
+                        && !dir.join("setup.py").exists()
+                    {
+                        continue;
+                    }
+                    // .nox — validate with Python project files in parent
+                    if name == ".nox"
+                        && !dir.join("noxfile.py").exists()
+                        && !dir.join("pyproject.toml").exists()
+                        && !dir.join("setup.py").exists()
+                    {
+                        continue;
+                    }
+                    // .ruff_cache — validate with Python project files in parent
+                    if name == ".ruff_cache"
+                        && !dir.join("pyproject.toml").exists()
+                        && !dir.join("setup.py").exists()
+                        && !dir.join("ruff.toml").exists()
+                        && !dir.join(".ruff.toml").exists()
+                    {
+                        continue;
+                    }
+                    // .eggs — validate with Python project files in parent
+                    if name == ".eggs"
+                        && !dir.join("setup.py").exists()
+                        && !dir.join("setup.cfg").exists()
+                        && !dir.join("pyproject.toml").exists()
+                    {
+                        continue;
+                    }
+                    // htmlcov — validate with Python project files in parent
+                    if name == "htmlcov"
+                        && !dir.join("setup.py").exists()
+                        && !dir.join("pyproject.toml").exists()
+                        && !dir.join("pytest.ini").exists()
+                        && !dir.join("setup.cfg").exists()
+                    {
+                        continue;
+                    }
+                    // .ipynb_checkpoints — validate with .ipynb files in parent
+                    if name == ".ipynb_checkpoints" {
+                        let has_notebook = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    e.file_name().to_string_lossy().ends_with(".ipynb")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_notebook {
+                            continue;
+                        }
+                    }
+                    // .gradle — validate with Gradle project files in parent
+                    if name == ".gradle"
+                        && !dir.join("build.gradle").exists()
+                        && !dir.join("build.gradle.kts").exists()
+                        && !dir.join("settings.gradle").exists()
+                        && !dir.join("settings.gradle.kts").exists()
+                    {
+                        continue;
+                    }
+                    // out — validate with Gradle/Maven project files (Java/Kotlin build output)
+                    if name == "out"
+                        && !dir.join("build.gradle").exists()
+                        && !dir.join("build.gradle.kts").exists()
+                        && !dir.join("pom.xml").exists()
+                    {
+                        continue;
+                    }
+                    // .next — validate with package.json in parent
+                    if name == ".next" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // .nuxt — validate with package.json in parent
+                    if name == ".nuxt" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // .dart_tool — validate with pubspec.yaml in parent
+                    if name == ".dart_tool" && !dir.join("pubspec.yaml").exists() {
+                        continue;
+                    }
+                    // .zig-cache / zig-out — validate with build.zig in parent
+                    if matches!(name.as_str(), ".zig-cache" | "zig-out")
+                        && !dir.join("build.zig").exists()
+                        && !dir.join("build.zig.zon").exists()
+                    {
+                        continue;
+                    }
+                    // .cxx — validate with CMakeLists.txt in parent
+                    if name == ".cxx" && !dir.join("CMakeLists.txt").exists() {
+                        continue;
+                    }
+                    // .expo — validate with package.json in parent
+                    if name == ".expo" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // bower_components — validate with bower.json or package.json in parent
+                    if name == "bower_components"
+                        && !dir.join("bower.json").exists()
+                        && !dir.join("package.json").exists()
+                    {
+                        continue;
+                    }
+                    // .yarn — validate with package.json in parent
+                    if name == ".yarn" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // .pnpm-store — validate with package.json or pnpm-lock.yaml in parent
+                    if name == ".pnpm-store"
+                        && !dir.join("package.json").exists()
+                        && !dir.join("pnpm-lock.yaml").exists()
+                    {
+                        continue;
+                    }
+                    // .vite — validate with package.json in parent
+                    if name == ".vite" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // .nx — validate with nx.json or package.json in parent
+                    if name == ".nx"
+                        && !dir.join("nx.json").exists()
+                        && !dir.join("package.json").exists()
+                    {
+                        continue;
+                    }
+                    // .nyc_output — validate with package.json in parent
+                    if name == ".nyc_output" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // .docusaurus — validate with package.json in parent
+                    if name == ".docusaurus" && !dir.join("package.json").exists() {
+                        continue;
+                    }
+                    // Carthage — validate with Cartfile in parent
+                    if name == "Carthage" && !dir.join("Cartfile").exists() {
+                        continue;
+                    }
+                    // .terraform — validate with .tf files in parent
+                    if name == ".terraform" {
+                        let has_tf = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    e.file_name().to_string_lossy().ends_with(".tf")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_tf {
+                            continue;
+                        }
                     }
                     // DerivedData — validate with .xcodeproj or .xcworkspace
                     if name == "DerivedData" {

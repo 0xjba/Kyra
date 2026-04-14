@@ -98,10 +98,12 @@ const DATA_SENSITIVE_PATTERNS: &[&str] = &[
 /// components that live outside /System/Applications/ but whose removal
 /// would render the system unusable or unbootable.
 const SYSTEM_CRITICAL_BUNDLES: &[&str] = &[
+    // Core OS services — removal would break the system
     "com.apple.loginwindow",
     "com.apple.SecurityAgent",
     "com.apple.CoreServices",
-    "com.apple.backgroundtaskmanagementagent",
+    "com.apple.coreservices",
+    "com.apple.backgroundtaskmanagement",
     "com.apple.SystemUIServer",
     "com.apple.WindowServer",
     "com.apple.Spotlight",
@@ -110,6 +112,77 @@ const SYSTEM_CRITICAL_BUNDLES: &[&str] = &[
     "com.apple.notificationcenterui",
     "com.apple.controlcenter",
     "com.apple.AirPlayUIAgent",
+    "com.apple.loginitems",
+    "com.apple.sharedfilelist",
+    "com.apple.sfl",
+    "com.apple.metadata",
+    "com.apple.security",
+    "com.apple.keychain",
+    "com.apple.trustd",
+    "com.apple.securityd",
+    "com.apple.frameworks",
+    // System apps — built-in Apple applications
+    "com.apple.Safari",
+    "com.apple.mail",
+    "com.apple.Terminal",
+    "com.apple.Preview",
+    "com.apple.TextEdit",
+    "com.apple.Notes",
+    "com.apple.reminders",
+    "com.apple.iCal",
+    "com.apple.AddressBook",
+    "com.apple.Photos",
+    "com.apple.AppStore",
+    "com.apple.calculator",
+    "com.apple.Dictionary",
+    "com.apple.ActivityMonitor",
+    "com.apple.Console",
+    "com.apple.DiskUtility",
+    "com.apple.KeychainAccess",
+    "com.apple.FontBook",
+    "com.apple.SystemProfiler",
+    "com.apple.ScreenSharing",
+    "com.apple.DigitalColorMeter",
+    "com.apple.grapher",
+    "com.apple.ScriptEditor2",
+    "com.apple.VoiceOverUtility",
+    "com.apple.BluetoothFileExchange",
+    "com.apple.print.PrinterProxy",
+    "com.apple.ColorSyncUtility",
+    "com.apple.audio.AudioMIDISetup",
+    "com.apple.DirectoryUtility",
+    "com.apple.NetworkUtility",
+    "com.apple.exposelauncher",
+    "com.apple.MigrateAssistant",
+    "com.apple.RAIDUtility",
+    "com.apple.BootCampAssistant",
+    "com.apple.Music",
+    "com.apple.podcasts",
+    "com.apple.iBooksX",
+    "com.apple.iBooks",
+    "com.apple.Automator",
+    // System Settings variants
+    "com.apple.systempreferences",
+    "com.apple.SystemSettings",
+    "com.apple.Settings",
+    // Cloud and update services
+    "com.apple.cloudd",
+    "com.apple.iCloud",
+    "com.apple.MobileSoftwareUpdate",
+    "com.apple.SoftwareUpdate",
+    "com.apple.installer",
+    "com.apple.bird",
+    "com.apple.CloudDocs",
+    // Networking and connectivity
+    "com.apple.WiFi",
+    "com.apple.airport",
+    "com.apple.Bluetooth",
+    // Input methods
+    "com.apple.inputmethod.",
+    "com.apple.inputsource",
+    "com.apple.TextInput",
+    "com.apple.CharacterPicker",
+    "com.apple.PressAndHold",
 ];
 
 /// Returns true if the bundle ID belongs to a system-critical macOS service
@@ -272,18 +345,14 @@ fn scan_caskroom(caskroom: &Path) -> Vec<AppInfo> {
     apps
 }
 
-/// Scans /Applications, /System/Applications, ~/Applications, Homebrew
-/// Caskrooms, and Setapp for installed apps. System apps are surfaced with
-/// `is_system = true` so the UI can display them but prevent removal.
+/// Scans /Applications, ~/Applications, Homebrew Caskrooms, and Setapp
+/// for installed apps. macOS built-in apps under /System/Applications are
+/// excluded because they cannot be uninstalled.
 pub fn scan_apps() -> Vec<AppInfo> {
     let mut apps = Vec::new();
 
     // User-installed applications
     apps.extend(scan_dir(Path::new("/Applications")));
-
-    // macOS built-in applications (surfaced read-only)
-    apps.extend(scan_dir(Path::new("/System/Applications")));
-    apps.extend(scan_dir(Path::new("/System/Applications/Utilities")));
 
     // Input Methods (system-level and user-level)
     apps.extend(scan_dir(Path::new("/Library/Input Methods")));

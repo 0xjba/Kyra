@@ -5,7 +5,7 @@ pub fn all_rules() -> Vec<CleanRule> {
         // ── System ──────────────────────────────────────────
         CleanRule {
             id: "system_caches".into(),
-            max_age_days: None,
+            max_age_days: Some(7),
             category: "System".into(),
             label: "System Caches".into(),
             paths: vec!["/Library/Caches".into()],
@@ -35,15 +35,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             ],
         },
         CleanRule {
-            id: "system_recent_items".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Recent Items".into(),
-            paths: vec![
-                "~/Library/Application Support/com.apple.sharedfilelist".into(),
-            ],
-        },
-        CleanRule {
             id: "system_mail_downloads".into(),
             max_age_days: Some(30),
             category: "System".into(),
@@ -52,27 +43,6 @@ pub fn all_rules() -> Vec<CleanRule> {
                 "~/Library/Mail Downloads".into(),
                 "~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads".into(),
             ],
-        },
-        CleanRule {
-            id: "system_diagnostic_logs".into(),
-            max_age_days: Some(30),
-            category: "System".into(),
-            label: "Diagnostic Logs".into(),
-            paths: vec!["/private/var/db/diagnostics".into()],
-        },
-        CleanRule {
-            id: "system_power_logs".into(),
-            max_age_days: Some(30),
-            category: "System".into(),
-            label: "Power Logs".into(),
-            paths: vec!["/private/var/db/powerlog".into()],
-        },
-        CleanRule {
-            id: "system_memory_exceptions".into(),
-            max_age_days: Some(30),
-            category: "System".into(),
-            label: "Memory Exception Reports".into(),
-            paths: vec!["/private/var/db/reportmemoryexception".into()],
         },
         CleanRule {
             id: "system_adobe_logs".into(),
@@ -313,14 +283,20 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Browsers".into(),
             label: "Edge Cache".into(),
-            paths: vec!["~/Library/Caches/Microsoft Edge".into()],
+            paths: vec!["~/Library/Caches/com.microsoft.edgemac".into()],
         },
         CleanRule {
             id: "brave_cache".into(),
             max_age_days: None,
             category: "Browsers".into(),
             label: "Brave Cache".into(),
-            paths: vec!["~/Library/Caches/BraveSoftware".into()],
+            paths: vec![
+                "~/Library/Caches/BraveSoftware/Brave-Browser".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/ShaderCache".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/GrShaderCache".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/GraphiteDawnCache".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/component_crx_cache".into(),
+            ],
         },
         CleanRule {
             id: "arc_cache".into(),
@@ -384,7 +360,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Yarn Cache".into(),
-            paths: vec!["~/Library/Caches/Yarn".into(), "~/.cache/yarn".into()],
+            paths: vec!["~/.yarn/cache".into(), "~/Library/Caches/Yarn".into(), "~/.cache/yarn".into()],
         },
         CleanRule {
             id: "dev_pnpm_store".into(),
@@ -433,6 +409,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Developer Tools".into(),
             label: "Turbo Cache".into(),
             paths: vec![
+                "~/.turbo/cache".into(),
                 "~/.cache/turbo".into(),
                 "~/Library/Caches/turbo".into(),
             ],
@@ -463,7 +440,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Cargo Git Checkouts".into(),
-            paths: vec!["~/.cargo/git/checkouts".into()],
+            paths: vec!["~/.cargo/git/checkouts".into(), "~/.cargo/git/db".into()],
         },
         CleanRule {
             id: "dev_cargo_src".into(),
@@ -498,7 +475,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Poetry Cache".into(),
-            paths: vec!["~/Library/Caches/pypoetry".into()],
+            paths: vec!["~/.cache/poetry".into(), "~/Library/Caches/pypoetry".into()],
         },
         CleanRule {
             id: "dev_ruff_cache".into(),
@@ -519,16 +496,17 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Jupyter Runtime".into(),
-            paths: vec!["~/Library/Jupyter/runtime".into()],
+            paths: vec!["~/.jupyter/runtime".into(), "~/Library/Jupyter/runtime".into()],
         },
         CleanRule {
             id: "dev_conda_packages".into(),
-            max_age_days: None,
+            max_age_days: Some(30),
             category: "Developer Tools".into(),
             label: "Conda Packages".into(),
             paths: vec![
                 "~/anaconda3/pkgs".into(),
                 "~/miniconda3/pkgs".into(),
+                "~/.conda/pkgs".into(),
             ],
         },
         CleanRule {
@@ -560,13 +538,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["~/.m2/repository".into()],
         },
         CleanRule {
-            id: "dev_cocoapods_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "CocoaPods Cache".into(),
-            paths: vec!["~/Library/Caches/CocoaPods".into()],
-        },
-        CleanRule {
             id: "dev_xcode_derived".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
@@ -575,7 +546,7 @@ pub fn all_rules() -> Vec<CleanRule> {
         },
         CleanRule {
             id: "dev_xcode_archives".into(),
-            max_age_days: None,
+            max_age_days: Some(90),
             category: "Developer Tools".into(),
             label: "Xcode Archives".into(),
             paths: vec!["~/Library/Developer/Xcode/Archives".into()],
@@ -603,13 +574,6 @@ pub fn all_rules() -> Vec<CleanRule> {
                 "~/Library/Caches/com.apple.dt.Xcode/Downloads/Documentation".into(),
                 "~/Library/Caches/com.apple.dt.Xcode.DocumentationIndexing".into(),
             ],
-        },
-        CleanRule {
-            id: "dev_docker_buildx".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Docker BuildX Cache".into(),
-            paths: vec!["~/.docker/buildx".into()],
         },
         CleanRule {
             id: "dev_kubernetes_cache".into(),
@@ -654,7 +618,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Flutter Pub Cache".into(),
-            paths: vec!["~/.pub-cache".into()],
+            paths: vec!["~/.pub-cache/hosted".into()],
         },
         CleanRule {
             id: "dev_deno_cache".into(),
@@ -675,7 +639,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Ruby Gems Cache".into(),
-            paths: vec!["~/.gem/ruby".into()],
+            paths: vec!["~/.gem/ruby/*/cache".into()],
         },
         CleanRule {
             id: "dev_jetbrains_cache".into(),
@@ -869,7 +833,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "AI Tools".into(),
             label: "Claude Desktop Cache".into(),
             paths: vec![
-                "~/Library/Caches/com.anthropic.claudedesktop".into(),
+                "~/Library/Caches/com.anthropic.claudefordesktop".into(),
                 "~/Library/Application Support/Claude/Cache".into(),
             ],
         },
@@ -907,7 +871,10 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Design".into(),
             label: "Sketch Cache".into(),
-            paths: vec!["~/Library/Caches/com.bohemiancoding.sketch3".into()],
+            paths: vec![
+                "~/Library/Caches/com.bohemiancoding.sketch3".into(),
+                "~/Library/Application Support/com.bohemiancoding.sketch3/cache".into(),
+            ],
         },
         CleanRule {
             id: "design_adobe".into(),
@@ -948,7 +915,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             label: "Spotify Cache".into(),
             paths: vec![
                 "~/Library/Caches/com.spotify.client".into(),
-                "~/Library/Caches/com.spotify.client/Data".into(),
                 "~/Library/Application Support/Spotify/watch-sources".into(),
                 "~/Library/Application Support/Spotify/Updates".into(),
             ],
@@ -969,7 +935,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             label: "Final Cut Pro Cache".into(),
             paths: vec![
                 "~/Library/Caches/com.apple.FinalCut".into(),
-                "~/Movies/Motion Templates.localized".into(),
             ],
         },
         CleanRule {
@@ -979,6 +944,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             label: "DaVinci Resolve Cache".into(),
             paths: vec![
                 "~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Cache".into(),
+                "~/Library/Caches/com.blackmagic-design.DaVinciResolve".into(),
             ],
         },
         CleanRule {
@@ -1072,14 +1038,14 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Notes & Productivity".into(),
             label: "Bear Cache".into(),
-            paths: vec!["~/Library/Caches/net.shinyfrog.bear".into()],
+            paths: vec!["~/Library/Caches/com.bear-writer.".into()],
         },
         CleanRule {
             id: "notes_evernote".into(),
             max_age_days: None,
             category: "Notes & Productivity".into(),
             label: "Evernote Cache".into(),
-            paths: vec!["~/Library/Caches/com.evernote.Evernote".into()],
+            paths: vec!["~/Library/Caches/com.evernote.".into()],
         },
         CleanRule {
             id: "notes_todoist".into(),
@@ -1107,7 +1073,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Notes & Productivity".into(),
             label: "Logseq Cache".into(),
-            paths: vec!["~/Library/Caches/com.electron.logseq".into()],
+            paths: vec!["~/Library/Caches/com.logseq.".into()],
         },
         // ── Utilities ───────────────────────────────────────
         CleanRule {
@@ -1143,7 +1109,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Utilities".into(),
             label: "CleanShot Cache".into(),
-            paths: vec!["~/Library/Caches/com.cleanshot.app".into()],
+            paths: vec!["~/Library/Caches/com.cleanshot.".into()],
         },
         CleanRule {
             id: "util_unarchiver".into(),
@@ -1151,7 +1117,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Utilities".into(),
             label: "The Unarchiver Cache".into(),
             paths: vec![
-                "~/Library/Caches/com.macpaw.site.theunarchiver".into(),
+                "~/Library/Caches/cx.c3.theunarchiver".into(),
             ],
         },
         CleanRule {
@@ -1167,7 +1133,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Utilities".into(),
             label: "TeamViewer Cache & Logs".into(),
             paths: vec![
-                "~/Library/Caches/com.teamviewer.TeamViewer".into(),
+                "~/Library/Caches/com.teamviewer.".into(),
                 "~/Library/Logs/TeamViewer".into(),
             ],
         },
@@ -1175,15 +1141,18 @@ pub fn all_rules() -> Vec<CleanRule> {
             id: "util_anydesk".into(),
             max_age_days: None,
             category: "Utilities".into(),
-            label: "AnyDesk Logs".into(),
-            paths: vec!["~/Library/Logs/AnyDesk".into()],
+            label: "AnyDesk Cache & Logs".into(),
+            paths: vec![
+                "~/Library/Caches/com.anydesk.".into(),
+                "~/Library/Logs/AnyDesk".into(),
+            ],
         },
         CleanRule {
             id: "util_todesk".into(),
             max_age_days: None,
             category: "Utilities".into(),
             label: "ToDesk Cache".into(),
-            paths: vec!["~/Library/Caches/com.todesk.desktop".into()],
+            paths: vec!["~/Library/Caches/com.todesk.".into()],
         },
         // ── Gaming ──────────────────────────────────────────
         CleanRule {
@@ -1268,6 +1237,7 @@ pub fn all_rules() -> Vec<CleanRule> {
                 "~/.lunarclient/game-cache".into(),
                 "~/.lunarclient/launcher-cache".into(),
                 "~/.lunarclient/logs".into(),
+                "~/.lunarclient/offline".into(),
             ],
         },
         CleanRule {
@@ -1324,39 +1294,11 @@ pub fn all_rules() -> Vec<CleanRule> {
         },
         // ── System-level paths ──────────────────────────────
         CleanRule {
-            id: "sys_autosave".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Autosave Information".into(),
-            paths: vec!["~/Library/Autosave Information".into()],
-        },
-        CleanRule {
             id: "sys_siri_suggestions".into(),
             max_age_days: None,
             category: "System".into(),
             label: "Siri Suggestions Cache".into(),
             paths: vec!["~/Library/Suggestions".into()],
-        },
-        CleanRule {
-            id: "sys_calendar_cache".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Calendar Cache".into(),
-            paths: vec!["~/Library/Calendars/Calendar Cache".into()],
-        },
-        CleanRule {
-            id: "sys_iconservices".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Icon Services Cache".into(),
-            paths: vec!["~/Library/Caches/com.apple.iconservices.store".into()],
-        },
-        CleanRule {
-            id: "sys_identity_caches".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Identity Caches".into(),
-            paths: vec!["~/Library/IdentityCaches".into()],
         },
         CleanRule {
             id: "sys_crashreporter".into(),
@@ -1418,7 +1360,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Utilities".into(),
             label: "qBittorrent Cache".into(),
-            paths: vec!["~/Library/Caches/qBittorrent".into()],
+            paths: vec!["~/Library/Caches/com.qbittorrent.qBittorrent".into()],
         },
         // ── Email ──────────────────────────────────────────
         CleanRule {
@@ -1433,7 +1375,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Email".into(),
             label: "Airmail Cache".into(),
-            paths: vec!["~/Library/Caches/com.airmail.Airmail3".into()],
+            paths: vec!["~/Library/Caches/com.airmail.".into()],
         },
         // ── Saved State ─────────────────────────────────────
         CleanRule {
@@ -1466,49 +1408,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             label: "tnpm Logs".into(),
             paths: vec!["~/.tnpm/_logs".into()],
         },
-        // ── Apple System Caches ────────────────────────────────
-        CleanRule {
-            id: "sys_webkit_networking".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "WebKit Networking Cache".into(),
-            paths: vec!["~/Library/Caches/com.apple.WebKit.Networking".into()],
-        },
-        CleanRule {
-            id: "sys_akd_cache".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Authentication Cache".into(),
-            paths: vec!["~/Library/Caches/com.apple.akd".into()],
-        },
-        CleanRule {
-            id: "sys_quicklook_cache".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Quick Look Cache".into(),
-            paths: vec!["~/Library/Caches/Quick Look".into()],
-        },
-        CleanRule {
-            id: "sys_diagnostic_reports".into(),
-            max_age_days: Some(7),
-            category: "System".into(),
-            label: "User Diagnostic Reports".into(),
-            paths: vec!["~/Library/DiagnosticReports".into()],
-        },
-        CleanRule {
-            id: "sys_helpd_cache".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Help Cache".into(),
-            paths: vec!["~/Library/Caches/com.apple.helpd".into()],
-        },
-        CleanRule {
-            id: "sys_geoservices_cache".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "GeoServices Cache".into(),
-            paths: vec!["~/Library/Caches/GeoServices".into()],
-        },
         // ── Chinese Market Communication Apps ──────────────────
         CleanRule {
             id: "comm_tencent_meeting".into(),
@@ -1529,7 +1428,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Communication".into(),
             label: "Feishu Cache".into(),
-            paths: vec!["~/Library/Caches/com.feishu.lark".into()],
+            paths: vec!["~/Library/Caches/com.feishu.".into()],
         },
         CleanRule {
             id: "comm_alilang".into(),
@@ -1594,14 +1493,14 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Media & Audio".into(),
             label: "Douyu Cache".into(),
-            paths: vec!["~/Library/Caches/com.douyu.live".into()],
+            paths: vec!["~/Library/Caches/com.douyu.".into()],
         },
         CleanRule {
             id: "media_huya".into(),
             max_age_days: None,
             category: "Media & Audio".into(),
             label: "Huya Cache".into(),
-            paths: vec!["~/Library/Caches/com.huya.live".into()],
+            paths: vec!["~/Library/Caches/com.huya.".into()],
         },
         CleanRule {
             id: "media_stremio".into(),
@@ -1626,14 +1525,14 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Design".into(),
             label: "Autodesk Cache".into(),
-            paths: vec!["~/Library/Caches/com.autodesk.AutoCAD".into()],
+            paths: vec!["~/Library/Caches/com.autodesk.".into()],
         },
         CleanRule {
             id: "design_sketchup".into(),
             max_age_days: None,
             category: "Design".into(),
             label: "SketchUp Cache".into(),
-            paths: vec!["~/Library/Caches/com.sketchup.SketchUp".into()],
+            paths: vec!["~/Library/Caches/com.sketchup.".into()],
         },
         CleanRule {
             id: "media_screenflow".into(),
@@ -1648,18 +1547,13 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Media & Audio".into(),
             label: "Premiere Pro Cache".into(),
             paths: vec![
-                "~/Library/Caches/com.adobe.PremierePro.20".into(),
-                "~/Library/Caches/com.adobe.PremierePro.21".into(),
-                "~/Library/Caches/com.adobe.PremierePro.22".into(),
-                "~/Library/Caches/com.adobe.PremierePro.23".into(),
-                "~/Library/Caches/com.adobe.PremierePro.24".into(),
-                "~/Library/Caches/com.adobe.PremierePro.25".into(),
+                "~/Library/Caches/com.adobe.PremierePro.".into(),
             ],
         },
         // ── Developer Tools (JVM) ──────────────────────────────
         CleanRule {
             id: "dev_sbt_cache".into(),
-            max_age_days: None,
+            max_age_days: Some(30),
             category: "Developer Tools".into(),
             label: "SBT Cache".into(),
             paths: vec!["~/.sbt".into()],
@@ -1673,7 +1567,7 @@ pub fn all_rules() -> Vec<CleanRule> {
         },
         CleanRule {
             id: "dev_gradle_daemon".into(),
-            max_age_days: None,
+            max_age_days: Some(7),
             category: "Developer Tools".into(),
             label: "Gradle Daemon".into(),
             paths: vec!["~/.gradle/daemon".into()],
@@ -1699,62 +1593,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Developer Tools".into(),
             label: "Zig Cache".into(),
             paths: vec!["~/.cache/zig".into()],
-        },
-        CleanRule {
-            id: "dev_terraform_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Terraform Cache".into(),
-            paths: vec!["~/.cache/terraform".into()],
-        },
-        CleanRule {
-            id: "dev_grafana_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Grafana Cache".into(),
-            paths: vec!["~/.grafana/cache".into()],
-        },
-        CleanRule {
-            id: "dev_prometheus_wal".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Prometheus WAL Cache".into(),
-            paths: vec!["~/.prometheus/data/wal".into()],
-        },
-        CleanRule {
-            id: "dev_jenkins_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Jenkins Workspace Cache".into(),
-            paths: vec!["~/.jenkins/workspace".into()],
-        },
-        CleanRule {
-            id: "dev_gitlab_runner_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "GitLab Runner Cache".into(),
-            paths: vec!["~/.cache/gitlab-runner".into()],
-        },
-        CleanRule {
-            id: "dev_github_actions_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "GitHub Actions Cache".into(),
-            paths: vec!["~/.github/cache".into()],
-        },
-        CleanRule {
-            id: "dev_circleci_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "CircleCI Cache".into(),
-            paths: vec!["~/.circleci/cache".into()],
-        },
-        CleanRule {
-            id: "dev_sonarqube_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "SonarQube Cache".into(),
-            paths: vec!["~/.sonar".into()],
         },
         CleanRule {
             id: "dev_prisma_cache".into(),
@@ -1797,14 +1635,14 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Navicat Cache".into(),
-            paths: vec!["~/Library/Caches/com.navicat.NavicatPremium".into()],
+            paths: vec!["~/Library/Caches/com.navicat.".into()],
         },
         CleanRule {
             id: "dev_dbeaver_cache".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "DBeaver Cache".into(),
-            paths: vec!["~/Library/Caches/com.dbeaver.product".into()],
+            paths: vec!["~/Library/Caches/com.dbeaver.".into()],
         },
         CleanRule {
             id: "dev_redis_insight".into(),
@@ -1836,13 +1674,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["~/Library/Caches/com.tinyapp.TablePlus".into()],
         },
         CleanRule {
-            id: "dev_paw_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Paw API Cache".into(),
-            paths: vec!["~/Library/Caches/com.getpaw.Paw".into()],
-        },
-        CleanRule {
             id: "dev_charles_proxy".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
@@ -1862,7 +1693,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Unity Cache".into(),
-            paths: vec!["~/Library/Caches/com.unity3d.UnityEditor".into()],
+            paths: vec!["~/Library/Caches/com.unity3d.".into()],
         },
         CleanRule {
             id: "dev_mongodb_compass".into(),
@@ -1900,19 +1731,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["~/Library/Caches/com.crashlytics.data".into()],
         },
         // ── Electron App Caches ────────────────────────────────
-        CleanRule {
-            id: "app_antigravity".into(),
-            max_age_days: None,
-            category: "Utilities".into(),
-            label: "Antigravity Cache".into(),
-            paths: vec![
-                "~/Library/Application Support/Antigravity/Cache".into(),
-                "~/Library/Application Support/Antigravity/Code Cache".into(),
-                "~/Library/Application Support/Antigravity/GPUCache".into(),
-                "~/Library/Application Support/Antigravity/DawnGraphiteCache".into(),
-                "~/Library/Application Support/Antigravity/DawnWebGPUCache".into(),
-            ],
-        },
         CleanRule {
             id: "app_filo".into(),
             max_age_days: None,
@@ -1973,59 +1791,11 @@ pub fn all_rules() -> Vec<CleanRule> {
         },
         // ── Shell / VCS Leftovers ──────────────────────────────
         CleanRule {
-            id: "shell_git_locks".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Git Config Locks".into(),
-            paths: vec!["~/.gitconfig.lock".into()],
-        },
-        CleanRule {
             id: "shell_omz_cache".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Oh My Zsh Cache".into(),
             paths: vec!["~/.oh-my-zsh/cache".into()],
-        },
-        CleanRule {
-            id: "shell_zcompdump".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Zsh Completion Cache".into(),
-            paths: vec!["~/.zcompdump".into()],
-        },
-        CleanRule {
-            id: "shell_lesshst".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "less History".into(),
-            paths: vec!["~/.lesshst".into()],
-        },
-        CleanRule {
-            id: "shell_wget_hsts".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "wget HSTS Cache".into(),
-            paths: vec!["~/.wget-hsts".into()],
-        },
-        CleanRule {
-            id: "shell_curl_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "curl Cache".into(),
-            paths: vec![
-                "~/.cache/curl".into(),
-                "~/Library/Caches/curl".into(),
-            ],
-        },
-        CleanRule {
-            id: "shell_wget_cache".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "wget Cache".into(),
-            paths: vec![
-                "~/.cache/wget".into(),
-                "~/Library/Caches/wget".into(),
-            ],
         },
         // ── Language-Specific Caches ───────────────────────────
         CleanRule {
@@ -2130,14 +1900,14 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Sublime Text Cache".into(),
-            paths: vec!["~/Library/Caches/com.sublimetext.4".into()],
+            paths: vec!["~/Library/Caches/com.sublimetext.".into()],
         },
         CleanRule {
             id: "dev_android_studio_cache".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Android Studio Cache".into(),
-            paths: vec!["~/Library/Caches/Google/AndroidStudio2024.1".into()],
+            paths: vec!["~/Library/Caches/Google/AndroidStudio".into()],
         },
         CleanRule {
             id: "dev_android_build_cache".into(),
@@ -2146,7 +1916,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             label: "Android Build Cache".into(),
             paths: vec![
                 "~/.android/build-cache".into(),
-                "~/.android/cache".into(),
             ],
         },
         // ── Xcode Extended ─────────────────────────────────────
@@ -2193,8 +1962,11 @@ pub fn all_rules() -> Vec<CleanRule> {
             id: "dev_xcode_sim_logs".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
-            label: "CoreSimulator Logs".into(),
-            paths: vec!["~/Library/Logs/CoreSimulator".into()],
+            label: "CoreSimulator Logs & Cache".into(),
+            paths: vec![
+                "~/Library/Logs/CoreSimulator".into(),
+                "~/Library/Developer/CoreSimulator/Caches".into(),
+            ],
         },
         CleanRule {
             id: "dev_xcode_doc_index".into(),
@@ -2297,7 +2069,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Notes & Productivity".into(),
             label: "Yinxiang Note Cache".into(),
-            paths: vec!["~/Library/Caches/com.yinxiang.Mac".into()],
+            paths: vec!["~/Library/Caches/com.yinxiang.".into()],
         },
         // ── Download Managers ──────────────────────────────────
         CleanRule {
@@ -2312,14 +2084,14 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Utilities".into(),
             label: "Downie Cache".into(),
-            paths: vec!["~/Library/Caches/com.downie.Downie-4".into()],
+            paths: vec!["~/Library/Caches/com.downie.Downie-".into()],
         },
         CleanRule {
             id: "dl_folx".into(),
             max_age_days: None,
             category: "Utilities".into(),
             label: "Folx Cache".into(),
-            paths: vec!["~/Library/Caches/com.folx.folx".into()],
+            paths: vec!["~/Library/Caches/com.folx.".into()],
         },
         CleanRule {
             id: "dl_pacifist".into(),
@@ -2329,13 +2101,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["~/Library/Caches/com.charlessoft.pacifist".into()],
         },
         // ── Gaming (extended) ──────────────────────────────────
-        CleanRule {
-            id: "game_ea".into(),
-            max_age_days: None,
-            category: "Gaming".into(),
-            label: "EA Origin Cache".into(),
-            paths: vec!["~/Library/Caches/com.ea.Origin".into()],
-        },
         CleanRule {
             id: "game_gog_galaxy".into(),
             max_age_days: None,
@@ -2348,7 +2113,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Gaming".into(),
             label: "Riot Games Cache".into(),
-            paths: vec!["~/Library/Caches/com.riotgames.LeagueofLegends".into()],
+            paths: vec!["~/Library/Caches/com.riotgames.".into()],
         },
         // ── Translation / Dictionary ───────────────────────────
         CleanRule {
@@ -2363,7 +2128,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Utilities".into(),
             label: "Eudict Cache".into(),
-            paths: vec!["~/Library/Caches/com.eudic.eudic".into()],
+            paths: vec!["~/Library/Caches/com.eudic.".into()],
         },
         CleanRule {
             id: "app_bob".into(),
@@ -2393,7 +2158,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Notes & Productivity".into(),
             label: "Any.do Cache".into(),
-            paths: vec!["~/Library/Caches/com.any.do.mac".into()],
+            paths: vec!["~/Library/Caches/com.any.do.".into()],
         },
         // ── Shell Utilities ────────────────────────────────────
         CleanRule {
@@ -2446,7 +2211,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Utilities".into(),
             label: "Sunlogin Cache".into(),
-            paths: vec!["~/Library/Caches/com.sunlogin.client".into()],
+            paths: vec!["~/Library/Caches/com.sunlogin.".into()],
         },
         // ── Podcasts Container Specifics ───────────────────────
         CleanRule {
@@ -2479,6 +2244,618 @@ pub fn all_rules() -> Vec<CleanRule> {
                 "~/Library/Application Support/Microsoft/Teams/logs".into(),
                 "~/Library/Application Support/Microsoft/Teams/tmp".into(),
             ],
+        },
+        // ── Cloud Storage Caches ──────────────────────────────
+        CleanRule {
+            id: "cloud_dropbox".into(),
+            max_age_days: None,
+            category: "Cloud Storage".into(),
+            label: "Dropbox Cache".into(),
+            paths: vec![
+                "~/Library/Caches/com.dropbox.DropboxMacUpdate".into(),
+                "~/Library/Caches/com.getdropbox.dropbox".into(),
+            ],
+        },
+        CleanRule {
+            id: "cloud_google_drive".into(),
+            max_age_days: None,
+            category: "Cloud Storage".into(),
+            label: "Google Drive Cache".into(),
+            paths: vec!["~/Library/Caches/com.google.GoogleDrive".into()],
+        },
+        CleanRule {
+            id: "cloud_baidu_netdisk".into(),
+            max_age_days: None,
+            category: "Cloud Storage".into(),
+            label: "Baidu Netdisk Cache".into(),
+            paths: vec!["~/Library/Caches/com.baidu.netdisk".into()],
+        },
+        CleanRule {
+            id: "cloud_alibaba".into(),
+            max_age_days: None,
+            category: "Cloud Storage".into(),
+            label: "Alibaba Cloud Cache".into(),
+            paths: vec!["~/Library/Caches/com.alibaba.teambitiondisk".into()],
+        },
+        CleanRule {
+            id: "cloud_box".into(),
+            max_age_days: None,
+            category: "Cloud Storage".into(),
+            label: "Box Cache".into(),
+            paths: vec!["~/Library/Caches/com.box.desktop".into()],
+        },
+        CleanRule {
+            id: "cloud_onedrive".into(),
+            max_age_days: None,
+            category: "Cloud Storage".into(),
+            label: "OneDrive Cache".into(),
+            paths: vec!["~/Library/Caches/com.microsoft.OneDrive".into()],
+        },
+        // ── Office App Caches ─────────────────────────────────
+        CleanRule {
+            id: "office_word".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Microsoft Word Cache".into(),
+            paths: vec![
+                "~/Library/Caches/com.microsoft.Word".into(),
+                "~/Library/Containers/com.microsoft.Word/Data/Library/Caches".into(),
+                "~/Library/Containers/com.microsoft.Word/Data/tmp".into(),
+                "~/Library/Containers/com.microsoft.Word/Data/Library/Logs".into(),
+            ],
+        },
+        CleanRule {
+            id: "office_excel".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Microsoft Excel Cache".into(),
+            paths: vec![
+                "~/Library/Caches/com.microsoft.Excel".into(),
+                "~/Library/Containers/com.microsoft.Excel/Data/Library/Caches".into(),
+                "~/Library/Containers/com.microsoft.Excel/Data/tmp".into(),
+                "~/Library/Containers/com.microsoft.Excel/Data/Library/Logs".into(),
+            ],
+        },
+        CleanRule {
+            id: "office_powerpoint".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Microsoft PowerPoint Cache".into(),
+            paths: vec!["~/Library/Caches/com.microsoft.Powerpoint".into()],
+        },
+        CleanRule {
+            id: "office_outlook".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Microsoft Outlook Cache".into(),
+            paths: vec!["~/Library/Caches/com.microsoft.Outlook".into()],
+        },
+        CleanRule {
+            id: "office_iwork".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Apple iWork Cache".into(),
+            paths: vec![
+                "~/Library/Caches/com.apple.iWork.Pages".into(),
+                "~/Library/Caches/com.apple.iWork.Keynote".into(),
+                "~/Library/Caches/com.apple.iWork.Numbers".into(),
+            ],
+        },
+        CleanRule {
+            id: "office_wps".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "WPS Office Cache".into(),
+            paths: vec!["~/Library/Caches/com.kingsoft.wpsoffice.mac".into()],
+        },
+        CleanRule {
+            id: "office_thunderbird".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Thunderbird Cache".into(),
+            paths: vec!["~/Library/Caches/org.mozilla.thunderbird".into()],
+        },
+        CleanRule {
+            id: "office_apple_mail".into(),
+            max_age_days: None,
+            category: "Office".into(),
+            label: "Apple Mail Cache".into(),
+            paths: vec!["~/Library/Caches/com.apple.mail".into()],
+        },
+        // ── Virtualization Caches ─────────────────────────────
+        CleanRule {
+            id: "vm_vmware_fusion".into(),
+            max_age_days: None,
+            category: "Virtualization".into(),
+            label: "VMware Fusion Cache".into(),
+            paths: vec!["~/Library/Caches/com.vmware.fusion".into()],
+        },
+        CleanRule {
+            id: "vm_parallels".into(),
+            max_age_days: None,
+            category: "Virtualization".into(),
+            label: "Parallels Cache".into(),
+            paths: vec!["~/Library/Caches/com.parallels.desktop.console".into()],
+        },
+        CleanRule {
+            id: "vm_virtualbox".into(),
+            max_age_days: None,
+            category: "Virtualization".into(),
+            label: "VirtualBox Cache".into(),
+            paths: vec!["~/VirtualBox VMs/.cache".into()],
+        },
+        CleanRule {
+            id: "vm_vagrant".into(),
+            max_age_days: None,
+            category: "Virtualization".into(),
+            label: "Vagrant Temp Files".into(),
+            paths: vec!["~/.vagrant.d/tmp".into()],
+        },
+        // ── Extra Browser Caches ──────────────────────────────
+        CleanRule {
+            id: "browser_helium".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Helium Cache".into(),
+            paths: vec![
+                "~/Library/Caches/net.imput.helium".into(),
+                "~/Library/Application Support/net.imput.helium/component_crx_cache".into(),
+                "~/Library/Application Support/net.imput.helium/extensions_crx_cache".into(),
+                "~/Library/Application Support/net.imput.helium/GrShaderCache".into(),
+                "~/Library/Application Support/net.imput.helium/GraphiteDawnCache".into(),
+                "~/Library/Application Support/net.imput.helium/ShaderCache".into(),
+            ],
+        },
+        CleanRule {
+            id: "browser_yandex".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Yandex Cache".into(),
+            paths: vec![
+                "~/Library/Caches/Yandex/YandexBrowser".into(),
+                "~/Library/Application Support/Yandex/YandexBrowser/ShaderCache".into(),
+                "~/Library/Application Support/Yandex/YandexBrowser/GrShaderCache".into(),
+                "~/Library/Application Support/Yandex/YandexBrowser/GraphiteDawnCache".into(),
+            ],
+        },
+        CleanRule {
+            id: "browser_comet".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Comet Cache".into(),
+            paths: vec!["~/Library/Caches/Comet".into()],
+        },
+        CleanRule {
+            id: "browser_zen".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Zen Cache".into(),
+            paths: vec!["~/Library/Caches/zen".into()],
+        },
+        CleanRule {
+            id: "browser_dia".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Dia Cache".into(),
+            paths: vec!["~/Library/Caches/company.thebrowser.dia".into()],
+        },
+        CleanRule {
+            id: "browser_puppeteer".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Puppeteer Browser Cache".into(),
+            paths: vec!["~/.cache/puppeteer".into()],
+        },
+        CleanRule {
+            id: "browser_firefox_profiles".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Firefox Profile Cache".into(),
+            paths: vec!["~/Library/Application Support/Firefox/Profiles/*/cache2".into()],
+        },
+        CleanRule {
+            id: "browser_google_updater".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "GoogleUpdater CRX Cache".into(),
+            paths: vec![
+                "~/Library/Application Support/Google/GoogleUpdater/crx_cache".into(),
+            ],
+        },
+        // ── Browser Subdirectory Caches (Chrome/Brave/Edge) ───
+        CleanRule {
+            id: "browser_chrome_shader".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Chrome Shader & Dawn Cache".into(),
+            paths: vec![
+                "~/Library/Application Support/Google/Chrome/ShaderCache".into(),
+                "~/Library/Application Support/Google/Chrome/GrShaderCache".into(),
+                "~/Library/Application Support/Google/Chrome/GraphiteDawnCache".into(),
+                "~/Library/Application Support/Google/Chrome/component_crx_cache".into(),
+            ],
+        },
+        CleanRule {
+            id: "browser_brave_shader".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Brave Shader & Dawn Cache".into(),
+            paths: vec![
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/ShaderCache".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/GrShaderCache".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/GraphiteDawnCache".into(),
+                "~/Library/Application Support/BraveSoftware/Brave-Browser/component_crx_cache".into(),
+            ],
+        },
+        CleanRule {
+            id: "browser_edge_extra".into(),
+            max_age_days: None,
+            category: "Browsers".into(),
+            label: "Edge Extended Cache".into(),
+            paths: vec![
+                "~/Library/Caches/com.microsoft.edgemac".into(),
+            ],
+        },
+        // ── Build Tool Caches ─────────────────────────────────
+        CleanRule {
+            id: "dev_vite_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Vite Cache".into(),
+            paths: vec![
+                "~/.vite/cache".into(),
+                "~/.cache/vite".into(),
+            ],
+        },
+        CleanRule {
+            id: "dev_webpack_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Webpack Cache".into(),
+            paths: vec!["~/.cache/webpack".into()],
+        },
+        CleanRule {
+            id: "dev_parcel_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Parcel Cache".into(),
+            paths: vec!["~/.parcel-cache".into()],
+        },
+        CleanRule {
+            id: "dev_mise_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "mise Cache".into(),
+            paths: vec!["~/Library/Caches/mise".into()],
+        },
+        // ── Docker BuildX Cache ───────────────────────────────
+        CleanRule {
+            id: "dev_docker_buildx_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Docker BuildX Cache".into(),
+            paths: vec!["~/.docker/buildx/cache".into()],
+        },
+        // ── Incomplete Downloads ──────────────────────────────
+        CleanRule {
+            id: "user_incomplete_downloads".into(),
+            max_age_days: None,
+            category: "User".into(),
+            label: "Incomplete Downloads".into(),
+            paths: vec![
+                "~/Downloads/*.download".into(),
+                "~/Downloads/*.crdownload".into(),
+                "~/Downloads/*.part".into(),
+            ],
+        },
+        // ── Shell History Backups ─────────────────────────────
+        CleanRule {
+            id: "shell_fish_history_bak".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Fish Shell History Backup".into(),
+            paths: vec!["~/.config/fish/fish_history.bak".into()],
+        },
+        CleanRule {
+            id: "shell_bash_history_bak".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Bash History Backup".into(),
+            paths: vec!["~/.bash_history.bak".into()],
+        },
+        CleanRule {
+            id: "shell_zsh_history_bak".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Zsh History Backup".into(),
+            paths: vec!["~/.zsh_history.bak".into()],
+        },
+        // ── Git Leftovers ─────────────────────────────────────
+        CleanRule {
+            id: "shell_git_lock".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Git Config Lock".into(),
+            paths: vec!["~/.gitconfig.lock".into()],
+        },
+        CleanRule {
+            id: "shell_git_bak".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Git Config Backup".into(),
+            paths: vec!["~/.gitconfig.bak".into()],
+        },
+        CleanRule {
+            id: "shell_viminfo_tmp".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Vim Temporary Files".into(),
+            paths: vec!["~/.viminfo.tmp".into()],
+        },
+        // ── CI/CD & DevOps Caches ─────────────────────────────
+        CleanRule {
+            id: "dev_terraform_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Terraform Cache".into(),
+            paths: vec!["~/.cache/terraform".into()],
+        },
+        CleanRule {
+            id: "dev_grafana_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Grafana Cache".into(),
+            paths: vec!["~/.grafana/cache".into()],
+        },
+        CleanRule {
+            id: "dev_prometheus_wal".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Prometheus WAL Cache".into(),
+            paths: vec!["~/.prometheus/data/wal".into()],
+        },
+        CleanRule {
+            id: "dev_gitlab_runner".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "GitLab Runner Cache".into(),
+            paths: vec!["~/.cache/gitlab-runner".into()],
+        },
+        CleanRule {
+            id: "dev_github_actions".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "GitHub Actions Cache".into(),
+            paths: vec!["~/.github/cache".into()],
+        },
+        CleanRule {
+            id: "dev_circleci_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "CircleCI Cache".into(),
+            paths: vec!["~/.circleci/cache".into()],
+        },
+        CleanRule {
+            id: "dev_sonarqube_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "SonarQube Cache".into(),
+            paths: vec!["~/.sonar".into()],
+        },
+        // ── Network Tool Caches ───────────────────────────────
+        CleanRule {
+            id: "dev_curl_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "curl Cache".into(),
+            paths: vec![
+                "~/.cache/curl".into(),
+                "~/Library/Caches/curl".into(),
+            ],
+        },
+        CleanRule {
+            id: "dev_wget_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "wget Cache".into(),
+            paths: vec![
+                "~/.cache/wget".into(),
+                "~/Library/Caches/wget".into(),
+            ],
+        },
+        // ── Antigravity (Electron) ────────────────────────────
+        CleanRule {
+            id: "app_antigravity".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Antigravity Cache".into(),
+            paths: vec![
+                "~/Library/Application Support/Antigravity/Cache".into(),
+                "~/Library/Application Support/Antigravity/Code Cache".into(),
+                "~/Library/Application Support/Antigravity/GPUCache".into(),
+                "~/Library/Application Support/Antigravity/DawnGraphiteCache".into(),
+                "~/Library/Application Support/Antigravity/DawnWebGPUCache".into(),
+            ],
+        },
+        // ── Paw API Tool ──────────────────────────────────────
+        CleanRule {
+            id: "dev_paw_cache".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "Paw API Cache".into(),
+            paths: vec!["~/Library/Caches/com.getpaw.Paw".into()],
+        },
+        // ── VS Code / Cursor Service Worker Caches ────────────
+        CleanRule {
+            id: "dev_vscode_service_worker".into(),
+            max_age_days: None,
+            category: "Developer Tools".into(),
+            label: "VS Code Service Worker Cache".into(),
+            paths: vec![
+                "~/Library/Application Support/Code/Service Worker/CacheStorage".into(),
+                "~/Library/Application Support/Code/Service Worker/ScriptCache".into(),
+            ],
+        },
+        CleanRule {
+            id: "dev_cursor_service_worker".into(),
+            max_age_days: None,
+            category: "AI Tools".into(),
+            label: "Cursor Service Worker Cache".into(),
+            paths: vec![
+                "~/Library/Application Support/Cursor/Service Worker/CacheStorage".into(),
+                "~/Library/Application Support/Cursor/Service Worker/ScriptCache".into(),
+            ],
+        },
+        // ── System Caches (extended) ──────────────────────────
+        CleanRule {
+            id: "sys_webkit_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "WebKit Network Cache".into(),
+            paths: vec!["~/Library/Caches/com.apple.WebKit.Networking".into()],
+        },
+        CleanRule {
+            id: "sys_icon_services".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Icon Services Cache".into(),
+            paths: vec!["~/Library/Caches/com.apple.iconservices.store".into()],
+        },
+        CleanRule {
+            id: "sys_autosave".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Autosave Information".into(),
+            paths: vec!["~/Library/Autosave Information".into()],
+        },
+        CleanRule {
+            id: "sys_identity_caches".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Identity Caches".into(),
+            paths: vec!["~/Library/IdentityCaches".into()],
+        },
+        CleanRule {
+            id: "sys_diagnostic_reports".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "User Diagnostic Reports".into(),
+            paths: vec!["~/Library/DiagnosticReports".into()],
+        },
+        CleanRule {
+            id: "sys_quicklook_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "QuickLook Cache".into(),
+            paths: vec!["~/Library/Caches/Quick Look".into()],
+        },
+        CleanRule {
+            id: "sys_apple_id_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Apple ID Cache".into(),
+            paths: vec!["~/Library/Caches/com.apple.akd".into()],
+        },
+        CleanRule {
+            id: "sys_helpd_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Help System Cache".into(),
+            paths: vec!["~/Library/Caches/com.apple.helpd".into()],
+        },
+        CleanRule {
+            id: "sys_geoservices_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Maps Geo Tile Cache".into(),
+            paths: vec!["~/Library/Caches/GeoServices".into()],
+        },
+        CleanRule {
+            id: "sys_addressbook_photos".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Address Book Photo Cache".into(),
+            paths: vec!["~/Library/Application Support/AddressBook/Sources/*/Photos.cache".into()],
+        },
+        // ── Sandboxed Container Caches (extended) ─────────────
+        CleanRule {
+            id: "sys_mediaanalysis_temp".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Media Analysis Temp".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.mediaanalysisd/Data/tmp".into(),
+            ],
+        },
+        CleanRule {
+            id: "sys_configurator_temp".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Apple Configurator Temp".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.configurator.xpc.InternetService/Data/tmp".into(),
+            ],
+        },
+        CleanRule {
+            id: "sys_geod_temp".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Geod Temp Files".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.geod/Data/tmp".into(),
+            ],
+        },
+        CleanRule {
+            id: "sys_memoji_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Memoji Picker Cache".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.AvatarUI.AvatarPickerMemojiPicker/Data/Library/Caches".into(),
+            ],
+        },
+        CleanRule {
+            id: "sys_coredevice_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "CoreDevice Service Cache".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.CoreDevice.CoreDeviceService/Data/Library/Caches".into(),
+            ],
+        },
+        CleanRule {
+            id: "sys_neptune_cache".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Apple Intelligence Cache".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.NeptuneOneExtension/Data/Library/Caches".into(),
+            ],
+        },
+        CleanRule {
+            id: "sys_media_services_temp".into(),
+            max_age_days: None,
+            category: "System".into(),
+            label: "Apple Media Services Temp".into(),
+            paths: vec![
+                "~/Library/Containers/com.apple.AppleMediaServicesUI.UtilityExtension/Data/tmp".into(),
+            ],
+        },
+        // ── Gaming (EA) ───────────────────────────────────────
+        CleanRule {
+            id: "game_ea".into(),
+            max_age_days: None,
+            category: "Gaming".into(),
+            label: "EA Origin Cache".into(),
+            paths: vec!["~/Library/Caches/com.ea.Origin".into()],
+        },
+        // ── Warp Log ──────────────────────────────────────────
+        CleanRule {
+            id: "shell_warp_log".into(),
+            max_age_days: None,
+            category: "Utilities".into(),
+            label: "Warp Log".into(),
+            paths: vec!["~/Library/Logs/warp.log".into()],
         },
     ]
 }

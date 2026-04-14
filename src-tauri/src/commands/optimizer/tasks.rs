@@ -6,7 +6,7 @@ pub fn all_tasks() -> Vec<OptTask> {
             id: "dns_flush".into(),
             name: "Flush DNS Cache".into(),
             description: "Clear the DNS resolver cache to fix stale lookups".into(),
-            command: "dscacheutil -flushcache".into(),
+            command: "dscacheutil -flushcache; killall -HUP mDNSResponder 2>/dev/null".into(),
             needs_admin: true,
             warning: None,
         },

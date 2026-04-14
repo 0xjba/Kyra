@@ -3,6 +3,7 @@ use crate::commands::shared;
 use crate::commands::utils::dir_size;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 const PROTECTED_PATHS: &[&str] = &[
     "/System",
@@ -17,6 +18,29 @@ const PROTECTED_PATHS: &[&str] = &[
 ];
 
 const VALID_EXTENSIONS: &[&str] = &["dmg", "pkg", "iso", "xip", "mpkg", "app", "zip"];
+
+fn is_dmg_mounted(path: &Path) -> bool {
+    let canonical = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => path.to_path_buf(),
+    };
+    let path_str = canonical.to_string_lossy();
+
+    let output = match Command::new("hdiutil")
+        .args(["info", "-plist"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.contains(path_str.as_ref())
+}
 
 fn is_safe_path(path: &Path) -> bool {
     let canonical = match path.canonicalize() {
@@ -99,6 +123,14 @@ pub fn remove_installer_files(
 
         if !is_safe_path(path) {
             errors.push(format!("Blocked: {}", path_str));
+            continue;
+        }
+
+        if path.extension().and_then(|e| e.to_str()) == Some("dmg") && is_dmg_mounted(path) {
+            errors.push(format!(
+                "Cannot delete: disk image is currently mounted: {}",
+                path_str
+            ));
             continue;
         }
 

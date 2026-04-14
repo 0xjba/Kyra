@@ -729,6 +729,10 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
         "/Library/PrivilegedHelperTools",
         "/Library/Receipts",
         "/Library/Input Methods",
+        "/Library/Audio/Plug-Ins/Components",
+        "/Library/Audio/Plug-Ins/VST",
+        "/Library/Audio/Plug-Ins/VST3",
+        "/Library/Audio/Plug-Ins/Digidesign",
     ];
 
     // Require bundle_id > 3 chars for system /Library search to avoid

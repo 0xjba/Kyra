@@ -55,12 +55,16 @@ const PROTECTED_PATHS: &[&str] = &[
     "/System",
     "/bin",
     "/sbin",
+    "/usr",
     "/usr/bin",
     "/usr/sbin",
+    "/usr/lib",
     "/etc",
     "/var/db",
+    "/private",
     "/Applications",
     "/Library/Frameworks",
+    "/Library/Extensions",
 ];
 
 /// Returns true if a path is safe to delete (not in the protected list).
