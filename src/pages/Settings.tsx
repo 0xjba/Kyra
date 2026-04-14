@@ -23,7 +23,6 @@ export default function Settings() {
   const settings = useSettingsStore((s) => s.settings);
   const loaded = useSettingsStore((s) => s.loaded);
   const load = useSettingsStore((s) => s.load);
-  const setDryRun = useSettingsStore((s) => s.setDryRun);
   const setUseTrash = useSettingsStore((s) => s.setUseTrash);
   const setLargeFileThreshold = useSettingsStore((s) => s.setLargeFileThreshold);
   const setAnalyzeScanDepth = useSettingsStore((s) => s.setAnalyzeScanDepth);
@@ -184,18 +183,6 @@ export default function Settings() {
               className="settings-toggle"
               checked={settings.use_trash}
               onChange={(e) => setUseTrash(e.target.checked)}
-            />
-          </label>
-          <label className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Dry Run Mode</div>
-              <div className="settings-row-desc">Preview deletions without removing files</div>
-            </div>
-            <input
-              type="checkbox"
-              className="settings-toggle"
-              checked={settings.dry_run}
-              onChange={(e) => setDryRun(e.target.checked)}
             />
           </label>
         </div>

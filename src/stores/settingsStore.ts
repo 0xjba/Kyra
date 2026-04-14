@@ -12,7 +12,6 @@ interface SettingsStore {
   loaded: boolean;
 
   load: () => Promise<void>;
-  setDryRun: (dryRun: boolean) => Promise<void>;
   setUseTrash: (useTrash: boolean) => Promise<void>;
   setLargeFileThreshold: (mb: number) => Promise<void>;
   setAnalyzeScanDepth: (depth: number) => Promise<void>;
@@ -49,12 +48,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     } catch {
       set({ loaded: true });
     }
-  },
-
-  setDryRun: async (dryRun: boolean) => {
-    const settings = { ...get().settings, dry_run: dryRun };
-    set({ settings });
-    await saveSettings(settings);
   },
 
   setUseTrash: async (useTrash: boolean) => {

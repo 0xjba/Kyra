@@ -42,11 +42,11 @@ const UNINSTALL_APPS = [
 ];
 
 const INSTALLER_FILES = [
-  { name: "Docker.dmg", size: "0.9 GB", date: "Mar 12, 2025" },
-  { name: "Xcode_15.pkg", size: "7.2 GB", date: "Feb 3, 2025" },
-  { name: "macOS_Sonoma.dmg", size: "13.1 GB", date: "Jan 18, 2025" },
-  { name: "Figma-2024.pkg", size: "0.4 GB", date: "Dec 8, 2024" },
-  { name: "VSCode.dmg", size: "0.2 GB", date: "Nov 22, 2024" },
+  { name: "Docker.dmg", size: "0.9 GB", date: "Mar 12, 2026" },
+  { name: "Xcode_16.pkg", size: "7.2 GB", date: "Feb 3, 2026" },
+  { name: "macOS_Sequoia.dmg", size: "13.1 GB", date: "Jan 18, 2026" },
+  { name: "Figma-2025.pkg", size: "0.4 GB", date: "Dec 8, 2025" },
+  { name: "VSCode.dmg", size: "0.2 GB", date: "Nov 22, 2025" },
   { name: "Slack-4.38.dmg", size: "0.3 GB", date: "Oct 14, 2024" },
   { name: "Spotify.dmg", size: "0.1 GB", date: "Sep 5, 2024" },
 ];

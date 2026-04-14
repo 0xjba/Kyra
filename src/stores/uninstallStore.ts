@@ -10,7 +10,7 @@ import {
   type UninstallProgress,
   type UninstallResult,
 } from "../lib/tauri";
-import { useSettingsStore } from "./settingsStore";
+
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 type UninstallPhase = "idle" | "scanning" | "list" | "removing" | "done";
@@ -111,9 +111,9 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       });
 
       const filePaths = Array.from(selectedFilePaths);
-      const dryRun = useSettingsStore.getState().settings.dry_run;
+      const dryRun = false;
       const result = await executeUninstall(selectedApp.path, filePaths, selectedApp.bundle_id, selectedApp.brew_cask, dryRun, permanent);
-      if (!dryRun && result.bytes_freed > 0) {
+      if (result.bytes_freed > 0) {
         addBytesFreed(result.bytes_freed).catch(() => {});
       }
       // Only remove the app from local list if its path was actually deleted
@@ -142,7 +142,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
         set({ progress });
       });
 
-      const dryRun = useSettingsStore.getState().settings.dry_run;
+      const dryRun = false;
       let totalRemoved = 0;
       let totalFreed = 0;
       const allErrors: string[] = [];
@@ -173,7 +173,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       // Only remove apps whose path was actually deleted
       const successPaths = new Set(allDeletedPaths);
       const remainingApps = get().apps.filter((a) => !successPaths.has(a.path));
-      if (!dryRun && totalFreed > 0) {
+      if (totalFreed > 0) {
         addBytesFreed(totalFreed).catch(() => {});
       }
       set({

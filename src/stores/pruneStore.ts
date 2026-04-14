@@ -90,10 +90,11 @@ export const usePruneStore = create<PruneStore>((set, get) => ({
     });
 
     try {
-      const { dry_run: dryRun, use_trash } = useSettingsStore.getState().settings;
+      const dryRun = false;
+      const { use_trash } = useSettingsStore.getState().settings;
       const permanent = !use_trash;
       const result = await executePrune(Array.from(selectedPaths), dryRun, permanent);
-      if (!dryRun && result.bytes_freed > 0) {
+      if (result.bytes_freed > 0) {
         addBytesFreed(result.bytes_freed).catch(() => {});
       }
       set({ phase: "done", result });
