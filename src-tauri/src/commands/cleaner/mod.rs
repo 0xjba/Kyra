@@ -38,6 +38,8 @@ pub struct CleanProgress {
     pub current_item: String,
     pub items_done: usize,
     pub items_total: usize,
+    pub paths_done: usize,
+    pub paths_total: usize,
     pub bytes_freed: u64,
 }
 

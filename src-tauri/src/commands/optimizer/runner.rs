@@ -1138,6 +1138,33 @@ fn run_bluetooth_reset() -> (bool, String) {
     }
 }
 
+/// Run `diskutil verifyVolume /` and parse the output into a
+/// one-line summary instead of dumping the raw multi-line output.
+fn run_disk_verify() -> (bool, String) {
+    let output = Command::new("diskutil")
+        .args(["verifyVolume", "/"])
+        .output();
+
+    match output {
+        Ok(o) => {
+            let combined = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr),
+            );
+            let lower = combined.to_lowercase();
+            if lower.contains("appears to be ok") {
+                (true, "Disk filesystem verified OK".into())
+            } else if lower.contains("error") || lower.contains("corrupt") || lower.contains("invalid") {
+                (false, "Disk issues detected — run: sudo diskutil repairVolume /".into())
+            } else {
+                (true, "Disk verify complete".into())
+            }
+        }
+        Err(e) => (false, format!("Failed to run diskutil: {}", e)),
+    }
+}
+
 fn run_custom_task(task: &OptTask) -> Option<(bool, String)> {
     match task.id.as_str() {
         "cache_refresh" => Some(run_cache_refresh()),
@@ -1152,6 +1179,7 @@ fn run_custom_task(task: &OptTask) -> Option<(bool, String)> {
         "notification_cleanup" => Some(run_notification_cleanup()),
         "coreduet_cleanup" => Some(run_coreduet_cleanup()),
         "login_items_audit" => Some(run_login_items_audit()),
+        "disk_verify" => Some(run_disk_verify()),
         _ => None,
     }
 }
@@ -1171,6 +1199,7 @@ where
         match pre_check(task) {
             PreCheckResult::Skip(reason) => {
                 skipped += 1;
+                crate::commands::shared::log_operation("OPTIMIZE", &task.id, &format!("skipped: {}", reason));
                 on_status(&OptTaskStatus {
                     task_id: task.id.clone(),
                     status: "skipped".into(),
@@ -1196,6 +1225,7 @@ where
 
         if success {
             succeeded += 1;
+            crate::commands::shared::log_operation("OPTIMIZE", &task.id, &format!("done: {}", message.trim()));
             on_status(&OptTaskStatus {
                 task_id: task.id.clone(),
                 status: "done".into(),
@@ -1207,6 +1237,7 @@ where
             });
         } else {
             failed += 1;
+            crate::commands::shared::log_operation("OPTIMIZE", &task.id, &format!("error: {}", message.trim()));
             on_status(&OptTaskStatus {
                 task_id: task.id.clone(),
                 status: "error".into(),

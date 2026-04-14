@@ -5,6 +5,7 @@ import {
   getStoragePath,
   getTotalBytesFreed,
   pickFolder,
+  revealLogInFinder,
 } from "../lib/tauri";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { check } from "@tauri-apps/plugin-updater";
@@ -391,6 +392,18 @@ export default function Settings() {
               <div className="settings-row-name">Storage Location</div>
               <div className="settings-row-desc settings-mono">{storagePath || "—"}</div>
             </div>
+          </div>
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-name">Export Logs</div>
+              <div className="settings-row-desc">Reveal operation logs in Finder for sharing or debugging</div>
+            </div>
+            <button
+              className="btn settings-btn-sm"
+              onClick={() => revealLogInFinder()}
+            >
+              Show in Finder
+            </button>
           </div>
           <div className="settings-row">
             <div className="settings-row-info">

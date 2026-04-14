@@ -95,6 +95,8 @@ export interface CleanProgress {
   current_item: string;
   items_done: number;
   items_total: number;
+  paths_done: number;
+  paths_total: number;
   bytes_freed: number;
 }
 
@@ -462,6 +464,14 @@ export async function resetLifetimeStats(): Promise<void> {
 
 export async function getStoragePath(): Promise<string> {
   return invoke<string>("get_storage_path");
+}
+
+export async function getLogPath(): Promise<string> {
+  return invoke<string>("get_log_path");
+}
+
+export async function revealLogInFinder(): Promise<void> {
+  return invoke<void>("reveal_log_in_finder");
 }
 
 export async function pickFolder(): Promise<string | null> {

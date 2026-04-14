@@ -147,6 +147,24 @@ fn is_leap(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+/// Returns the log file path for the frontend.
+#[tauri::command]
+pub fn get_log_path() -> String {
+    log_path().to_string_lossy().to_string()
+}
+
+/// Opens the log file's parent directory in Finder and selects the file.
+#[tauri::command]
+pub fn reveal_log_in_finder() {
+    let path = log_path();
+    if path.exists() {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn();
+    }
+}
+
 /// Log a session start marker with timestamp.
 pub fn log_session_start(module: &str) {
     let timestamp = chrono_timestamp();

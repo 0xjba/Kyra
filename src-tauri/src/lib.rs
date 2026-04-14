@@ -8,6 +8,24 @@ use sysinfo::System;
 use tauri::Manager;
 
 pub fn run() {
+    // Install panic hook so crashes are written to the log file
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_else(|| "unknown".into());
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".into()
+        };
+        commands::shared::log_operation("PANIC", &location, &payload);
+        default_hook(info);
+    }));
+
+    // Log system info on startup
+    log_system_info();
+
     tauri::Builder::default()
         .manage(SystemMonitor(Mutex::new(System::new_all())))
         .manage(StatsStreamActive(Arc::new(AtomicBool::new(false))))
@@ -77,6 +95,8 @@ pub fn run() {
             commands::shared::check_sip_status,
             commands::shared::open_fda_settings,
             commands::shared::restart_app,
+            commands::shared::get_log_path,
+            commands::shared::reveal_log_in_finder,
             commands::shared::get_app_icon,
             commands::shared::get_app_icon_by_path,
             commands::cleaner::check_running_processes,
@@ -84,4 +104,24 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");
+}
+
+fn log_system_info() {
+    use std::process::Command;
+
+    let os_version = Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".into());
+
+    let arch = std::env::consts::ARCH;
+    let app_version = env!("CARGO_PKG_VERSION");
+
+    commands::shared::log_operation(
+        "APP_START",
+        "kyra",
+        &format!("v{} | macOS {} | {}", app_version, os_version, arch),
+    );
 }

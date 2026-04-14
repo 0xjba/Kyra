@@ -1276,6 +1276,87 @@ fn expand_home(path: &str) -> Option<PathBuf> {
     }
 }
 
+/// Like `expand_home`, but supports a single `*` wildcard segment in the path.
+/// For example, `~/Library/.../Profiles/*/cache2` will enumerate all entries
+/// under the `Profiles` directory and return each matching `cache2` child.
+/// Patterns like `~/Downloads/*.part` match files whose names end with `.part`.
+/// If the path contains no `*`, behaves identically to `expand_home` (returns 0 or 1 path).
+fn expand_home_glob(path: &str) -> Vec<PathBuf> {
+    // First, expand the home directory prefix.
+    let expanded_str = if let Some(rest) = path.strip_prefix("~/") {
+        match dirs::home_dir() {
+            Some(home) => format!("{}/{}", home.display(), rest),
+            None => return Vec::new(),
+        }
+    } else if path == "~" {
+        match dirs::home_dir() {
+            Some(home) => return vec![home],
+            None => return Vec::new(),
+        }
+    } else {
+        path.to_string()
+    };
+
+    if !expanded_str.contains('*') {
+        let p = PathBuf::from(&expanded_str);
+        return vec![p];
+    }
+
+    // Split at the first `*`.
+    let (before_star, after_star) = match expanded_str.split_once('*') {
+        Some(pair) => pair,
+        None => return vec![PathBuf::from(&expanded_str)],
+    };
+
+    // `before_star` ends with `/` for directory wildcards (e.g. `.../Profiles/`)
+    // or ends with a filename prefix for file wildcards (e.g. `.../Downloads/`).
+    // `after_star` starts with the remainder (e.g. `/cache2` or `.part`).
+
+    // Determine the parent directory to enumerate and any filename prefix.
+    let parent_dir: &str;
+    let name_prefix: &str;
+    if let Some(idx) = before_star.rfind('/') {
+        parent_dir = &before_star[..idx];
+        name_prefix = &before_star[idx + 1..];
+    } else {
+        parent_dir = ".";
+        name_prefix = before_star;
+    }
+
+    let entries = match std::fs::read_dir(parent_dir) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut results = Vec::new();
+    for entry in entries.flatten() {
+        let entry_name = entry.file_name();
+        let entry_name_str = entry_name.to_string_lossy();
+
+        // Check that the entry name starts with the prefix (if any).
+        if !name_prefix.is_empty() && !entry_name_str.starts_with(name_prefix) {
+            continue;
+        }
+
+        // Check that the entry name ends with the suffix (if any).
+        // `after_star` could be `/cache2` (directory wildcard) or `.part` (file wildcard).
+        if after_star.starts_with('/') {
+            // Directory wildcard: entry must be a directory, and we append the remainder.
+            let suffix = &after_star[1..]; // strip leading `/`
+            let candidate = entry.path().join(suffix);
+            results.push(candidate);
+        } else {
+            // File wildcard: entry name must end with after_star (e.g. `.part`).
+            if !entry_name_str.ends_with(after_star) {
+                continue;
+            }
+            results.push(entry.path());
+        }
+    }
+
+    results
+}
+
 /// Returns true if `path` (or any parent) is covered by a whitelisted entry.
 fn is_whitelisted(path: &str, whitelist: &[String]) -> bool {
     whitelist.iter().any(|w| path == w || path.starts_with(&format!("{}/", w)))
@@ -2001,64 +2082,63 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
         let mut total_size: u64 = 0;
 
         for raw_path in &rule.paths {
-            let expanded = match expand_home(raw_path) {
-                Some(p) => p,
-                None => continue,
-            };
+            let expanded_paths = expand_home_glob(raw_path);
 
-            if !expanded.exists() {
-                continue;
-            }
-
-            // Skip whitelisted paths
-            let expanded_str = expanded.to_string_lossy().to_string();
-            if is_whitelisted(&expanded_str, &settings.whitelist) {
-                crate::commands::shared::log_operation(
-                    "SCAN",
-                    &expanded_str,
-                    &format!("skipped: on user whitelist (rule: {})", rule.label),
-                );
-                continue;
-            }
-
-            if let Some(max_age_days) = rule.max_age_days {
-                // Age-filtered scanning: only include files older than the threshold
-                if expanded.is_dir() {
-                    let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days);
-                    let before_count = found_paths.len();
-                    for p in old_paths {
-                        if !is_whitelisted(&p.path, &settings.whitelist) {
-                            total_size += p.size;
-                            found_paths.push(p);
-                        }
-                    }
-                    let added = found_paths.len() - before_count;
-                    if added > 0 {
-                        crate::commands::shared::log_operation(
-                            "SCAN",
-                            &rule.label,
-                            &format!("age-filter>{} days: {} paths from {}", max_age_days, added, expanded.display()),
-                        );
-                    }
-                }
-            } else {
-                // Standard scanning: include the entire path
-                let size = if expanded.is_dir() {
-                    deletable_dir_size(&expanded)
-                } else {
-                    expanded.metadata().map(|m| m.len()).unwrap_or(0)
-                };
-
-                if size == 0 {
+            for expanded in expanded_paths {
+                if !expanded.exists() {
                     continue;
                 }
 
-                found_paths.push(PathInfo {
-                    path: expanded.to_string_lossy().to_string(),
-                    size,
-                    is_dir: expanded.is_dir(),
-                });
-                total_size += size;
+                // Skip whitelisted paths
+                let expanded_str = expanded.to_string_lossy().to_string();
+                if is_whitelisted(&expanded_str, &settings.whitelist) {
+                    crate::commands::shared::log_operation(
+                        "SCAN",
+                        &expanded_str,
+                        &format!("skipped: on user whitelist (rule: {})", rule.label),
+                    );
+                    continue;
+                }
+
+                if let Some(max_age_days) = rule.max_age_days {
+                    // Age-filtered scanning: only include files older than the threshold
+                    if expanded.is_dir() {
+                        let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days);
+                        let before_count = found_paths.len();
+                        for p in old_paths {
+                            if !is_whitelisted(&p.path, &settings.whitelist) {
+                                total_size += p.size;
+                                found_paths.push(p);
+                            }
+                        }
+                        let added = found_paths.len() - before_count;
+                        if added > 0 {
+                            crate::commands::shared::log_operation(
+                                "SCAN",
+                                &rule.label,
+                                &format!("age-filter>{} days: {} paths from {}", max_age_days, added, expanded.display()),
+                            );
+                        }
+                    }
+                } else {
+                    // Standard scanning: include the entire path
+                    let size = if expanded.is_dir() {
+                        deletable_dir_size(&expanded)
+                    } else {
+                        expanded.metadata().map(|m| m.len()).unwrap_or(0)
+                    };
+
+                    if size == 0 {
+                        continue;
+                    }
+
+                    found_paths.push(PathInfo {
+                        path: expanded.to_string_lossy().to_string(),
+                        size,
+                        is_dir: expanded.is_dir(),
+                    });
+                    total_size += size;
+                }
             }
         }
 

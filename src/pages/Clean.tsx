@@ -882,8 +882,8 @@ function CleaningView() {
   }, [isDone]);
 
   const percent = isDone ? 100
-    : progress && progress.items_total > 0
-      ? Math.round((progress.items_done / progress.items_total) * 100)
+    : progress && progress.paths_total > 0
+      ? Math.round((progress.paths_done / progress.paths_total) * 100)
       : 0;
 
   const ringSize = 120;

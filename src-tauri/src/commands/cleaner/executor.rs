@@ -219,7 +219,7 @@ fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<String>) {
 }
 
 /// Deletes all paths for the given scan items.
-/// Calls `on_progress` after each item is processed.
+/// Calls `on_progress` after each path is processed for smooth UI updates.
 /// If `dry_run` is true, reports what would be deleted without actually deleting.
 pub fn execute_clean_items<F>(
     items: &[ScanItem],
@@ -237,6 +237,19 @@ where
     let mut errors: Vec<String> = Vec::new();
     let mut cleaned_ids: Vec<String> = Vec::new();
     let items_total = items.len();
+    let paths_total: usize = items.iter().map(|it| it.paths.len()).sum();
+    let mut paths_done: usize = 0;
+
+    // Emit initial progress so the UI immediately shows "Starting..." instead
+    // of being stuck at null until the first deletion completes.
+    on_progress(&CleanProgress {
+        current_item: items.first().map(|it| it.label.clone()).unwrap_or_default(),
+        items_done: 0,
+        items_total,
+        paths_done: 0,
+        paths_total,
+        bytes_freed: 0,
+    });
 
     for (i, item) in items.iter().enumerate() {
         let mut item_had_success = false;
@@ -279,6 +292,15 @@ where
             if dry_run {
                 bytes_freed += path_info.size;
                 item_had_success = true;
+                paths_done += 1;
+                on_progress(&CleanProgress {
+                    current_item: item.label.clone(),
+                    items_done: i,
+                    items_total,
+                    paths_done,
+                    paths_total,
+                    bytes_freed,
+                });
             } else if is_tm_failed_rule {
                 match tmutil_delete(&path_info.path) {
                     Ok(()) => {
@@ -295,6 +317,15 @@ where
                         errors.push(format!("{}: {}", path_info.path, e));
                     }
                 }
+                paths_done += 1;
+                on_progress(&CleanProgress {
+                    current_item: item.label.clone(),
+                    items_done: i,
+                    items_total,
+                    paths_done,
+                    paths_total,
+                    bytes_freed,
+                });
             } else if is_tm_snapshot_rule {
                 match tmutil_delete_local_snapshot(&path_info.path) {
                     Ok(()) => {
@@ -315,6 +346,15 @@ where
                         errors.push(format!("{}: {}", path_info.path, e));
                     }
                 }
+                paths_done += 1;
+                on_progress(&CleanProgress {
+                    current_item: item.label.clone(),
+                    items_done: i,
+                    items_total,
+                    paths_done,
+                    paths_total,
+                    bytes_freed,
+                });
             } else if is_simctl_unavail_rule {
                 // Run `xcrun simctl delete unavailable` once for the
                 // whole batch, then fall back to manual dir deletion
@@ -376,6 +416,15 @@ where
                         }
                     }
                 }
+                paths_done += 1;
+                on_progress(&CleanProgress {
+                    current_item: item.label.clone(),
+                    items_done: i,
+                    items_total,
+                    paths_done,
+                    paths_total,
+                    bytes_freed,
+                });
             } else {
                 let path = Path::new(&path_info.path);
 
@@ -417,6 +466,15 @@ where
                         }
                     }
                 }
+                paths_done += 1;
+                on_progress(&CleanProgress {
+                    current_item: item.label.clone(),
+                    items_done: i,
+                    items_total,
+                    paths_done,
+                    paths_total,
+                    bytes_freed,
+                });
             }
         }
 
@@ -424,13 +482,6 @@ where
             items_cleaned += 1;
             cleaned_ids.push(item.rule_id.clone());
         }
-
-        on_progress(&CleanProgress {
-            current_item: item.label.clone(),
-            items_done: i + 1,
-            items_total,
-            bytes_freed,
-        });
     }
 
     CleanResult {

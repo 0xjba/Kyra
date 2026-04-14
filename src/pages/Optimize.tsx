@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useOptimizeStore } from "../stores/optimizeStore";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, Copy, Check } from "lucide-react";
 import type { OptTask } from "../lib/tauri";
 import { askAiOptimize, canAskAiOptimize } from "../utils/askAi";
 import AskAiCoachMark from "../components/AskAiCoachMark";
@@ -97,6 +97,7 @@ function TaskCard({
 
   const [showCheckmark, setShowCheckmark] = useState(false);
   const [cardPulse, setCardPulse] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const isRunning = displayStatus === "running";
   const isDone = displayStatus === "done";
@@ -132,6 +133,15 @@ function TaskCard({
     spotlight_rebuild: "Spotlight re-indexing started",
     dock_refresh: "Dock refreshed and reloaded",
     firewall_enable: "Firewall enabled",
+    quarantine_cleanup: "Gatekeeper quarantine records cleared",
+    prevent_network_dsstore: "Network .DS_Store creation disabled",
+    launch_agents_cleanup: "Stale Launch Agents removed",
+    periodic_maintenance: "Periodic maintenance scripts executed",
+    shared_file_list_repair: "Shared file lists repaired",
+    notification_cleanup: "Old notification records cleaned",
+    disk_verify: "Disk filesystem verified OK",
+    coreduet_cleanup: "Usage history records trimmed",
+    login_items_audit: "Login items audited",
   };
 
   const resultMessage = isDone
@@ -152,14 +162,29 @@ function TaskCard({
           <span className="opt-card-name">{task.name}</span>
           {task.needs_admin && <span className="opt-admin-badge">admin</span>}
         </div>
-        <div className={`opt-card-desc${isDone ? " opt-card-desc-done" : ""}`}>
-          {isDone && resultMessage ? resultMessage : task.description}
+        <div
+          className={`opt-card-desc${isDone ? " opt-card-desc-done" : isError ? " opt-card-desc-error" : isSkipped ? " opt-card-desc-skip" : ""}`}
+          title={isError && status.message ? status.message : undefined}
+        >
+          {isDone && resultMessage ? resultMessage
+            : isError && status.message ? (<>
+              <span className="opt-error-text">{status.message}</span>
+              <button
+                className="opt-error-copy"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(status.message!);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? <Check size={11} /> : <Copy size={11} />}
+              </button>
+            </>)
+            : isSkipped && status.message ? status.message
+            : task.description}
         </div>
-        {isError && status.message ? (
-          <div className="opt-card-error">{status.message}</div>
-        ) : isSkipped && status.message ? (
-          <div className="opt-card-skip">{status.message}</div>
-        ) : task.warning && !isDone ? (
+        {!isFinished && task.warning ? (
           <div className="opt-card-warning">{"\u26A0"} {task.warning}</div>
         ) : null}
       </div>
