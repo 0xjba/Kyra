@@ -147,6 +147,26 @@ fn is_leap(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+/// Log a session start marker with timestamp.
+pub fn log_session_start(module: &str) {
+    let timestamp = chrono_timestamp();
+    log_operation(
+        "SESSION_START",
+        module,
+        &format!("--- Session started at {} ---", timestamp),
+    );
+}
+
+/// Log a session end marker with summary.
+pub fn log_session_end(module: &str, summary: &str) {
+    let timestamp = chrono_timestamp();
+    log_operation(
+        "SESSION_END",
+        module,
+        &format!("--- {} | {} ---", summary, timestamp),
+    );
+}
+
 /// Read a cached icon or return None.
 fn read_cached_icon(cache_path: &std::path::Path) -> Option<String> {
     if cache_path.exists() {

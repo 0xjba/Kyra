@@ -7,6 +7,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const INSTALLER_EXTENSIONS: &[&str] = &["dmg", "pkg", "iso", "xip", "mpkg"];
 
+/// Strip Homebrew hash prefix from filenames.
+/// Homebrew cached downloads look like `<64 hex chars>--actual-name`.
+/// This returns the part after `--` if the prefix matches.
+fn strip_brew_hash_prefix(name: &str) -> String {
+    if name.len() > 66 && &name[64..66] == "--" {
+        let prefix = &name[..64];
+        if prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+            return name[66..].to_string();
+        }
+    }
+    name.to_string()
+}
+
 /// Minimum age (in days) before a macOS installer is eligible to surface
 /// in scan results. Recent installers may still be in use by the user
 /// (upgrade in progress, freshly downloaded) and accidental deletion is
@@ -130,6 +143,43 @@ fn is_protected_macos_installer(app_path: &Path, modified_secs: u64) -> bool {
     false
 }
 
+/// Check if a ZIP file contains installer files (.app, .pkg, .mpkg).
+/// Skips files over 500MB to avoid slow reads on huge archives.
+fn is_installer_zip(path: &Path) -> bool {
+    // Skip huge ZIPs — reading the central directory of a multi-GB archive is expensive
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.len() > 500 * 1024 * 1024 {
+            return false;
+        }
+    }
+
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let reader = std::io::BufReader::new(file);
+    let mut archive = match zip::ZipArchive::new(reader) {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+
+    let check_count = archive.len().min(50);
+    for i in 0..check_count {
+        if let Ok(entry) = archive.by_index(i) {
+            let name = entry.name().to_lowercase();
+            if name.ends_with(".app/") || name.ends_with(".pkg") || name.ends_with(".mpkg")
+                || name.ends_with(".dmg") || name.ends_with(".xip")
+                || name.contains(".app/")
+            {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn is_installer_extension(ext: &str) -> bool {
     INSTALLER_EXTENSIONS.contains(&ext)
 }
@@ -161,6 +211,11 @@ fn scan_directory_recursive(
             Some(n) => n.to_string_lossy().to_string(),
             None => continue,
         };
+
+        // Skip symlinks to avoid traversal outside expected directories
+        if path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            continue;
+        }
 
         if name.starts_with('.') {
             continue;
@@ -201,13 +256,37 @@ fn scan_directory_recursive(
             }
 
             results.push(InstallerFile {
-                name,
+                name: name.clone(),
                 path: path.to_string_lossy().to_string(),
                 extension,
                 size,
                 modified_secs,
             });
-        } else if path.is_dir() && current_depth < max_depth {
+        }
+
+        // Check ZIP files for embedded installers
+        if !is_installer && !is_app {
+            if let Some(ext) = path.extension() {
+                if ext.to_string_lossy().eq_ignore_ascii_case("zip") && is_installer_zip(&path) {
+                    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    let modified_secs = fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs())
+                        .unwrap_or(0);
+
+                    results.push(InstallerFile {
+                        name,
+                        path: path.to_string_lossy().to_string(),
+                        extension: "zip".to_string(),
+                        size,
+                        modified_secs,
+                    });
+                    continue;
+                }
+            }
+        }
+
+        if !is_installer && !is_app && path.is_dir() && current_depth < max_depth {
             results.extend(scan_directory_recursive(
                 &path,
                 check_app_bundles,
@@ -227,12 +306,12 @@ pub fn scan_for_installers() -> Vec<InstallerFile> {
         // Original locations
         let downloads = home.join("Downloads");
         if downloads.exists() {
-            all.extend(scan_directory(&downloads, true, 0));
+            all.extend(scan_directory(&downloads, true, 2));
         }
 
         let desktop = home.join("Desktop");
         if desktop.exists() {
-            all.extend(scan_directory(&desktop, false, 0));
+            all.extend(scan_directory(&desktop, false, 1));
         }
 
         // New locations — installers only (no .app bundles), top-level
@@ -249,20 +328,52 @@ pub fn scan_for_installers() -> Vec<InstallerFile> {
         // Homebrew cached downloads
         let homebrew_cache = home.join("Library/Caches/Homebrew/downloads");
         if homebrew_cache.exists() {
-            all.extend(scan_directory(&homebrew_cache, false, 0));
+            let mut brew_files = scan_directory(&homebrew_cache, false, 0);
+            for f in &mut brew_files {
+                f.name = strip_brew_hash_prefix(&f.name);
+            }
+            all.extend(brew_files);
         }
 
-        // Mail attachment downloads
-        let mail_downloads = home.join("Library/Mail Downloads");
-        if mail_downloads.exists() {
-            all.extend(scan_directory(&mail_downloads, false, 1));
+        // Mail attachment downloads (containerized path for modern macOS)
+        let mail_downloads_container = home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
+        if mail_downloads_container.exists() {
+            all.extend(scan_directory(&mail_downloads_container, false, 1));
+        }
+        // Legacy Mail Downloads path
+        let mail_downloads_legacy = home.join("Library/Mail Downloads");
+        if mail_downloads_legacy.exists() {
+            all.extend(scan_directory(&mail_downloads_legacy, false, 1));
+        }
+
+        // iCloud Drive Downloads
+        let icloud_downloads = home.join("Library/Mobile Documents/com~apple~CloudDocs/Downloads");
+        if icloud_downloads.exists() {
+            all.extend(scan_directory(&icloud_downloads, false, 1));
+        }
+
+        // Library Downloads (software updates, etc.)
+        let library_downloads = home.join("Library/Downloads");
+        if library_downloads.exists() {
+            all.extend(scan_directory(&library_downloads, false, 0));
+        }
+
+        // Telegram Desktop cached installers
+        let telegram_appdata = home.join("Library/Application Support/Telegram Desktop");
+        if telegram_appdata.exists() {
+            all.extend(scan_directory(&telegram_appdata, false, 1));
+        }
+
+        let telegram_downloads = home.join("Downloads/Telegram Desktop");
+        if telegram_downloads.exists() {
+            all.extend(scan_directory(&telegram_downloads, false, 1));
         }
     }
 
     // Shared location for multi-user installs
     let users_shared = Path::new("/Users/Shared");
     if users_shared.exists() {
-        all.extend(scan_directory(users_shared, false, 0));
+        all.extend(scan_directory(users_shared, false, 2));
     }
 
     let tmp = Path::new("/tmp");
@@ -270,7 +381,8 @@ pub fn scan_for_installers() -> Vec<InstallerFile> {
         all.extend(scan_directory(tmp, false, 0));
     }
 
+    let mut seen = std::collections::HashSet::new();
+    all.retain(|item| seen.insert(item.path.clone()));
     all.sort_by(|a, b| b.size.cmp(&a.size));
-    all.dedup_by(|a, b| a.path == b.path);
     all
 }

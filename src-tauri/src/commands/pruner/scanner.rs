@@ -3,6 +3,27 @@ use std::fs;
 use super::{ArtifactEntry, ScanProgress};
 use crate::commands::utils::dir_size;
 
+/// Maximum depth to scan for build artifacts.
+const MAX_SCAN_DEPTH: usize = 6;
+
+/// Wraps `dir_size` with a timeout to avoid stalling on huge or slow directories.
+/// Returns `Some(size)` on success, `None` on timeout.
+fn dir_size_with_timeout(path: &std::path::Path, timeout_secs: u64) -> Option<u64> {
+    let path = path.to_path_buf();
+    let handle = std::thread::spawn(move || dir_size(&path));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    loop {
+        if handle.is_finished() {
+            return Some(handle.join().unwrap_or(0));
+        }
+        if std::time::Instant::now() > deadline {
+            return None; // timeout — size unknown
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// Known build artifact directory names and their human-readable type labels.
 const ARTIFACT_DIRS: &[(&str, &str)] = &[
     // JavaScript / Node.js
@@ -41,6 +62,7 @@ const ARTIFACT_DIRS: &[(&str, &str)] = &[
     (".bundle", "Ruby Bundler"),
     // C# / .NET
     ("obj", "C#/.NET Build"),
+    ("bin", "C#/.NET Build"),
     // C++ (CMake)
     (".cxx", "C++ Build"),
     ("CMakeFiles", "CMake Build"),
@@ -90,9 +112,12 @@ where
     }
 
     let mut results: Vec<ArtifactEntry> = Vec::new();
-    let mut stack: Vec<std::path::PathBuf> = vec![root_path.to_path_buf()];
+    let mut stack: Vec<(std::path::PathBuf, usize)> = vec![(root_path.to_path_buf(), 0)];
 
-    while let Some(dir) = stack.pop() {
+    while let Some((dir, current_depth)) = stack.pop() {
+        if current_depth >= MAX_SCAN_DEPTH {
+            continue;
+        }
         let entries = match fs::read_dir(&dir) {
             Ok(e) => e,
             Err(_) => continue,
@@ -163,14 +188,58 @@ where
                     // target — could be Rust (Cargo.toml) or Maven (pom.xml)
                     if name == "target" {
                         if dir.join("pom.xml").exists() {
+                            // Skip artifacts modified within the last 7 days (actively in use)
+                            let seven_days = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+                            let is_recent = std::fs::metadata(&path)
+                                .and_then(|m| m.modified())
+                                .map(|mtime| {
+                                    std::time::SystemTime::now()
+                                        .duration_since(mtime)
+                                        .unwrap_or_default()
+                                        < seven_days
+                                })
+                                .unwrap_or(false);
+                            if is_recent {
+                                let size_result = dir_size_with_timeout(&path, 15);
+                                // Skip genuinely empty artifacts (Some(0)), keep timeouts (None) with size 0
+                                if size_result == Some(0) {
+                                    is_artifact = true;
+                                    break;
+                                }
+                                let size = size_result.unwrap_or(0);
+                                results.push(ArtifactEntry {
+                                    project_name: project_name.clone(),
+                                    project_path: project_path.clone(),
+                                    artifact_type: "Maven".to_string(),
+                                    artifact_path: path.to_string_lossy().to_string(),
+                                    size,
+                                    is_recent: true,
+                                });
+                                is_artifact = true;
+                                if results.len() % 50 == 0 {
+                                    on_progress(&ScanProgress {
+                                        current_path: dir.to_string_lossy().to_string(),
+                                        artifacts_found: results.len(),
+                                    });
+                                }
+                                break;
+                            }
+
                             // Maven project — override the artifact_type
-                            let size = dir_size(&path);
+                            let size_result = dir_size_with_timeout(&path, 15);
+                            // Skip genuinely empty artifacts (Some(0)), keep timeouts (None) with size 0
+                            if size_result == Some(0) {
+                                is_artifact = true;
+                                break;
+                            }
+                            let size = size_result.unwrap_or(0);
                             results.push(ArtifactEntry {
                                 project_name: project_name.clone(),
                                 project_path: project_path.clone(),
                                 artifact_type: "Maven".to_string(),
                                 artifact_path: path.to_string_lossy().to_string(),
                                 size,
+                                is_recent: false,
                             });
                             is_artifact = true;
                             if results.len() % 50 == 0 {
@@ -203,16 +272,27 @@ where
                             | ".angular"
                             | ".svelte-kit"
                             | ".astro"
-                            | "coverage"
                     ) && !dir.join("package.json").exists()
                     {
                         continue;
                     }
-                    // vendor — validate with composer.json, go.mod, or Gemfile
+                    // coverage — validate with package.json or Python/Go/Rust project files
+                    if name == "coverage"
+                        && !dir.join("package.json").exists()
+                        && !dir.join("pytest.ini").exists()
+                        && !dir.join("setup.py").exists()
+                        && !dir.join("setup.cfg").exists()
+                        && !dir.join("pyproject.toml").exists()
+                        && !dir.join("Cargo.toml").exists()
+                        && !dir.join("go.mod").exists()
+                    {
+                        continue;
+                    }
+                    // vendor — only match PHP Composer projects; Go vendor dirs
+                    // are intentionally vendored for reproducible builds and Ruby
+                    // vendor dirs contain importmap dependencies.
                     if name == "vendor"
                         && !dir.join("composer.json").exists()
-                        && !dir.join("go.mod").exists()
-                        && !dir.join("Gemfile").exists()
                     {
                         continue;
                     }
@@ -232,6 +312,21 @@ where
                         if !has_dotnet {
                             continue;
                         }
+                    }
+                    // bin — validate with .csproj/.fsproj/.vbproj in parent AND Debug/ or Release/ subdirectory
+                    if name == "bin" {
+                        let has_dotnet_proj = fs::read_dir(&dir)
+                            .map(|entries| {
+                                entries.filter_map(|e| e.ok()).any(|e| {
+                                    let n = e.file_name();
+                                    let n = n.to_string_lossy();
+                                    n.ends_with(".csproj") || n.ends_with(".fsproj") || n.ends_with(".vbproj")
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_dotnet_proj { continue; }
+                        let has_build_output = path.join("Debug").is_dir() || path.join("Release").is_dir();
+                        if !has_build_output { continue; }
                     }
                     // .bundle — validate with Gemfile
                     if name == ".bundle" && !dir.join("Gemfile").exists() {
@@ -303,7 +398,25 @@ where
                         }
                     }
 
-                    let size = dir_size(&path);
+                    // Check if artifact was modified within the last 7 days (actively in use)
+                    let seven_days = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+                    let is_recent = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .map(|mtime| {
+                            std::time::SystemTime::now()
+                                .duration_since(mtime)
+                                .unwrap_or_default()
+                                < seven_days
+                        })
+                        .unwrap_or(false);
+
+                    let size_result = dir_size_with_timeout(&path, 15);
+                    // Skip genuinely empty artifacts (Some(0)), keep timeouts (None) with size 0
+                    if size_result == Some(0) {
+                        is_artifact = true;
+                        break;
+                    }
+                    let size = size_result.unwrap_or(0);
 
                     results.push(ArtifactEntry {
                         project_name,
@@ -311,6 +424,7 @@ where
                         artifact_type: artifact_type.to_string(),
                         artifact_path: path.to_string_lossy().to_string(),
                         size,
+                        is_recent,
                     });
 
                     is_artifact = true;
@@ -330,6 +444,18 @@ where
             if !is_artifact {
                 for (suffix, artifact_type) in ARTIFACT_SUFFIXES {
                     if name.ends_with(suffix) {
+                        // Check if artifact was modified within the last 7 days (actively in use)
+                        let seven_days = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+                        let is_recent = std::fs::metadata(&path)
+                            .and_then(|m| m.modified())
+                            .map(|mtime| {
+                                std::time::SystemTime::now()
+                                    .duration_since(mtime)
+                                    .unwrap_or_default()
+                                    < seven_days
+                            })
+                            .unwrap_or(false);
+
                         let project_path = dir.to_string_lossy().to_string();
                         let project_name = dir
                             .file_name()
@@ -337,7 +463,13 @@ where
                             .unwrap_or("unknown")
                             .to_string();
 
-                        let size = dir_size(&path);
+                        let size_result = dir_size_with_timeout(&path, 15);
+                        // Skip genuinely empty artifacts (Some(0)), keep timeouts (None) with size 0
+                        if size_result == Some(0) {
+                            is_artifact = true;
+                            break;
+                        }
+                        let size = size_result.unwrap_or(0);
 
                         results.push(ArtifactEntry {
                             project_name,
@@ -345,6 +477,7 @@ where
                             artifact_type: artifact_type.to_string(),
                             artifact_path: path.to_string_lossy().to_string(),
                             size,
+                            is_recent,
                         });
 
                         is_artifact = true;
@@ -355,7 +488,19 @@ where
 
             // Only descend if this was NOT an artifact directory
             if !is_artifact {
-                stack.push(path);
+                // Skip directories that waste time or produce false positives
+                if name == ".Trash" || name == "Applications" {
+                    continue;
+                }
+                // Skip ~/Library — it's huge and not relevant
+                if name == "Library" {
+                    if let Some(home) = dirs::home_dir() {
+                        if dir == home {
+                            continue;
+                        }
+                    }
+                }
+                stack.push((path, current_depth + 1));
             }
         }
     }

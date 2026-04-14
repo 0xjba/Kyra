@@ -248,12 +248,19 @@ where
         // APFS local snapshots are removed via tmutil deletelocalsnapshots.
         // Paths for this rule are pseudo-URIs of the form `tmutil://<id>`.
         let is_tm_snapshot_rule = item.rule_id == "special_tm_local_snapshots";
+        // Unavailable Xcode simulators are cleaned via `xcrun simctl delete unavailable`
+        // with fallback to manual directory deletion. Paths are pseudo-URIs
+        // of the form `simctl_unavailable://<UDID>`.
+        let is_simctl_unavail_rule = item.rule_id == "dev_xcode_unavailable_sims";
+
+        // For the unavailable simulators rule, run the bulk command once
+        // rather than per-path. Track whether we already ran it.
+        let mut simctl_bulk_ran = false;
 
         for path_info in &item.paths {
-            // Skip safe-path / whitelist checks for the snapshot pseudo-URIs
-            // because they are not real filesystem paths. Every other path
-            // still goes through the normal validation.
-            if !is_tm_snapshot_rule {
+            // Skip safe-path / whitelist checks for pseudo-URIs
+            // because they are not real filesystem paths.
+            if !is_tm_snapshot_rule && !is_simctl_unavail_rule {
                 if !is_safe_path(&path_info.path) {
                     let reason = "skipped: protected path (SIP / system directory)";
                     shared::log_operation("CLEAN", &path_info.path, reason);
@@ -306,6 +313,67 @@ where
                             &format!("tmutil deletelocalsnapshots failed: {}", e),
                         );
                         errors.push(format!("{}: {}", path_info.path, e));
+                    }
+                }
+            } else if is_simctl_unavail_rule {
+                // Run `xcrun simctl delete unavailable` once for the
+                // whole batch, then fall back to manual dir deletion
+                // for any remaining orphaned device directories.
+                if !simctl_bulk_ran {
+                    simctl_bulk_ran = true;
+                    let simctl_ok = Command::new("/usr/bin/xcrun")
+                        .args(["simctl", "delete", "unavailable"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+                    if simctl_ok {
+                        shared::log_operation(
+                            "CLEAN",
+                            "xcrun simctl delete unavailable",
+                            "success",
+                        );
+                    } else {
+                        shared::log_operation(
+                            "CLEAN",
+                            "xcrun simctl delete unavailable",
+                            "failed, falling back to manual deletion",
+                        );
+                    }
+                }
+                // Try manual deletion of the device directory as fallback
+                if let Some(udid) = path_info.path.strip_prefix("simctl_unavailable://") {
+                    if let Some(home) = dirs::home_dir() {
+                        let device_dir = home.join(format!(
+                            "Library/Developer/CoreSimulator/Devices/{}",
+                            udid
+                        ));
+                        if device_dir.is_dir() {
+                            match safe_remove_dir_all(&device_dir) {
+                                Ok(_) => {
+                                    bytes_freed += path_info.size;
+                                    item_had_success = true;
+                                    shared::log_operation(
+                                        "CLEAN",
+                                        &path_info.path,
+                                        "manual device dir removal",
+                                    );
+                                }
+                                Err(e) => {
+                                    shared::log_operation(
+                                        "CLEAN",
+                                        &path_info.path,
+                                        &format!("manual removal failed: {}", e),
+                                    );
+                                    errors.push(format!("{}: {}", path_info.path, e));
+                                }
+                            }
+                        } else {
+                            // Device dir already removed by simctl
+                            bytes_freed += path_info.size;
+                            item_had_success = true;
+                        }
                     }
                 }
             } else {

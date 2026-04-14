@@ -212,7 +212,7 @@ pub fn detect_cask(app_path: &str) -> Option<String> {
 }
 
 /// Resolve the brew executable path on Apple Silicon or Intel Homebrew.
-fn brew_binary() -> Option<&'static str> {
+pub fn brew_binary() -> Option<&'static str> {
     if Path::new("/opt/homebrew/bin/brew").exists() {
         Some("/opt/homebrew/bin/brew")
     } else if Path::new("/usr/local/bin/brew").exists() {
@@ -305,7 +305,6 @@ pub fn uninstall_cask_with_size(
 /// Returns true if the given cask token is currently recorded as installed
 /// by `brew list --cask`. Used as a final sanity check before invoking
 /// `brew uninstall` so we never pass a stale or hand-constructed token.
-#[allow(dead_code)]
 pub fn is_cask_installed(cask: &str) -> bool {
     if !is_valid_cask_token(cask) {
         return false;

@@ -18,6 +18,9 @@ pub struct AppInfo {
     /// Homebrew cask token if the app was installed via `brew install --cask`,
     /// otherwise `None`. Used to drive brew-aware uninstall.
     pub brew_cask: Option<String>,
+    /// True if the app declares LSBackgroundOnly or LSUIElement in its
+    /// Info.plist — these are helper/agent apps that have no visible UI.
+    pub is_background_only: bool,
 }
 
 /// A file or directory associated with an application.

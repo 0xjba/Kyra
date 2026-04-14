@@ -217,7 +217,7 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
     try {
       const { useSettingsStore } = await import("./settingsStore");
       const threshold = useSettingsStore.getState().settings.large_file_threshold_mb || 100;
-      const files = await findLargeFiles(threshold);
+      const files = await findLargeFiles(threshold, get().scanPath || undefined);
       set({ largeFiles: files, largeFilesLoading: false });
     } catch {
       set({ largeFilesLoading: false });

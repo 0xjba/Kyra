@@ -31,18 +31,30 @@ const VALID_ARTIFACT_NAMES: &[&str] = &[
     "Pods", ".build", "DerivedData",
     // Android / JVM
     ".gradle",
-    // PHP / Go / Ruby
+    // PHP
     "vendor",
+    // Ruby
+    ".bundle",
     // C# / .NET
-    "obj",
+    "obj", "bin",
     // C++ (CMake)
-    ".cxx",
+    ".cxx", "CMakeFiles",
     // React Native
     ".expo",
     // Flutter / Dart
     ".dart_tool",
     // Zig
     ".zig-cache", "zig-out",
+    // Elixir
+    "_build", "deps",
+    // Haskell
+    "dist-newstyle", ".stack-work",
+    // OCaml
+    "_opam",
+    // iOS / macOS
+    "Carthage",
+    // Bun
+    ".bun",
 ];
 
 /// Returns true if a path is safe to delete for prune operations.

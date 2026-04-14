@@ -103,7 +103,7 @@ fn try_force_quit(app_path: &str, display_name: &str, dry_run: bool) -> bool {
 
     shared::log_operation("UNINSTALL", &target, "force quit: SIGTERM");
     let _ = Command::new("/usr/bin/pkill").args(["-x", &target]).output();
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(2000));
 
     if !is_process_running(&target) {
         return true;
@@ -113,7 +113,7 @@ fn try_force_quit(app_path: &str, display_name: &str, dry_run: bool) -> bool {
     let _ = Command::new("/usr/bin/pkill")
         .args(["-9", "-x", &target])
         .output();
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(2000));
 
     if !is_process_running(&target) {
         return true;
@@ -123,7 +123,7 @@ fn try_force_quit(app_path: &str, display_name: &str, dry_run: bool) -> bool {
     let escaped = applescript_escape(display_name);
     let script = format!("tell application \"{}\" to quit", escaped);
     let _ = Command::new("osascript").arg("-e").arg(&script).output();
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(2000));
 
     !is_process_running(&target)
 }
@@ -558,6 +558,56 @@ fn is_safe_path(path: &str) -> bool {
     true
 }
 
+/// Remove the app from the Dock persistent apps list.
+fn try_remove_from_dock(bundle_id: &str) {
+    let dock_plist = match dirs::home_dir() {
+        Some(h) => h.join("Library/Preferences/com.apple.dock.plist"),
+        None => return,
+    };
+
+    if !dock_plist.exists() {
+        return;
+    }
+
+    // Read number of persistent-apps
+    let count_output = Command::new("/usr/libexec/PlistBuddy")
+        .arg("-c")
+        .arg("Print :persistent-apps")
+        .arg(dock_plist.to_string_lossy().as_ref())
+        .output();
+
+    if let Ok(o) = count_output {
+        let text = String::from_utf8_lossy(&o.stdout);
+        let count = text.matches("Dict {").count();
+
+        // Iterate backwards to safely remove by index
+        for i in (0..count).rev() {
+            let check_cmd = format!(
+                "Print :persistent-apps:{}:tile-data:bundle-identifier",
+                i
+            );
+            if let Ok(co) = Command::new("/usr/libexec/PlistBuddy")
+                .arg("-c")
+                .arg(&check_cmd)
+                .arg(dock_plist.to_string_lossy().as_ref())
+                .output()
+            {
+                let bid = String::from_utf8_lossy(&co.stdout).trim().to_string();
+                if bid.eq_ignore_ascii_case(bundle_id) {
+                    let delete_cmd = format!("Delete :persistent-apps:{}", i);
+                    let _ = Command::new("/usr/libexec/PlistBuddy")
+                        .arg("-c")
+                        .arg(&delete_cmd)
+                        .arg(dock_plist.to_string_lossy().as_ref())
+                        .output();
+                }
+            }
+        }
+    }
+
+    let _ = Command::new("killall").arg("Dock").output();
+}
+
 /// Removes the app bundle and selected associated files.
 /// Calls `on_progress` after each item is processed.
 ///
@@ -630,6 +680,35 @@ where
                     app_path,
                     &format!("brew --zap {}: {}", cask, log_line.lines().next().unwrap_or("ok")),
                 );
+                // Clean up orphaned brew dependencies in background (30s timeout)
+                std::thread::spawn(|| {
+                    if let Some(brew_bin) = brew::brew_binary() {
+                        if let Ok(mut child) = std::process::Command::new(brew_bin)
+                            .arg("autoremove")
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn()
+                        {
+                            let start = std::time::Instant::now();
+                            let timeout = std::time::Duration::from_secs(30);
+                            loop {
+                                match child.try_wait() {
+                                    Ok(Some(_)) => break,
+                                    Ok(None) => {
+                                        if start.elapsed() > timeout {
+                                            let _ = child.kill();
+                                            let _ = child.wait();
+                                            break;
+                                        }
+                                        std::thread::sleep(std::time::Duration::from_millis(200));
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+                    }
+                });
+
                 // If the bundle is already gone, count it as removed now.
                 let path = Path::new(app_path);
                 let app_gone = !path.exists() && fs::symlink_metadata(path).is_err();
@@ -645,8 +724,45 @@ where
                     app_path,
                     &format!("brew --zap {} failed: {}", cask, e),
                 );
-                errors.push(format!("brew uninstall failed: {}", e));
-                false
+
+                // 3-way cask-state fallback after brew failure:
+                //   - cask gone (not in `brew list --cask`): brew partially
+                //     succeeded — the cask record is removed but the .app
+                //     bundle may remain on disk. Proceed with manual deletion.
+                //   - cask still installed: brew failed entirely. Don't touch
+                //     the .app to avoid a state mismatch where brew still
+                //     reports it as installed. Surface a suggestion instead.
+                //   - unknown (brew list failed): surface a suggestion.
+                let cask_still_registered = brew::is_cask_installed(cask);
+
+                if !cask_still_registered {
+                    // Cask record is gone — brew partially cleaned up.
+                    // Fall through to the normal file-deletion loop which
+                    // will handle the .app bundle manually.
+                    shared::log_operation(
+                        "UNINSTALL",
+                        app_path,
+                        &format!("brew cask {} no longer registered, will delete .app manually", cask),
+                    );
+                    errors.push(format!("brew uninstall partially succeeded: {}", e));
+                    false
+                } else {
+                    // Cask is still registered (or state unknown) — don't
+                    // delete the .app behind brew's back. Suggest the user
+                    // runs `brew uninstall` manually.
+                    shared::log_operation(
+                        "UNINSTALL",
+                        app_path,
+                        &format!("brew cask {} still registered, skipping manual .app delete", cask),
+                    );
+                    errors.push(format!(
+                        "brew uninstall failed: {}. Run `brew uninstall --cask --zap {}` manually.",
+                        e, cask
+                    ));
+                    // Return true to prevent the file-deletion loop from
+                    // removing the .app bundle while brew still owns it.
+                    true
+                }
             }
         }
     } else {
@@ -777,12 +893,36 @@ where
         });
     }
 
+    // Verify deletions — adjust bytes_freed for files that survived
+    if !dry_run && !deleted_paths.is_empty() {
+        let mut surviving_bytes: u64 = 0;
+        deleted_paths.retain(|p| {
+            let path = std::path::Path::new(p);
+            if path.exists() {
+                // File survived deletion — don't count its bytes
+                let size = if path.is_dir() { dir_size(path) } else { path.metadata().map(|m| m.len()).unwrap_or(0) };
+                surviving_bytes += size;
+                false
+            } else {
+                true
+            }
+        });
+        if surviving_bytes > 0 {
+            bytes_freed = bytes_freed.saturating_sub(surviving_bytes);
+        }
+    }
+
     // Flush cfprefsd's preference cache so it doesn't re-create the
     // bundle's .plist after we just removed it. Only runs if the file
     // loop actually did work (skip for pure dry-run which did nothing
     // on-disk anyway).
     if !dry_run && !bundle_id.is_empty() {
         try_defaults_delete(bundle_id);
+    }
+
+    // Remove the app from the Dock if it was pinned there
+    if !dry_run && !bundle_id.is_empty() {
+        try_remove_from_dock(bundle_id);
     }
 
     // Compact and rebuild the LaunchServices database so stale entries

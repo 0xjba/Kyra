@@ -308,8 +308,8 @@ export interface LargeFile {
   size: number;
 }
 
-export async function findLargeFiles(minSizeMb: number): Promise<LargeFile[]> {
-  return invoke<LargeFile[]>("find_large_files", { minSizeMb });
+export async function findLargeFiles(minSizeMb: number, searchPath?: string): Promise<LargeFile[]> {
+  return invoke<LargeFile[]>("find_large_files", { minSizeMb, searchPath: searchPath ?? null });
 }
 
 // ── Prune Module Types ──────────────────────────────────

@@ -153,3 +153,24 @@ pub fn path_size(path: &Path) -> u64 {
         fs::metadata(path).map(|m| physical_size(&m)).unwrap_or(0)
     }
 }
+
+/// Deduplicate paths by inode — same file via different paths counted once.
+pub fn dedup_paths_by_inode(paths: &[String]) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut seen_inodes: HashSet<(u64, u64)> = HashSet::new(); // (dev, inode)
+    let mut unique = Vec::new();
+
+    for path in paths {
+        if let Ok(meta) = fs::metadata(path) {
+            let key = (meta.dev(), meta.ino());
+            if seen_inodes.insert(key) {
+                unique.push(path.clone());
+            }
+        } else {
+            unique.push(path.clone()); // Keep paths we can't stat
+        }
+    }
+
+    unique
+}

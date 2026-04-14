@@ -11,6 +11,7 @@ pub struct ArtifactEntry {
     pub artifact_type: String,
     pub artifact_path: String,
     pub size: u64,
+    pub is_recent: bool,
 }
 
 #[derive(Clone, Serialize)]

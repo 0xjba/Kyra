@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use super::{CleanRule, PathInfo, ScanItem};
-use crate::commands::utils::deletable_dir_size;
+use crate::commands::utils::{deletable_dir_size, dir_size};
 
 // ── Special Scan Functions ───────────────────────────────────────────
 
@@ -871,6 +871,98 @@ fn xcode_simulator_is_booted() -> bool {
     }
 }
 
+/// Special scan: detect unavailable Xcode simulators via `xcrun simctl`.
+/// These are simulators whose runtimes have been removed and can be
+/// safely deleted with `xcrun simctl delete unavailable`. The executor
+/// runs that command first, then falls back to manual deletion of
+/// orphaned device directories if the command fails.
+fn scan_xcode_unavailable_simulators() -> Option<ScanItem> {
+    // Check if xcrun simctl is available
+    let simctl_check = std::process::Command::new("/usr/bin/xcrun")
+        .args(["simctl", "list", "devices", "unavailable"])
+        .output();
+    let output = match simctl_check {
+        Ok(o) if o.status.success() => o,
+        _ => return None,
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse UDIDs of unavailable simulators
+    let mut udids: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        if !line.contains("(unavailable") {
+            continue;
+        }
+        // Extract UUID: look for (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
+        if let Some(start) = line.find('(') {
+            let after = &line[start + 1..];
+            if let Some(end) = after.find(')') {
+                let candidate = &after[..end];
+                // Validate UUID format (36 chars: 8-4-4-4-12 hex)
+                if candidate.len() == 36
+                    && candidate.chars().enumerate().all(|(i, c)| {
+                        if i == 8 || i == 13 || i == 18 || i == 23 {
+                            c == '-'
+                        } else {
+                            c.is_ascii_hexdigit()
+                        }
+                    })
+                {
+                    udids.push(candidate.to_string());
+                }
+            }
+        }
+    }
+
+    if udids.is_empty() {
+        return None;
+    }
+
+    let home = dirs::home_dir()?;
+    let devices_root = home.join("Library/Developer/CoreSimulator/Devices");
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for udid in &udids {
+        let device_dir = devices_root.join(udid);
+        let size = if device_dir.is_dir() {
+            deletable_dir_size(&device_dir)
+        } else {
+            // Device dir may not exist on disk; use nominal size
+            4096
+        };
+        // Store the UDID as a pseudo-path so the executor can use
+        // `xcrun simctl delete unavailable` and fall back to manual
+        // deletion of these specific device directories.
+        paths.push(PathInfo {
+            path: format!("simctl_unavailable://{}", udid),
+            size,
+            is_dir: true,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Xcode Unavailable Simulators",
+        &format!("{} simulators, {} bytes", udids.len(), total_size),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_xcode_unavailable_sims".into(),
+        category: "Developer Tools".into(),
+        label: format!("Xcode Unavailable Simulators ({})", udids.len()),
+        paths,
+        total_size,
+    })
+}
+
 /// Special scan: Xcode simulator caches, gated on no booted simulators.
 /// Returns `None` if Xcode command-line tools aren't present, the cache
 /// is empty, or any simulator is currently running.
@@ -916,7 +1008,7 @@ fn scan_xcode_simulator_caches() -> Option<ScanItem> {
 }
 
 /// Special scan: dynamically discover macOS installer apps in /Applications.
-/// Safety gates (matching the reference implementation):
+/// Safety gates:
 ///   1. Glob `/Applications/Install macOS*.app` — catches future OS names
 ///   2. Skip if installer process is currently running (`pgrep -f`)
 ///   3. Skip if installer's DTPlatformVersion matches current macOS major
@@ -1063,6 +1155,21 @@ fn scan_incomplete_downloads() -> Option<ScanItem> {
 
         if extensions.iter().any(|ext| lower.ends_with(ext)) {
             let path = entry.path();
+            let path_str = path.to_string_lossy().to_string();
+
+            // Skip files that are still being written to (active download)
+            if let Ok(lsof_out) = std::process::Command::new("lsof")
+                .arg(&path_str)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+            {
+                if lsof_out.success() {
+                    // File is still open by a process — skip it
+                    continue;
+                }
+            }
+
             if let Ok(meta) = path.metadata() {
                 let size = meta.len();
                 paths.push(PathInfo {
@@ -1094,6 +1201,54 @@ fn scan_incomplete_downloads() -> Option<ScanItem> {
     })
 }
 
+/// Scan for browser code signature caches in temp directories.
+fn scan_code_sign_caches() -> Vec<ScanItem> {
+    let mut items = Vec::new();
+    let var_folders = std::path::Path::new("/private/var/folders");
+    if !var_folders.exists() {
+        return items;
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+
+    // /private/var/folders has a two-level hash structure: /XX/XXXXXXXX/
+    if let Ok(level1) = std::fs::read_dir(var_folders) {
+        'outer: for l1 in level1.flatten() {
+            if std::time::Instant::now() > deadline { break; }
+            if !l1.path().is_dir() { continue; }
+            if let Ok(level2) = std::fs::read_dir(l1.path()) {
+                for l2 in level2.flatten() {
+                    if std::time::Instant::now() > deadline { break 'outer; }
+                    if !l2.path().is_dir() { continue; }
+                    if let Ok(contents) = std::fs::read_dir(l2.path()) {
+                        for entry in contents.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if name.ends_with(".code_sign_clone") && entry.path().is_dir() {
+                                let size = deletable_dir_size(&entry.path());
+                                if size > 0 {
+                                    items.push(ScanItem {
+                                        rule_id: "code_sign_caches".into(),
+                                        category: "System".into(),
+                                        label: "Browser Code Signature Cache".into(),
+                                        paths: vec![PathInfo {
+                                            path: entry.path().to_string_lossy().to_string(),
+                                            size,
+                                            is_dir: true,
+                                        }],
+                                        total_size: size,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    items
+}
+
 /// Expands `~` at the start of a path to the user's home directory.
 fn expand_home(path: &str) -> Option<PathBuf> {
     if let Some(rest) = path.strip_prefix("~/") {
@@ -1108,6 +1263,85 @@ fn expand_home(path: &str) -> Option<PathBuf> {
 /// Returns true if `path` (or any parent) is covered by a whitelisted entry.
 fn is_whitelisted(path: &str, whitelist: &[String]) -> bool {
     whitelist.iter().any(|w| path == w || path.starts_with(&format!("{}/", w)))
+}
+
+/// Scan external volumes for macOS metadata debris (.Spotlight-V100, .Trashes, .fseventsd).
+fn scan_external_volumes_metadata() -> Vec<ScanItem> {
+    let mut items = Vec::new();
+    let volumes = std::path::Path::new("/Volumes");
+    if !volumes.exists() {
+        return items;
+    }
+
+    // Get boot volume name to skip it
+    let boot_volume = std::process::Command::new("diskutil")
+        .args(["info", "-plist", "/"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let text = String::from_utf8_lossy(&o.stdout).to_string();
+            // Extract VolumeName — look for the key then grab the string value
+            let key = "<key>VolumeName</key>";
+            text.find(key).and_then(|pos| {
+                let after = &text[pos + key.len()..];
+                let start = after.find("<string>")? + 8;
+                let end = after[start..].find("</string>")?;
+                Some(after[start..start + end].to_string())
+            })
+        })
+        .unwrap_or_default();
+
+    if let Ok(entries) = std::fs::read_dir(volumes) {
+        for entry in entries.flatten() {
+            let vol_path = entry.path();
+            let vol_name = entry.file_name().to_string_lossy().to_string();
+
+            if vol_name == boot_volume || vol_name.starts_with('.') || !vol_path.is_dir() {
+                continue;
+            }
+
+            let metadata_dirs = [".Spotlight-V100", ".Trashes", ".fseventsd"];
+            let mut vol_paths = Vec::new();
+            let mut vol_size: u64 = 0;
+
+            for meta_name in &metadata_dirs {
+                let meta_path = vol_path.join(meta_name);
+                if meta_path.exists() {
+                    let size = dir_size(&meta_path);
+                    vol_size += size;
+                    vol_paths.push(PathInfo {
+                        path: meta_path.to_string_lossy().to_string(),
+                        size,
+                        is_dir: true,
+                    });
+                }
+            }
+
+            // Also check for .DS_Store at top level
+            let ds_store = vol_path.join(".DS_Store");
+            if ds_store.exists() {
+                let size = std::fs::metadata(&ds_store).map(|m| m.len()).unwrap_or(0);
+                vol_size += size;
+                vol_paths.push(PathInfo {
+                    path: ds_store.to_string_lossy().to_string(),
+                    size,
+                    is_dir: false,
+                });
+            }
+
+            if !vol_paths.is_empty() && vol_size > 0 {
+                items.push(ScanItem {
+                    rule_id: format!("external_vol_{}", vol_name.to_lowercase().replace(' ', "_")),
+                    category: "System".into(),
+                    label: format!("External Volume Metadata ({})", vol_name),
+                    paths: vol_paths,
+                    total_size: vol_size,
+                });
+            }
+        }
+    }
+
+    items
 }
 
 /// Scans a directory for entries older than `max_age_days` days.
@@ -1147,6 +1381,564 @@ fn scan_with_age_filter(dir: &Path, max_age_days: u32) -> (Vec<PathInfo>, u64) {
     (paths, total)
 }
 
+// ── Browser Old Framework Version Detection ─────────────────────────
+
+/// A browser whose `Versions/` directory under its framework bundle
+/// may contain old, no-longer-active framework versions.
+struct BrowserFrameworkTarget {
+    /// Human-readable label for the scan result (e.g. "Chrome Old Framework Versions").
+    label: &'static str,
+    /// Rule ID used in the resulting `ScanItem`.
+    rule_id: &'static str,
+    /// Exact process name for `pgrep -x` to detect whether the browser is running.
+    process_name: &'static str,
+    /// Relative path from the `.app` bundle to the `Versions/` directory.
+    versions_subpath: &'static str,
+}
+
+/// Candidate `.app` locations: `/Applications` and `~/Applications`.
+fn browser_app_paths(app_name: &str) -> Vec<PathBuf> {
+    let mut paths = vec![PathBuf::from(format!("/Applications/{}", app_name))];
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(format!("Applications/{}", app_name)));
+    }
+    paths
+}
+
+/// Returns true if the process with the exact name is currently running.
+fn is_exact_process_running(name: &str) -> bool {
+    let out = std::process::Command::new("/usr/bin/pgrep")
+        .args(["-x", name])
+        .output();
+    match out {
+        Ok(o) => o.status.success() && !o.stdout.is_empty(),
+        Err(_) => false,
+    }
+}
+
+/// Scan a single browser's framework `Versions/` directory for old
+/// (non-current) version subdirectories.
+///
+/// Logic:
+/// 1. Check if the browser process is running — skip if so.
+/// 2. For each candidate `.app` location, locate `Versions/`.
+/// 3. Resolve the `Current` symlink to identify the active version.
+/// 4. Collect all other version directories as cleanable.
+fn scan_single_browser_framework(
+    target: &BrowserFrameworkTarget,
+    whitelist: &[String],
+) -> Option<ScanItem> {
+    if is_exact_process_running(target.process_name) {
+        crate::commands::shared::log_operation(
+            "SCAN",
+            target.label,
+            &format!("skipped: {} is running", target.process_name),
+        );
+        return None;
+    }
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    // Derive the .app bundle name from the versions_subpath
+    // (everything before "/Contents/...")
+    let app_bundle_name = target.versions_subpath
+        .split("/Contents/")
+        .next()
+        .unwrap_or("");
+
+    for app_dir in browser_app_paths(app_bundle_name) {
+        let versions_dir = app_dir.join(
+            target.versions_subpath
+                .strip_prefix(app_bundle_name)
+                .unwrap_or("")
+                .trim_start_matches('/')
+        );
+
+        if !versions_dir.is_dir() {
+            continue;
+        }
+
+        let current_link = versions_dir.join("Current");
+        if !current_link.is_symlink() {
+            continue;
+        }
+
+        let current_version = match std::fs::read_link(&current_link) {
+            Ok(target) => {
+                // The symlink target may be just "130.0.0.0" or a full path;
+                // we only need the final component.
+                target
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            }
+            Err(_) => continue,
+        };
+        if current_version.is_empty() {
+            continue;
+        }
+
+        // Verify the Current symlink target actually exists; if broken,
+        // skip to avoid accidentally deleting the active version.
+        if !versions_dir.join(&current_version).is_dir() {
+            crate::commands::shared::log_operation(
+                "SCAN",
+                target.label,
+                "skipped: Current symlink target is broken",
+            );
+            continue;
+        }
+
+        let entries = match std::fs::read_dir(&versions_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() || path.is_symlink() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if name == "Current" || name == current_version {
+                continue;
+            }
+            let path_str = path.to_string_lossy().to_string();
+            if is_whitelisted(&path_str, whitelist) {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &path_str,
+                    &format!("skipped: on user whitelist ({})", target.label),
+                );
+                continue;
+            }
+            let size = deletable_dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+            paths.push(PathInfo {
+                path: path_str,
+                size,
+                is_dir: true,
+            });
+            total_size += size;
+        }
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        target.label,
+        &format!("{} bytes ({} dirs)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: target.rule_id.to_string(),
+        category: "Browsers".into(),
+        label: format!("{} ({} old)", target.label, paths.len()),
+        paths,
+        total_size,
+    })
+}
+
+/// Special scan: find old EdgeUpdater version directories under
+/// `~/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable/`.
+/// Unlike the framework scanner, the EdgeUpdater has no `Current` symlink —
+/// we keep only the latest version (by version sort) and flag the rest.
+fn scan_edge_updater_old_versions(whitelist: &[String]) -> Option<ScanItem> {
+    if is_exact_process_running("Microsoft Edge") {
+        crate::commands::shared::log_operation(
+            "SCAN",
+            "Edge Updater Old Versions",
+            "skipped: Microsoft Edge is running",
+        );
+        return None;
+    }
+
+    let home = dirs::home_dir()?;
+    let updater_dir = home.join("Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable");
+    if !updater_dir.is_dir() {
+        return None;
+    }
+
+    let mut version_dirs: Vec<(String, PathBuf)> = Vec::new();
+    let entries = match std::fs::read_dir(&updater_dir) {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || path.is_symlink() {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            version_dirs.push((name.to_string(), path));
+        }
+    }
+
+    // Need at least 2 versions to have something to clean
+    if version_dirs.len() < 2 {
+        return None;
+    }
+
+    // Sort by version string descending to find the latest
+    version_dirs.sort_by(|a, b| version_compare(&b.0, &a.0));
+    let latest = &version_dirs[0].0;
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for (name, path) in &version_dirs {
+        if name == latest {
+            continue;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        if is_whitelisted(&path_str, whitelist) {
+            crate::commands::shared::log_operation(
+                "SCAN",
+                &path_str,
+                "skipped: on user whitelist (Edge Updater Old Versions)",
+            );
+            continue;
+        }
+        let size = deletable_dir_size(path);
+        if size == 0 {
+            continue;
+        }
+        paths.push(PathInfo {
+            path: path_str,
+            size,
+            is_dir: true,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Edge Updater Old Versions",
+        &format!("{} bytes ({} dirs)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "browser_edge_updater_old_versions".into(),
+        category: "Browsers".into(),
+        label: format!("Edge Updater Old Versions ({} old)", paths.len()),
+        paths,
+        total_size,
+    })
+}
+
+/// Simple version comparison using numeric segments split on `.`.
+/// Falls back to lexicographic comparison for non-numeric segments.
+fn version_compare(a: &str, b: &str) -> std::cmp::Ordering {
+    let a_parts: Vec<&str> = a.split('.').collect();
+    let b_parts: Vec<&str> = b.split('.').collect();
+    let max_len = a_parts.len().max(b_parts.len());
+    for i in 0..max_len {
+        let a_seg = a_parts.get(i).copied().unwrap_or("0");
+        let b_seg = b_parts.get(i).copied().unwrap_or("0");
+        match (a_seg.parse::<u64>(), b_seg.parse::<u64>()) {
+            (Ok(an), Ok(bn)) => match an.cmp(&bn) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            },
+            _ => match a_seg.cmp(b_seg) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            },
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// Scan all supported browsers for old framework versions, plus
+/// Edge's updater directory.
+fn scan_browser_old_framework_versions() -> Vec<ScanItem> {
+    let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
+    let whitelist = &settings.whitelist;
+
+    let targets = [
+        BrowserFrameworkTarget {
+            label: "Chrome Old Framework Versions",
+            rule_id: "browser_chrome_old_framework",
+            process_name: "Google Chrome",
+            versions_subpath: "Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions",
+        },
+        BrowserFrameworkTarget {
+            label: "Edge Old Framework Versions",
+            rule_id: "browser_edge_old_framework",
+            process_name: "Microsoft Edge",
+            versions_subpath: "Microsoft Edge.app/Contents/Frameworks/Microsoft Edge Framework.framework/Versions",
+        },
+        BrowserFrameworkTarget {
+            label: "Brave Old Framework Versions",
+            rule_id: "browser_brave_old_framework",
+            process_name: "Brave Browser",
+            versions_subpath: "Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Versions",
+        },
+    ];
+
+    let mut items = Vec::new();
+    for target in &targets {
+        if let Some(item) = scan_single_browser_framework(target, whitelist) {
+            items.push(item);
+        }
+    }
+    if let Some(edge_updater) = scan_edge_updater_old_versions(whitelist) {
+        items.push(edge_updater);
+    }
+    items
+}
+
+/// Scan orphaned system-level services (LaunchDaemons, LaunchAgents,
+/// PrivilegedHelperTools) left behind after apps are uninstalled.
+/// These live under `/Library/` and normally require root to read,
+/// so we shell out to `find` with sudo. Each found plist/helper is
+/// checked against Spotlight to see if the owning app still exists;
+/// entries whose owning app is gone are flagged. The scan is gated on
+/// `sudo -n true` succeeding (i.e. the user has an active sudo
+/// ticket) — we never prompt for a password during a scan.
+///
+/// Items returned carry `needs_admin: true` via the `system_services://`
+/// pseudo-path prefix so the executor knows to use elevated privileges.
+fn scan_orphaned_system_services() -> Option<ScanItem> {
+    // Only proceed if we already have a sudo ticket — never prompt.
+    let sudo_check = std::process::Command::new("sudo")
+        .args(["-n", "true"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match sudo_check {
+        Ok(s) if s.success() => {}
+        _ => return None,
+    }
+
+    let scan_dirs: &[(&str, &str)] = &[
+        ("/Library/LaunchDaemons", "*.plist"),
+        ("/Library/LaunchAgents", "*.plist"),
+        ("/Library/PrivilegedHelperTools", "*"),
+    ];
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for (dir, _pattern) in scan_dirs {
+        let dir_path = Path::new(dir);
+        if !dir_path.is_dir() {
+            continue;
+        }
+
+        // Use sudo find to list entries
+        let output = std::process::Command::new("sudo")
+            .args(["find", dir, "-maxdepth", "1", "-not", "-name", ".", "-print0"])
+            .output();
+        let output = match output {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for entry_str in stdout.split('\0') {
+            let entry_str = entry_str.trim();
+            if entry_str.is_empty() || entry_str == *dir {
+                continue;
+            }
+
+            let entry_path = Path::new(entry_str);
+            let filename = match entry_path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+
+            // Skip Apple system files
+            if filename.starts_with("com.apple.") {
+                continue;
+            }
+
+            // For plist dirs, only look at .plist files
+            if dir.contains("Launch") && !filename.ends_with(".plist") {
+                continue;
+            }
+
+            // Extract the bundle ID
+            let bundle_id = filename
+                .trim_end_matches(".plist")
+                .to_string();
+
+            // Only consider entries that look like bundle IDs
+            if !bundle_id.contains('.') {
+                continue;
+            }
+
+            // Check if the owning app is still installed via Spotlight
+            if mdfind_has_bundle_id(&bundle_id) {
+                continue;
+            }
+
+            // Get file size via sudo stat
+            let size = std::process::Command::new("sudo")
+                .args(["stat", "-f", "%z", entry_str])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        String::from_utf8_lossy(&o.stdout)
+                            .trim()
+                            .parse::<u64>()
+                            .ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+
+            paths.push(PathInfo {
+                path: format!("system_services://{}", entry_str),
+                size,
+                is_dir: false,
+            });
+            total_size += size;
+        }
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Orphaned System Services",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "orphan_system_services".into(),
+        category: "Orphaned Data".into(),
+        label: format!("Orphaned System Services ({})", paths.len()),
+        paths,
+        total_size,
+    })
+}
+
+/// Collect the set of active mount points on the system. Used to
+/// determine whether a simulator runtime volume is currently in use.
+fn collect_mount_points() -> Vec<String> {
+    let output = std::process::Command::new("mount").output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout
+                .lines()
+                .filter_map(|line| {
+                    // mount output format: <device> on <mountpoint> (<options>)
+                    let parts: Vec<&str> = line.splitn(4, ' ').collect();
+                    if parts.len() >= 3 && parts[1] == "on" {
+                        Some(parts[2].to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Returns true if a path (or any sub-path) appears in the list of
+/// active mount points, indicating the runtime volume is in use.
+fn is_path_mounted(path: &Path, mount_points: &[String]) -> bool {
+    let path_str = path.to_string_lossy();
+    mount_points.iter().any(|mp| {
+        mp == path_str.as_ref() || mp.starts_with(&format!("{}/", path_str))
+    })
+}
+
+/// Special scan: find unused Xcode simulator runtime volumes under
+/// `/Library/Developer/CoreSimulator/Volumes` and
+/// `/Library/Developer/CoreSimulator/Cryptex`. These can be multiple
+/// GB each. A volume is considered "in use" if it (or any sub-path)
+/// appears as an active mount point; unused volumes are flagged for
+/// cleanup. Requires the directories to exist and at least one
+/// candidate to be found.
+fn scan_xcode_simulator_runtime_volumes() -> Option<ScanItem> {
+    let volumes_root = Path::new("/Library/Developer/CoreSimulator/Volumes");
+    let cryptex_root = Path::new("/Library/Developer/CoreSimulator/Cryptex");
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for root in &[volumes_root, cryptex_root] {
+        if !root.is_dir() {
+            continue;
+        }
+        let entries = match std::fs::read_dir(root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && !path.is_symlink() {
+                candidates.push(path);
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let mount_points = collect_mount_points();
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for candidate in &candidates {
+        // Skip volumes that are actively mounted (in use by a runtime)
+        if is_path_mounted(candidate, &mount_points) {
+            continue;
+        }
+
+        let size = deletable_dir_size(candidate);
+        if size == 0 {
+            continue;
+        }
+
+        paths.push(PathInfo {
+            path: candidate.to_string_lossy().to_string(),
+            size,
+            is_dir: true,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Xcode Simulator Runtime Volumes (unused)",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_xcode_sim_runtime_volumes".into(),
+        category: "Developer Tools".into(),
+        label: format!("Xcode Simulator Runtime Volumes ({} unused)", paths.len()),
+        paths,
+        total_size,
+    })
+}
+
 /// Scans the filesystem for items matching the given rules.
 /// Returns only rules that have at least one existing path with non-zero size.
 pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
@@ -1154,6 +1946,41 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     let mut results = Vec::new();
 
     for rule in rules {
+        // Skip Spotify cache if offline music is present.
+        // offline.bnk exists even with no offline downloads; only treat
+        // it as evidence when it has real content (>1 KB). Encrypted
+        // track blobs (*.file) in PersistentCache/Storage are reliable.
+        if rule.id == "spotify_cache" {
+            let home = dirs::home_dir().unwrap_or_default();
+            let spotify_data = home.join("Library/Application Support/Spotify");
+            let bnk_file = spotify_data.join("PersistentCache/Storage/offline.bnk");
+            let bnk_size = bnk_file.metadata().map(|m| m.len()).unwrap_or(0);
+            let has_track_blobs = {
+                let storage_dir = spotify_data.join("PersistentCache/Storage");
+                storage_dir.is_dir()
+                    && std::fs::read_dir(&storage_dir)
+                        .ok()
+                        .map(|entries| {
+                            entries
+                                .flatten()
+                                .any(|e| {
+                                    e.file_name()
+                                        .to_string_lossy()
+                                        .ends_with(".file")
+                                })
+                        })
+                        .unwrap_or(false)
+            };
+            if bnk_size > 1024 || has_track_blobs {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &rule.label,
+                    "skipped: offline music downloads detected",
+                );
+                continue;
+            }
+        }
+
         let mut found_paths = Vec::new();
         let mut total_size: u64 = 0;
 
@@ -1254,6 +2081,9 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     if let Some(xcode_sim) = scan_xcode_simulator_caches() {
         results.push(xcode_sim);
     }
+    if let Some(xcode_unavail) = scan_xcode_unavailable_simulators() {
+        results.push(xcode_unavail);
+    }
     if let Some(jb_old) = scan_jetbrains_toolbox_old_builds() {
         results.push(jb_old);
     }
@@ -1269,8 +2099,464 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     if let Some(tm_snaps) = scan_tm_local_snapshots() {
         results.push(tm_snaps);
     }
+    if let Some(sys_services) = scan_orphaned_system_services() {
+        results.push(sys_services);
+    }
+    if let Some(sim_vols) = scan_xcode_simulator_runtime_volumes() {
+        results.push(sim_vols);
+    }
+    results.extend(scan_browser_old_framework_versions());
+    results.extend(scan_code_sign_caches());
+    results.extend(scan_external_volumes_metadata());
+    results.extend(scan_service_worker_caches());
+    results.extend(scan_dynamic_container_caches());
+    if let Some(doc_idx) = scan_xcode_doc_stale_indexes() {
+        results.push(doc_idx);
+    }
+    if let Some(rust_tc) = scan_rust_old_toolchains() {
+        results.push(rust_tc);
+    }
+    if let Some(ndk) = scan_android_ndk_old_versions() {
+        results.push(ndk);
+    }
 
     results
+}
+
+// ── Service Worker Cache Cleaning ──────────────────────────────────
+
+/// Domains whose Service Worker caches must be preserved (web editors,
+/// Google Workspace offline, code platforms, collaboration PWAs).
+const PROTECTED_SW_DOMAINS: &[&str] = &[
+    "capcut.com",
+    "photopea.com",
+    "pixlr.com",
+    "docs.google.com",
+    "sheets.google.com",
+    "slides.google.com",
+    "drive.google.com",
+    "mail.google.com",
+    "github.com",
+    "gitlab.com",
+    "codepen.io",
+    "codesandbox.io",
+    "replit.com",
+    "stackblitz.com",
+    "notion.so",
+    "figma.com",
+    "linear.app",
+    "excalidraw.com",
+];
+
+/// Browser Service Worker cache roots (relative to ~/Library/Application Support).
+const SW_CACHE_ROOTS: &[(&str, &str)] = &[
+    ("Google/Chrome/Default/Service Worker/CacheStorage", "Chrome"),
+    ("Code/Service Worker/CacheStorage", "VS Code"),
+    ("Cursor/Service Worker/CacheStorage", "Cursor"),
+    ("BraveSoftware/Brave-Browser/Default/Service Worker/CacheStorage", "Brave"),
+];
+
+/// Scan Service Worker CacheStorage directories across browsers, skipping
+/// entries whose folder name contains a protected domain.
+fn scan_service_worker_caches() -> Vec<ScanItem> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let app_support = home.join("Library/Application Support");
+    let mut items = Vec::new();
+
+    for (rel_path, browser_name) in SW_CACHE_ROOTS {
+        let cache_root = app_support.join(rel_path);
+        if !cache_root.is_dir() {
+            continue;
+        }
+
+        let mut paths: Vec<PathInfo> = Vec::new();
+        let mut total_size: u64 = 0;
+
+        // CacheStorage has a two-level structure: origin_hash/cache_name
+        let entries = match std::fs::read_dir(&cache_root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() || path.is_symlink() {
+                continue;
+            }
+            // Extract domain hint from directory name
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_protected = PROTECTED_SW_DOMAINS.iter().any(|d| name.contains(d));
+            if is_protected {
+                continue;
+            }
+            let size = deletable_dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+            paths.push(PathInfo {
+                path: path.to_string_lossy().to_string(),
+                size,
+                is_dir: true,
+            });
+            total_size += size;
+        }
+
+        // Also clean ScriptCache alongside CacheStorage
+        let script_cache = cache_root.parent().map(|p| p.join("ScriptCache"));
+        if let Some(sc) = script_cache {
+            if sc.is_dir() {
+                let size = deletable_dir_size(&sc);
+                if size > 0 {
+                    paths.push(PathInfo {
+                        path: sc.to_string_lossy().to_string(),
+                        size,
+                        is_dir: true,
+                    });
+                    total_size += size;
+                }
+            }
+        }
+
+        if !paths.is_empty() {
+            crate::commands::shared::log_operation(
+                "SCAN",
+                &format!("{} Service Worker Cache", browser_name),
+                &format!("{} bytes ({} paths)", total_size, paths.len()),
+            );
+            items.push(ScanItem {
+                rule_id: format!("sw_cache_{}", browser_name.to_lowercase().replace(' ', "_")),
+                category: "Browsers".into(),
+                label: format!("{} Service Worker Cache", browser_name),
+                paths,
+                total_size,
+            });
+        }
+    }
+
+    items
+}
+
+// ── Dynamic Container Cache Scanning ─────────────────────────────
+
+/// Dynamically scan ~/Library/Containers/*/Data/Library/Caches for
+/// containers not already covered by hardcoded rules. This catches
+/// sandboxed apps that accumulate cache without a dedicated CleanRule.
+fn scan_dynamic_container_caches() -> Vec<ScanItem> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let containers_dir = home.join("Library/Containers");
+    if !containers_dir.is_dir() {
+        return Vec::new();
+    }
+
+    // Bundle IDs already covered by hardcoded rules in rules.rs
+    let known_containers: HashSet<&str> = [
+        "com.apple.appstore",
+        "com.apple.appstoreagent",
+        "com.apple.stocks",
+        "com.apple.wallpaper.agent",
+        "com.apple.mediaanalysisd",
+        "com.apple.geod",
+        "com.apple.AMPArtworkAgent",
+        "com.apple.podcasts",
+        "com.apple.news",
+        "com.apple.Maps",
+        "com.apple.weather",
+        "com.apple.Home",
+        "com.apple.freeform",
+        "com.apple.wallpaper.extension.aerials",
+        // Containers covered by dedicated rules
+        "com.ranchero.NetNewsWire-Evergreen",
+        "com.ideasoncanvas.mindnode",
+        "com.apple.mail",
+    ].iter().copied().collect();
+
+    let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    let entries = match std::fs::read_dir(&containers_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    for entry in entries.flatten() {
+        let container_path = entry.path();
+        if !container_path.is_dir() || container_path.is_symlink() {
+            continue;
+        }
+        let bundle_id = match container_path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // Skip known containers (already have dedicated rules)
+        if known_containers.contains(bundle_id) {
+            continue;
+        }
+
+        // Scan both Data/Library/Caches and Data/tmp inside each container.
+        let scan_subdirs = [
+            container_path.join("Data/Library/Caches"),
+            container_path.join("Data/tmp"),
+        ];
+
+        for caches_dir in &scan_subdirs {
+            if !caches_dir.is_dir() {
+                continue;
+            }
+
+            let cache_str = caches_dir.to_string_lossy().to_string();
+            if is_whitelisted(&cache_str, &settings.whitelist) {
+                continue;
+            }
+
+            let size = deletable_dir_size(caches_dir);
+            // Only report if cache is meaningful (> 1 MB)
+            if size < 1024 * 1024 {
+                continue;
+            }
+
+            paths.push(PathInfo {
+                path: cache_str,
+                size,
+                is_dir: true,
+            });
+            total_size += size;
+        }
+    }
+
+    if paths.is_empty() {
+        return Vec::new();
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Sandboxed App Caches (dynamic)",
+        &format!("{} bytes ({} containers)", total_size, paths.len()),
+    );
+
+    vec![ScanItem {
+        rule_id: "dynamic_container_caches".into(),
+        category: "System".into(),
+        label: format!("Sandboxed App Caches ({} apps)", paths.len()),
+        paths,
+        total_size,
+    }]
+}
+
+// ── Xcode Documentation Stale Index ─────────────────────────────
+
+/// Scan for stale Xcode documentation indexes, keeping only the newest.
+/// The DocumentationCache directory under /Library/Developer/Xcode/ can
+/// contain multiple `DeveloperDocumentation*.index` entries; only the
+/// most recent is actively used.
+fn scan_xcode_doc_stale_indexes() -> Option<ScanItem> {
+    let doc_cache = Path::new("/Library/Developer/Xcode/DocumentationCache");
+    if !doc_cache.is_dir() {
+        return None;
+    }
+
+    let mut entries: Vec<(PathBuf, SystemTime)> = Vec::new();
+    let dir_entries = std::fs::read_dir(doc_cache).ok()?;
+    for entry in dir_entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.contains("DeveloperDocumentation") && name.ends_with(".index") {
+            let path = entry.path();
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            entries.push((path, modified));
+        }
+    }
+
+    // Need at least 2 to have stale ones
+    if entries.len() < 2 {
+        return None;
+    }
+
+    // Sort newest first, skip the first (keep it)
+    entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for (path, _) in entries.into_iter().skip(1) {
+        let size = if path.is_dir() {
+            deletable_dir_size(&path)
+        } else {
+            path.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+        if size == 0 {
+            continue;
+        }
+        paths.push(PathInfo {
+            path: path.to_string_lossy().to_string(),
+            size,
+            is_dir: path.is_dir(),
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Xcode Documentation (stale indexes)",
+        &format!("{} bytes ({} stale)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_xcode_doc_stale_index".into(),
+        category: "Developer Tools".into(),
+        label: format!("Xcode Documentation ({} stale indexes)", paths.len()),
+        paths,
+        total_size,
+    })
+}
+
+// ── Rust Old Toolchains ──────────────────────────────────────────
+
+/// Number of Rust toolchains to preserve (the most recent by mtime).
+const RUST_TOOLCHAIN_KEEP: usize = 2;
+
+/// Scan `~/.rustup/toolchains` for old toolchain versions, keeping the
+/// most recent N. Each toolchain can be 500 MB+.
+fn scan_rust_old_toolchains() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let toolchains_dir = home.join(".rustup/toolchains");
+    if !toolchains_dir.is_dir() {
+        return None;
+    }
+
+    let mut versions: Vec<(PathBuf, SystemTime)> = Vec::new();
+    let entries = std::fs::read_dir(&toolchains_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || path.is_symlink() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        versions.push((path, modified));
+    }
+
+    if versions.len() <= RUST_TOOLCHAIN_KEEP {
+        return None;
+    }
+
+    versions.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for (path, _) in versions.into_iter().skip(RUST_TOOLCHAIN_KEEP) {
+        let size = deletable_dir_size(&path);
+        if size == 0 {
+            continue;
+        }
+        paths.push(PathInfo {
+            path: path.to_string_lossy().to_string(),
+            size,
+            is_dir: true,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Rust Toolchains (old versions)",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_rust_old_toolchains".into(),
+        category: "Developer Tools".into(),
+        label: format!("Rust Toolchains ({} old)", paths.len()),
+        paths,
+        total_size,
+    })
+}
+
+// ── Android NDK Old Versions ─────────────────────────────────────
+
+/// Number of Android NDK versions to preserve.
+const ANDROID_NDK_KEEP: usize = 1;
+
+/// Scan `~/Library/Android/sdk/ndk` for old NDK versions, keeping the
+/// most recent. Each NDK version can be several GB.
+fn scan_android_ndk_old_versions() -> Option<ScanItem> {
+    let home = dirs::home_dir()?;
+    let ndk_dir = home.join("Library/Android/sdk/ndk");
+    if !ndk_dir.is_dir() {
+        return None;
+    }
+
+    let mut versions: Vec<(String, PathBuf)> = Vec::new();
+    let entries = std::fs::read_dir(&ndk_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || path.is_symlink() {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            versions.push((name.to_string(), path));
+        }
+    }
+
+    if versions.len() <= ANDROID_NDK_KEEP {
+        return None;
+    }
+
+    // Sort by version string descending (newest first)
+    versions.sort_by(|a, b| version_compare(&b.0, &a.0));
+
+    let mut paths: Vec<PathInfo> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for (_name, path) in versions.into_iter().skip(ANDROID_NDK_KEEP) {
+        let size = deletable_dir_size(&path);
+        if size == 0 {
+            continue;
+        }
+        paths.push(PathInfo {
+            path: path.to_string_lossy().to_string(),
+            size,
+            is_dir: true,
+        });
+        total_size += size;
+    }
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    crate::commands::shared::log_operation(
+        "SCAN",
+        "Android NDK (old versions)",
+        &format!("{} bytes ({} paths)", total_size, paths.len()),
+    );
+
+    Some(ScanItem {
+        rule_id: "dev_android_ndk_old".into(),
+        category: "Developer Tools".into(),
+        label: format!("Android NDK ({} old versions)", paths.len()),
+        paths,
+        total_size,
+    })
 }
 
 // ── Orphaned App Data Detection ───────────────────────────────────────

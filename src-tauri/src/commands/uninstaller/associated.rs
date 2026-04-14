@@ -32,7 +32,14 @@ const SEARCH_LOCATIONS: &[(&str, &str)] = &[
     ("Workflows", "Plug-ins"),
     ("Address Book Plug-Ins", "Plug-ins"),
     ("Accessibility", "Plug-ins"),
+    ("Application Support/FileProvider", "App Data"),
+    ("Application Support/CrashReporter", "Crash Reports"),
     ("Contextual Menu Items", "Plug-ins"),
+    ("Audio/Plug-Ins/Components", "Plug-ins"),
+    ("Audio/Plug-Ins/VST", "Plug-ins"),
+    ("Audio/Plug-Ins/VST3", "Plug-ins"),
+    ("Audio/Plug-Ins/Digidesign", "Plug-ins"),
+    ("Mail/Bundles", "Plug-ins"),
 ];
 
 /// Generate the set of lowercase naming variants for an app name, covering
@@ -497,9 +504,168 @@ fn find_toolchain_specific(
         ] {
             push_path(home.join(leftover), "Containers", &mut out);
         }
+
+        // Deeper Caches search (depth 2) — Raycast nests cache dirs inside
+        // intermediary directories under ~/Library/Caches.
+        let caches_root = home.join("Library/Caches");
+        if caches_root.is_dir() {
+            if let Ok(entries) = fs::read_dir(&caches_root) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        // Check depth-1 entries for *raycast* match (already handled above)
+                        // and walk one level deeper for depth-2 matches.
+                        if let Ok(sub_entries) = fs::read_dir(&path) {
+                            for sub in sub_entries.filter_map(|e| e.ok()) {
+                                let sub_name = sub.file_name().to_string_lossy().to_lowercase();
+                                if sub_name.contains("raycast") && sub.path().is_dir() {
+                                    push_path(sub.path(), "Caches", &mut out);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // VSCode globalStorage — Raycast extensions leave data here.
+        let vscode_global = home.join("Library/Application Support/Code/User/globalStorage");
+        if vscode_global.is_dir() {
+            if let Ok(entries) = fs::read_dir(&vscode_global) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let entry_lower = entry.file_name().to_string_lossy().to_lowercase();
+                    if entry_lower.contains("raycast") {
+                        push_path(entry.path(), "App Data", &mut out);
+                    }
+                }
+            }
+        }
+    }
+
+    // Zed cross-channel HTTPStorages cleanup: when uninstalling any Zed
+    // channel build (bundle ID starts with "dev.zed.Zed"), also pick up
+    // HTTPStorages directories for ALL channel variants (Dev, Nightly,
+    // Preview, etc.) since they share state across channels.
+    if bundle_lower.starts_with("dev.zed.zed") {
+        let http_storages = home.join("Library/HTTPStorages");
+        if http_storages.is_dir() {
+            if let Ok(entries) = fs::read_dir(&http_storages) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with("dev.zed.Zed-") {
+                        push_path(entry.path(), "HTTP Storage", &mut out);
+                    }
+                }
+            }
+        }
     }
 
     out
+}
+
+/// Read CFBundleExecutable from an app's Info.plist via `defaults read`.
+fn read_bundle_executable(app_path: &str) -> Option<String> {
+    let plist = format!("{}/Contents/Info.plist", app_path);
+    if !Path::new(&plist).exists() {
+        return None;
+    }
+
+    let output = Command::new("/usr/bin/defaults")
+        .arg("read")
+        .arg(&plist)
+        .arg("CFBundleExecutable")
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if val.is_empty() { None } else { Some(val) }
+}
+
+/// Check if a filename matches a prefix with a strict separator requirement.
+/// The character immediately after the prefix must be '.', '_', or '-' to avoid
+/// false positives (e.g. "Foo" should match "Foo.crash" but not "Foobar.crash").
+fn matches_diag_prefix(filename: &str, prefix: &str) -> bool {
+    if !filename.starts_with(prefix) {
+        return false;
+    }
+    if filename.len() == prefix.len() {
+        return true;
+    }
+    let sep = filename.as_bytes()[prefix.len()];
+    sep == b'.' || sep == b'_' || sep == b'-'
+}
+
+/// Find diagnostic reports (crash logs, spin dumps) for the app.
+/// Uses CFBundleExecutable from the app's Info.plist for matching, falling back
+/// to the app name with spaces removed. Requires a separator (., _, -) after
+/// the prefix to avoid false positives.
+fn find_diagnostic_reports(
+    _bundle_id: &str,
+    app_name: &str,
+    app_path: &str,
+) -> Vec<AssociatedFile> {
+    let mut files = Vec::new();
+    let home = dirs::home_dir().unwrap_or_default();
+
+    // Determine the prefix: prefer CFBundleExecutable, fall back to app name
+    // without spaces (matching the reference behavior).
+    let exec_name = read_bundle_executable(app_path);
+    let nospace_name = app_name.replace(' ', "");
+    let prefix = exec_name.as_deref().unwrap_or(&nospace_name);
+
+    // Require 3+ character prefix to avoid false positives (e.g. "Go", "AI")
+    if prefix.len() < 3 {
+        return files;
+    }
+
+    let report_dirs = [
+        home.join("Library/Logs/DiagnosticReports"),
+        PathBuf::from("/Library/Logs/DiagnosticReports"),
+    ];
+
+    let crash_exts = ["ips", "crash", "spin"];
+
+    for dir in &report_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
+
+                let ext_match = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| crash_exts.contains(&e))
+                    .unwrap_or(false);
+
+                if !ext_match {
+                    continue;
+                }
+
+                // Strict prefix matching with separator requirement.
+                if matches_diag_prefix(name, prefix) {
+                    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    files.push(AssociatedFile {
+                        path: path.to_string_lossy().to_string(),
+                        category: "Diagnostic Reports".into(),
+                        size,
+                        is_dir: false,
+                    });
+                }
+            }
+        }
+    }
+
+    files
 }
 
 /// Searches ~/Library subdirectories for files associated with the given app.
@@ -546,6 +712,69 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
         }
     }
 
+    // System-level /Library search for app-specific files
+    let system_lib_dirs: &[&str] = &[
+        "/Library/Application Support",
+        "/Library/Caches",
+        "/Library/Preferences",
+        "/Library/Logs",
+        "/Library/LaunchDaemons",
+        "/Library/LaunchAgents",
+        "/Library/PreferencePanes",
+        "/Library/QuickLook",
+        "/Library/Screen Savers",
+        "/Library/Services",
+        "/Library/Extensions",
+        "/Library/StartupItems",
+        "/Library/PrivilegedHelperTools",
+        "/Library/Receipts",
+        "/Library/Input Methods",
+    ];
+
+    // Require bundle_id > 3 chars for system /Library search to avoid
+    // false positives on short identifiers.
+    for dir_str in system_lib_dirs {
+        if bundle_id.len() <= 3 && name_variants.iter().all(|v| v.len() <= 3) {
+            break;
+        }
+        let dir = Path::new(dir_str);
+        if !dir.exists() {
+            continue;
+        }
+
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let entry_name = entry.file_name().to_string_lossy().to_string();
+                if matches_app(&entry_name, bundle_id, &name_variants) {
+                    let path = entry.path();
+                    let size = if path.is_dir() {
+                        path_size(&path)
+                    } else {
+                        fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+                    };
+
+                    let category = if dir_str.contains("LaunchDaemons") || dir_str.contains("LaunchAgents") {
+                        "Launch Services"
+                    } else if dir_str.contains("Extensions") {
+                        "Kernel Extensions"
+                    } else {
+                        "System Files"
+                    };
+
+                    let path_str = path.to_string_lossy().to_string();
+                    if !results.iter().any(|r| r.path == path_str) {
+                        results.push(AssociatedFile {
+                            path: path_str,
+                            category: category.into(),
+                            size,
+                            is_dir: path.is_dir(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     // Scan LaunchAgents, LaunchDaemons, and PrivilegedHelperTools
     if !bundle_id.is_empty() {
         let launch_dirs: Vec<(std::path::PathBuf, &str)> = vec![
@@ -580,6 +809,41 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
                             category: category.to_string(),
                             size,
                             is_dir: path.is_dir(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Name-based LaunchAgent search (user agents only, 5+ char names)
+    if app_name.len() >= 5 {
+        let user_agents = home.join("Library/LaunchAgents");
+        // Common words that shouldn't match
+        const COMMON_WORDS: &[&str] = &[
+            "music", "notes", "photos", "mail", "safari", "finder",
+            "system", "update", "helper", "agent", "daemon", "service",
+            "server", "watch", "store", "cloud", "drive", "sync",
+        ];
+        let name_lower = app_name.to_lowercase();
+        let is_common = COMMON_WORDS.iter().any(|w| *w == name_lower);
+
+        if !is_common && user_agents.exists() {
+            if let Ok(entries) = fs::read_dir(&user_agents) {
+                for entry in entries.flatten() {
+                    let entry_name = entry.file_name().to_string_lossy().to_lowercase();
+                    // Match by app name variants (not bundle ID — that's already done above)
+                    if name_variants.iter().any(|v| entry_name.contains(v.as_str())) {
+                        let path = entry.path();
+                        let size = path_size(&path);
+                        if size == 0 { continue; }
+                        let path_str = path.to_string_lossy().to_string();
+                        if results.iter().any(|r| r.path == path_str) { continue; }
+                        results.push(AssociatedFile {
+                            path: path_str,
+                            category: "Launch Agents".to_string(),
+                            size,
+                            is_dir: false,
                         });
                     }
                 }
@@ -764,6 +1028,13 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
     // state folders that don't live under ~/Library/Application Support
     // and don't match the bundle id at all.
     for item in find_toolchain_specific(bundle_id, app_name, &home) {
+        if !results.iter().any(|r| r.path == item.path) {
+            results.push(item);
+        }
+    }
+
+    // Diagnostic reports (crash logs, spin dumps) for the app.
+    for item in find_diagnostic_reports(bundle_id, app_name, _app_path) {
         if !results.iter().any(|r| r.path == item.path) {
             results.push(item);
         }

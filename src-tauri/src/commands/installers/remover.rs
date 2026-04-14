@@ -16,7 +16,7 @@ const PROTECTED_PATHS: &[&str] = &[
     "/Applications",
 ];
 
-const VALID_EXTENSIONS: &[&str] = &["dmg", "pkg", "iso", "xip", "mpkg", "app"];
+const VALID_EXTENSIONS: &[&str] = &["dmg", "pkg", "iso", "xip", "mpkg", "app", "zip"];
 
 fn is_safe_path(path: &Path) -> bool {
     let canonical = match path.canonicalize() {
@@ -43,6 +43,11 @@ fn is_safe_path(path: &Path) -> bool {
                 || canonical.starts_with(h.join("Public"))
                 || canonical.starts_with(h.join("Library/Caches/Homebrew/downloads"))
                 || canonical.starts_with(h.join("Library/Mail Downloads"))
+                || canonical.starts_with(h.join("Library/Downloads"))
+                || canonical.starts_with(h.join("Library/Mobile Documents/com~apple~CloudDocs/Downloads"))
+                || canonical.starts_with(h.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"))
+                || canonical.starts_with(h.join("Library/Application Support/Telegram Desktop"))
+                || canonical.starts_with(h.join("Downloads/Telegram Desktop"))
         })
         .unwrap_or(false);
     let in_tmp = canonical.starts_with("/tmp") || canonical.starts_with("/private/tmp");

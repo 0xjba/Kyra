@@ -1,6 +1,6 @@
 {
   "productName": "Kyra",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.kyra.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
