@@ -101,6 +101,11 @@ pub fn run() {
             commands::shared::get_app_icon_by_path,
             commands::cleaner::check_running_processes,
             commands::cleaner::run_brew_cleanup,
+            commands::guardian::guardian_run_probes,
+            commands::guardian::guardian_score,
+            commands::guardian::guardian_clean,
+            commands::guardian::guardian_check_license,
+            commands::guardian::guardian_get_device_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kyra");

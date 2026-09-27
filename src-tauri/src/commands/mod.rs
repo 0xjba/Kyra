@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod cleaner;
+pub mod guardian;
 pub mod monitor;
 pub mod optimizer;
 pub mod installers;
