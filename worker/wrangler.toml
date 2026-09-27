@@ -1,0 +1,10 @@
+name = "kyra-guardian"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+JEV_API_URL = "https://api.typesafe.ai/v1/score"
+
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "placeholder-kv-id"
