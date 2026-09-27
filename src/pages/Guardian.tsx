@@ -192,20 +192,48 @@ function CleaningView() {
   const done = progress?.categories_done ?? 0;
   const percent = total > 0 ? Math.round((done / total) * 100) : 0;
 
+  const ringSize = 120;
+  const strokeWidth = 6;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (percent / 100) * circumference;
+
   return (
     <div className="centered">
-      <div className="guardian-progress-wrap">
-        <div className="guardian-progress-track">
-          <div className="guardian-progress-fill" style={{ width: `${percent}%` }} />
-        </div>
-        <div className="guardian-progress-percent">{percent}%</div>
+      <div className="guardian-ring-wrap">
+        <svg
+          className="guardian-ring-svg"
+          width={ringSize}
+          height={ringSize}
+          viewBox={`0 0 ${ringSize} ${ringSize}`}
+        >
+          <defs>
+            <linearGradient id="guardian-ring-glass" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.35)" />
+              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.18)" />
+              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.30)" />
+            </linearGradient>
+          </defs>
+          <circle
+            cx={ringSize / 2} cy={ringSize / 2} r={radius}
+            fill="none" stroke="rgba(255, 255, 255, 0.06)" strokeWidth={strokeWidth}
+          />
+          <circle
+            cx={ringSize / 2} cy={ringSize / 2} r={radius}
+            fill="none" stroke="url(#guardian-ring-glass)"
+            strokeWidth={strokeWidth} strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={dashOffset}
+            className="guardian-ring-fill"
+          />
+        </svg>
+        <span className="guardian-ring-percent">{percent}%</span>
       </div>
 
       <div className="guardian-ring-freed">
         {progress ? formatSize(progress.bytes_freed) : "0 B"} reclaimed
       </div>
 
-      <div className="guardian-row-details">
+      <div className="guardian-ring-current">
         {progress?.current_category
           ? `Cleaning ${progress.current_category}…`
           : "Starting…"}
@@ -219,25 +247,70 @@ function SuccessView() {
   const cleanResult = useGuardianStore((s) => s.cleanResult);
   const reset = useGuardianStore((s) => s.reset);
 
+  const ringSize = 120;
+  const strokeWidth = 6;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+
   return (
-    <div className="centered">
-      <div className="guardian-empty-icon">
-        <Check size={26} strokeWidth={1.5} />
+    <div className="centered guardian-done">
+      <div className="guardian-ring-wrap">
+        <svg
+          className="guardian-ring-svg"
+          width={ringSize}
+          height={ringSize}
+          viewBox={`0 0 ${ringSize} ${ringSize}`}
+        >
+          <defs>
+            <linearGradient id="guardian-ring-glass-done" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.5)" />
+              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.28)" />
+              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.45)" />
+            </linearGradient>
+            <filter id="guardian-ring-glow">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <circle
+            cx={ringSize / 2} cy={ringSize / 2} r={radius}
+            fill="none" stroke="rgba(255, 255, 255, 0.06)" strokeWidth={strokeWidth}
+          />
+          <circle
+            cx={ringSize / 2} cy={ringSize / 2} r={radius}
+            fill="none" stroke="url(#guardian-ring-glass-done)"
+            strokeWidth={strokeWidth} strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={0}
+            className="guardian-ring-fill"
+            filter="url(#guardian-ring-glow)"
+          />
+        </svg>
+        <Check size={32} strokeWidth={2.5} className="guardian-ring-check" />
       </div>
-      <div className="guardian-empty-title">
+
+      <div className="guardian-ring-freed">
         {cleanResult ? formatSize(cleanResult.bytes_freed) : "0 B"} reclaimed
       </div>
-      <div className="guardian-empty-desc">
-        {cleanResult ? cleanResult.categories_cleaned : 0} categories cleaned successfully.
-        {cleanResult && cleanResult.errors.length > 0 && (
-          <>
-            {" "}
-            {cleanResult.errors.length} item{cleanResult.errors.length !== 1 ? "s" : ""} couldn't be removed.
-          </>
-        )}
+
+      <div className="guardian-ring-current">
+        {cleanResult ? cleanResult.categories_cleaned : 0} categories cleaned
       </div>
-      <button className="btn btn-primary" onClick={reset} style={{ marginTop: 8 }}>
-        Scan Again
+
+      {cleanResult && cleanResult.errors.length > 0 && (
+        <div style={{
+          fontSize: 11,
+          color: "rgba(255,255,255,0.4)",
+          marginTop: 4,
+        }}>
+          {cleanResult.errors.length} item{cleanResult.errors.length !== 1 ? "s" : ""} couldn't be removed
+        </div>
+      )}
+
+      <button className="btn" onClick={reset} style={{ marginTop: 12 }}>
+        Done
       </button>
     </div>
   );

@@ -40,8 +40,6 @@
   height: 48px;
   border-radius: 10px;
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -97,27 +95,23 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 2px 2px 4px;
+  gap: 2px;
+  scrollbar-gutter: stable;
 }
 
+/* ── Category row — flat list item, not a card ── */
 .guardian-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.12s;
 }
 
 .guardian-row:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--border-hover);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .guardian-row .checkbox {
@@ -129,7 +123,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .guardian-row-top {
@@ -150,83 +144,115 @@
 }
 
 .guardian-row-size {
-  font-size: var(--font-base);
-  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
 
 .guardian-row-details {
-  font-size: var(--font-base);
+  font-size: var(--font-sm);
   color: var(--text-tertiary);
-  line-height: var(--leading-relaxed);
+  line-height: var(--leading-normal);
 }
 
 /* ── Score badge ── */
 .guardian-score-badge {
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
-  padding: 2px 7px;
-  border-radius: 5px;
+  padding: 1px 6px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
 .guardian-score-high {
-  background: rgba(42, 200, 82, 0.14);
+  background: rgba(42, 200, 82, 0.12);
   color: var(--green);
 }
 
 .guardian-score-mid {
-  background: rgba(253, 210, 37, 0.14);
+  background: rgba(253, 210, 37, 0.12);
   color: var(--yellow);
 }
 
 .guardian-score-low {
-  background: rgba(253, 72, 65, 0.14);
+  background: rgba(253, 72, 65, 0.12);
   color: var(--red);
 }
 
 /* ── Footer ── */
 .guardian-footer {
-  flex-shrink: 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-/* ── Cleaning progress ── */
-.guardian-progress-wrap {
-  width: 220px;
+/* ── Progress Ring ── */
+.guardian-ring-wrap {
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 120px;
+  height: 120px;
+  margin-bottom: 4px;
 }
 
-.guardian-progress-track {
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
+.guardian-ring-svg {
+  transform: rotate(-90deg);
+  overflow: visible;
 }
 
-.guardian-progress-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.6));
-  transition: width 0.3s ease;
+.guardian-ring-fill {
+  transition: stroke-dashoffset 0.3s ease;
 }
 
-.guardian-progress-percent {
-  font-size: var(--font-base);
-  color: var(--text-secondary);
+.guardian-ring-percent {
+  position: absolute;
+  font-size: var(--font-3xl);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+}
+
+.guardian-ring-check {
+  position: absolute;
+  color: rgba(255, 255, 255, 0.7);
+  animation: guardianCheckPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes guardianCheckPop {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 .guardian-ring-freed {
-  font-size: var(--font-2xl);
-  font-weight: var(--weight-semibold);
+  font-size: 24px;
+  font-weight: var(--weight-medium);
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+}
+
+.guardian-ring-current {
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
   margin-top: 4px;
+}
+
+.guardian-done .guardian-ring-freed {
+  color: var(--text-primary);
+}
+
+.guardian-done .guardian-ring-current {
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
 }
 
 /* ── Empty / success / error states ── */
