@@ -14,6 +14,7 @@ const Status = lazy(() => import("./pages/Status"));
 const Prune = lazy(() => import("./pages/Prune"));
 const Installers = lazy(() => import("./pages/Installers"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Guardian = lazy(() => import("./pages/Guardian"));
 const ModulePlaceholder = lazy(() => import("./pages/ModulePlaceholder"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 
@@ -109,6 +110,7 @@ export default function App() {
                   <Route path="/prune" element={<Prune />} />
                   <Route path="/installers" element={<Installers />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/guardian" element={<Guardian />} />
                   <Route path="/:module" element={<ModulePlaceholder />} />
                 </Routes>
               </Suspense>

@@ -510,3 +510,92 @@ export async function getAppIcon(appName: string): Promise<string | null> {
 export async function getAppIconByPath(appPath: string): Promise<string | null> {
   return invoke<string | null>("get_app_icon_by_path", { appPath });
 }
+
+// ── Guardian Module Types ──────────────────────────────
+
+export interface ProbeReport {
+  category: string;
+  display_name: string;
+  total_bytes: number;
+  cleanable_bytes: number;
+  item_count: number;
+  last_used_secs: number | null;
+  confidence: number;
+  details: string;
+}
+
+export interface GuardianScanResult {
+  probes: ProbeReport[];
+  total_cleanable: number;
+  scan_duration_ms: number;
+}
+
+export interface ScoredProbe {
+  category: string;
+  display_name: string;
+  cleanable_bytes: number;
+  score: number;
+  confidence: number;
+  details: string;
+}
+
+export interface GuardianResult {
+  scores: ScoredProbe[];
+  total_cleanable: number;
+}
+
+export interface GuardianCleanProgress {
+  current_category: string;
+  categories_done: number;
+  categories_total: number;
+  bytes_freed: number;
+}
+
+export interface GuardianCleanResult {
+  categories_cleaned: number;
+  bytes_freed: number;
+  errors: string[];
+}
+
+export interface LicenseStatus {
+  active: boolean;
+  expires: number | null;
+}
+
+// ── Guardian Module Commands ───────────────────────────
+
+export async function guardianRunProbes(): Promise<GuardianScanResult> {
+  return invoke<GuardianScanResult>("guardian_run_probes");
+}
+
+export async function guardianScore(
+  probes: ProbeReport[],
+  deviceId: string
+): Promise<GuardianResult> {
+  return invoke<GuardianResult>("guardian_score", { probes, deviceId });
+}
+
+export async function guardianClean(
+  categories: string[],
+  permanent: boolean
+): Promise<GuardianCleanResult> {
+  return invoke<GuardianCleanResult>("guardian_clean", { categories, permanent });
+}
+
+export async function guardianCheckLicense(
+  deviceId: string
+): Promise<LicenseStatus> {
+  return invoke<LicenseStatus>("guardian_check_license", { deviceId });
+}
+
+export async function guardianGetDeviceId(): Promise<string> {
+  return invoke<string>("guardian_get_device_id");
+}
+
+export async function listenGuardianCleanProgress(
+  callback: (progress: GuardianCleanProgress) => void
+): Promise<UnlistenFn> {
+  return listen<GuardianCleanProgress>("guardian-clean-progress", (event) => {
+    callback(event.payload);
+  });
+}

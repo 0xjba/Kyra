@@ -8,6 +8,7 @@ import {
   Package,
   Download,
   Settings as SettingsIcon,
+  Shield,
 } from "lucide-react";
 import ModuleCard from "../components/ModuleCard";
 import { useUninstallStore } from "../stores/uninstallStore";
@@ -135,6 +136,15 @@ export default function Home() {
           icon={HardDrive}
           route="/analyze"
           meta="Scan to explore"
+          style={{ gridColumn: "span 2" }}
+        />
+
+        <ModuleCard
+          title="Guardian"
+          description="AI-powered auto-clean"
+          icon={Shield}
+          route="/guardian"
+          meta="Scan to score"
           style={{ gridColumn: "span 2" }}
         />
       </div>
