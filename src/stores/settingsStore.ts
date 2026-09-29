@@ -20,6 +20,9 @@ interface SettingsStore {
   setNotificationsEnabled: (enabled: boolean) => Promise<void>;
   setLowDiskThreshold: (gb: number) => Promise<void>;
   setOnboardingCompleted: (completed: boolean) => Promise<void>;
+  setPawtrolEnabled: (enabled: boolean) => Promise<void>;
+  setPawtrolAutoClean: (enabled: boolean) => Promise<void>;
+  setPawtrolLoginPrompted: (prompted: boolean) => Promise<void>;
   addWhitelist: (path: string) => Promise<void>;
   removeWhitelist: (path: string) => Promise<void>;
 }
@@ -35,6 +38,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifications_enabled: true,
   low_disk_threshold_gb: 10,
   onboarding_completed: false,
+  pawtrol_enabled: true,
+  pawtrol_auto_clean: true,
+  pawtrol_login_prompted: false,
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -94,6 +100,24 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setOnboardingCompleted: async (completed: boolean) => {
     const settings = { ...get().settings, onboarding_completed: completed };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setPawtrolEnabled: async (enabled: boolean) => {
+    const settings = { ...get().settings, pawtrol_enabled: enabled };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setPawtrolAutoClean: async (enabled: boolean) => {
+    const settings = { ...get().settings, pawtrol_auto_clean: enabled };
+    set({ settings });
+    await saveSettings(settings);
+  },
+
+  setPawtrolLoginPrompted: async (prompted: boolean) => {
+    const settings = { ...get().settings, pawtrol_login_prompted: prompted };
     set({ settings });
     await saveSettings(settings);
   },

@@ -1,0 +1,1488 @@
+@media (prefers-color-scheme: dark) {
+
+  :root {
+    --bg-card: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    --bg-card-flat: rgba(255,255,255,0.06);
+    --border: rgba(255,255,255,0.1);
+    --border-hover: rgba(255,255,255,0.18);
+    --text-primary: #f0f2f5;
+    --text-secondary: rgba(240,242,245,0.65);
+    --text-tertiary: rgba(240,242,245,0.5);
+    --text-icon: rgba(240,242,245,0.7);
+    --shadow-tile:
+      inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      inset 10px 10px 24px -14px rgba(255,255,255,0.03),
+      0 8px 24px -6px rgba(0,0,0,0.35);
+    --shadow-tile-hover:
+      inset 0 1px 0.5px rgba(255,255,255,0.1),
+      inset 0 0 0 1px rgba(255,255,255,0.1),
+      inset 10px 10px 24px -12px rgba(255,255,255,0.04),
+      0 14px 30px -8px rgba(0,0,0,0.5);
+    --shadow-panel:
+      inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+    --shadow-pill:
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 4px 12px -4px rgba(0,0,0,0.3);
+  }
+
+  /* Stem darkening makes light-on-dark text look heavy; keep dark mode crisp. */
+  :root body,
+  :root #root {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Root Frame ───────────────────────────────────── */
+
+  :root #root {
+    background: linear-gradient(180deg, rgba(15,18,30,0.65), rgba(10,12,24,0.55));
+  }
+
+  :root #root::after {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px rgba(255,255,255,0.04);
+  }
+
+  /* ── Global Buttons ───────────────────────────────── */
+
+  :root .btn {
+    background: rgba(255,255,255,0.07);
+    color: rgba(240,242,245,0.8);
+  }
+  :root .btn:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .btn-primary,
+  :root .btn-primary:hover {
+    color: #fff;
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -4px rgba(31,95,255,0.45);
+  }
+  :root .btn-danger {
+    color: #fff;
+    background: linear-gradient(180deg, #ff6a63, #e5332b);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 16px -4px rgba(229,51,43,0.4);
+  }
+  :root .btn-text:hover {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .btn-text {
+    color: #4f8bff;
+  }
+  :root .btn-text:hover {
+    background: rgba(31,95,255,0.1);
+  }
+  :root .btn-sm {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .btn-sm:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  /* ── Global Checkbox ──────────────────────────────── */
+
+  :root .checkbox {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 0 0 1px rgba(240,242,245,0.18);
+  }
+  :root .checkbox:checked {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 2px rgba(31,95,255,0.35);
+  }
+  :root .checkbox.partial {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 2px rgba(31,95,255,0.35);
+  }
+
+  /* ── Scrollbar ────────────────────────────────────── */
+
+  :root ::-webkit-scrollbar-thumb {
+    background: rgba(240,242,245,0.12);
+  }
+  :root ::-webkit-scrollbar-thumb:hover {
+    background: rgba(240,242,245,0.22);
+  }
+
+  /* ── Spinner ──────────────────────────────────────── */
+
+  :root .spinner {
+    border-color: rgba(240,242,245,0.1);
+  }
+
+  /* ── Module Footer ────────────────────────────────── */
+
+  :root .module-footer {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+
+  /* ── Tooltip / Coach Mark ─────────────────────────── */
+
+  :root .tooltip-wrap[data-tooltip]::before {
+    background: rgba(30,32,38,0.92);
+  }
+  :root .coach-mark {
+    background: rgba(30,32,38,0.92);
+  }
+  :root .coach-mark::after {
+    border-top-color: rgba(30,32,38,0.92);
+  }
+
+  /* ── Titlebar Controls ────────────────────────────── */
+
+  :root .titlebar-chip {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 4px 12px -4px rgba(0,0,0,0.3);
+  }
+  :root .titlebar-chip:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .titlebar-chip.open {
+    background: rgba(255,255,255,0.14);
+  }
+  :root .titlebar-gear {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 4px 12px -4px rgba(0,0,0,0.3);
+    color: rgba(240,242,245,0.7);
+  }
+  :root .titlebar-gear:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .titlebar-btn-circle.inactive {
+    background: rgba(255,255,255,0.22);
+    color: rgba(255,255,255,0.6);
+  }
+
+  /* ── Pawtrol Popover ──────────────────────────────── */
+
+  :root .paw-pop {
+    background: linear-gradient(170deg, rgba(30,32,40,0.88), rgba(25,28,38,0.8));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),
+      inset 0 0 0 0.5px rgba(255,255,255,0.1),
+      0 30px 60px -14px rgba(0,0,0,0.6),
+      0 0 0 0.5px rgba(0,0,0,0.2);
+  }
+  :root .paw-pop-icon {
+    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),
+      0 2px 8px -2px rgba(0,0,0,0.3),
+      0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .paw-pop-teaser {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .paw-pop-cat-size {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .paw-pop-perk-check {
+    background: rgba(42,200,82,0.2);
+    color: #34d058;
+  }
+  :root .paw-pop-refresh {
+    color: #4f8bff;
+  }
+  :root .paw-pop-active-pill {
+    color: #34d058;
+    background: rgba(42,200,82,0.2);
+  }
+  :root .paw-pop-icon-btn {
+    background: rgba(255,255,255,0.08);
+    color: rgba(240,242,245,0.75);
+  }
+  :root .paw-pop-icon-btn:hover {
+    background: rgba(255,255,255,0.14);
+  }
+  :root .paw-pop-summary {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .paw-pop-summary-label,
+  :root .paw-pop-summary-meta,
+  :root .paw-pop-summary-empty {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .paw-pop-teaser-size {
+    background: rgba(240,242,245,0.35);
+  }
+
+  /* ── Dashboard ────────────────────────────────────── */
+
+  :root .hero-banner {
+    background: linear-gradient(155deg, rgba(255,255,255,0.1), rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.06));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      inset 16px 16px 34px -20px rgba(255,255,255,0.06),
+      inset -14px -14px 34px -20px rgba(34,184,240,0.2),
+      0 10px 30px -8px rgba(0,0,0,0.45);
+  }
+  :root .hero-cat {
+    filter: drop-shadow(0 12px 14px rgba(0,0,0,0.5));
+  }
+  :root .hero-bubble {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 18px -6px rgba(0,0,0,0.4);
+  }
+  :root .hero-label {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .hero-unit {
+    color: rgba(240,242,245,0.5);
+  }
+  :root .hero-sub {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .module-card-tinted-red {
+    background: linear-gradient(155deg, rgba(255,120,110,0.14), rgba(253,72,65,0.04) 70%);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      inset 10px 10px 24px -14px rgba(255,255,255,0.04),
+      0 8px 24px -6px rgba(180,30,20,0.3);
+  }
+  :root .module-card-tinted-yellow {
+    background: linear-gradient(155deg, rgba(255,226,90,0.16), rgba(253,210,37,0.05) 70%);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      inset 10px 10px 24px -14px rgba(255,255,255,0.04),
+      0 8px 24px -6px rgba(160,120,0,0.3);
+  }
+  :root .module-card-tinted-green {
+    background: linear-gradient(155deg, rgba(90,220,130,0.14), rgba(42,200,82,0.04) 70%);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      inset 10px 10px 24px -14px rgba(255,255,255,0.04),
+      0 8px 24px -6px rgba(10,120,40,0.3);
+  }
+  :root .module-card-meta-text {
+    color: rgba(240,242,245,0.65);
+  }
+  :root .module-card-flag {
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.12);
+  }
+  :root .module-card-tinted-red .module-card-header {
+    color: #ff6b6b !important;
+  }
+  :root .module-card-tinted-yellow .module-card-header {
+    color: #fdd225 !important;
+  }
+  :root .module-card-tinted-green .module-card-header {
+    color: #34d058 !important;
+  }
+  :root .mini-bar {
+    background: rgba(240,242,245,0.08);
+  }
+  :root .mini-sunburst {
+    background: conic-gradient(rgba(240,242,245,0.08) 0deg 120deg, rgba(240,242,245,0.05) 120deg 200deg, rgba(240,242,245,0.1) 200deg 280deg, rgba(240,242,245,0.03) 280deg 360deg);
+  }
+  :root .mini-sunburst::after {
+    background: rgba(255,255,255,0.04);
+  }
+
+  /* ── Status ───────────────────────────────────────── */
+
+  :root .status-machine,
+  :root .status-gauge-detail,
+  :root .status-network-up,
+  :root .status-process-mem {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .status-uptime {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  :root .status-gauge-card {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      inset 10px 10px 24px -14px rgba(255,255,255,0.03),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .status-gauge-card:nth-child(1) {
+    background: linear-gradient(155deg, rgba(90,200,250,0.12), rgba(34,184,240,0.03) 70%);
+  }
+  :root .status-gauge-card:nth-child(2) {
+    background: linear-gradient(155deg, rgba(90,220,130,0.12), rgba(42,200,82,0.03) 70%);
+  }
+  :root .status-gauge-card:nth-child(3) {
+    background: linear-gradient(155deg, rgba(255,226,90,0.14), rgba(253,210,37,0.04) 70%);
+  }
+  :root .status-network-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .status-info-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .status-process-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .status-process-row:hover {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .status-process-bar {
+    background: rgba(240,242,245,0.08);
+  }
+  :root .status-skeleton {
+    background: rgba(240,242,245,0.06);
+  }
+
+  /* ── Settings ─────────────────────────────────────── */
+
+  :root .settings-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .settings-row + .settings-row {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+  :root label.settings-row:hover {
+    background: rgba(255,255,255,0.05);
+  }
+  :root .settings-toggle {
+    background: rgba(240,242,245,0.14);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.2), inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .settings-toggle:checked {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+  }
+  :root .settings-toggle::after {
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.9), inset 0 0 0 0.5px rgba(0,0,0,0.1);
+  }
+  :root .settings-select {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .settings-select:hover {
+    background: rgba(255,255,255,0.14);
+  }
+  :root .settings-select option {
+    background: #2c2c2e;
+  }
+  :root .settings-stepper {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .settings-stepper-btn:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .settings-segment {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .settings-segment-option {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .settings-segment-option.active {
+    background: rgba(255,255,255,0.12);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  :root .settings-ignore-item {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+  :root .settings-ignore-remove:hover {
+    background: rgba(253,72,65,0.18);
+  }
+  :root .settings-ignore-input-row {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+  :root .settings-ignore-input {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .settings-ignore-actions {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+  :root .settings-ignore-add {
+    border-color: rgba(240,242,245,0.12);
+  }
+  :root .settings-ignore-add:hover {
+    border-color: rgba(240,242,245,0.22);
+  }
+  :root .settings-btn-sm {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .settings-btn-danger:hover {
+    background: rgba(253,72,65,0.15);
+    color: #ff6b6b;
+  }
+  :root .settings-nav {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .settings-row-desc {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .settings-row-value {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .settings-about-desc {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .settings-about-dev {
+    color: rgba(240,242,245,0.5);
+  }
+  :root .settings-nav-item {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .settings-nav-item:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .settings-nav-item.active {
+    background: rgba(255,255,255,0.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px -2px rgba(0,0,0,0.25);
+  }
+
+  /* ── Clean ────────────────────────────────────────── */
+
+  :root .clean-storage-track {
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .clean-cat-row:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .clean-cat-row.active {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px -2px rgba(0,0,0,0.25);
+  }
+  :root .clean-cat-warning {
+    color: #f59e0b;
+  }
+  :root .clean-detail-card-icon {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  :root .clean-summary-context {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .clean-detail-count {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .clean-detail-card-desc {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .clean-detail-header {
+    border-bottom-color: rgba(240,242,245,0.08);
+  }
+  :root .clean-detail-toggle-box {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 0 0 1px rgba(240,242,245,0.18);
+  }
+  :root .clean-detail-toggle-box:hover {
+    background: rgba(255,255,255,0.14);
+    box-shadow: inset 0 0 0 1px rgba(240,242,245,0.28);
+  }
+  :root .clean-detail-toggle-box.checked {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 2px rgba(31,95,255,0.35);
+  }
+  :root .clean-detail-toggle-box.partial {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 2px rgba(31,95,255,0.35);
+  }
+  :root .clean-item:hover {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .clean-item-running {
+    color: #f59e0b;
+  }
+  :root .clean-ring-track {
+    stroke: rgba(255,255,255,0.07);
+  }
+  :root .clean-ring-center {
+    background: linear-gradient(155deg, rgba(255,255,255,0.1), rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 8px 20px -8px rgba(0,0,0,0.45);
+  }
+  :root .clean-equiv-card {
+    background: linear-gradient(155deg, rgba(255,226,90,0.2), rgba(253,210,37,0.06));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06), 0 8px 20px -8px rgba(0,0,0,0.35);
+  }
+  :root .clean-equiv-icon {
+    color: #ffc940;
+  }
+  :root .clean-equiv-desc {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .clean-breakdown-chip {
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .clean-breakdown-more:hover {
+    background: rgba(255,255,255,0.1);
+  }
+  :root .clean-done-btn {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 6px 16px -6px rgba(0,0,0,0.4);
+  }
+  :root .clean-done-btn:hover {
+    background: rgba(255,255,255,0.14);
+  }
+  :root .clean-empty-icon,
+  :root .clean-idle-icon {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 12px -4px rgba(0,0,0,0.25);
+  }
+  :root .clean-idle-desc {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .clean-detected-chip {
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .clean-scan-track {
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.25), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .clean-scan-fill {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+  }
+  :root .clean-found-chip {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  :root .clean-ask-ai-btn {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .clean-ask-ai-btn:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .clean-action-btn {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -4px rgba(31,95,255,0.45);
+  }
+  :root .clean-confirm-overlay {
+    background: rgba(0,0,0,0.4);
+  }
+  :root .clean-confirm-dialog {
+    background: rgba(30,32,38,0.9);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),
+      0 30px 60px -12px rgba(0,0,0,0.7),
+      0 0 0 0.5px rgba(0,0,0,0.2);
+  }
+  :root .clean-confirm-desc {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .clean-confirm-cancel {
+    background: rgba(240,242,245,0.1);
+  }
+  :root .clean-confirm-cancel:hover {
+    background: rgba(240,242,245,0.15);
+  }
+  :root .clean-confirm-clean {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 16px -4px rgba(229,51,43,0.4);
+  }
+  :root .success-overlay {
+    background: rgba(20,22,28,0.95);
+  }
+  :root .success-headline {
+    color: #34d058;
+  }
+  :root .success-storage-free {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .success-storage-label-right {
+    color: #34d058;
+  }
+  :root .success-upsell {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 8px 20px -8px rgba(0,0,0,0.3);
+  }
+  :root .success-upsell-btn {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -4px rgba(31,95,255,0.45);
+  }
+
+  /* ── Analyze ──────────────────────────────────────── */
+
+  :root .analyze-error {
+    color: #ff6b6b;
+    background: rgba(253,72,65,0.12);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.04), inset 0 0 0 0.5px rgba(253,72,65,0.2);
+  }
+  :root .analyze-up-btn,
+  :root .analyze-back-btn {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .analyze-up-btn:hover,
+  :root .analyze-back-btn:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .btn-active {
+    background: rgba(255,255,255,0.09);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .analyze-breadcrumb {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .analyze-breadcrumb-item {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .analyze-breadcrumb-item:hover {
+    background: rgba(255,255,255,0.08);
+  }
+  :root .analyze-breadcrumb-sep {
+    color: rgba(240,242,245,0.25);
+  }
+  :root .analyze-reveal-btn {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .analyze-reveal-btn:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .analyze-idle-icon {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .analyze-path-input-wrap {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 2px 8px -2px rgba(0,0,0,0.2);
+  }
+  :root .analyze-path-input-wrap:focus-within {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 0 0 2px rgba(31,95,255,0.35),
+      0 2px 8px -2px rgba(0,0,0,0.2);
+  }
+  :root .analyze-pick-chip {
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .analyze-pick-chip:hover,
+  :root .analyze-pick-chip.active {
+    background: rgba(255,255,255,0.09);
+  }
+  :root .analyze-detected-chip {
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .analyze-detected-dot {
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.15);
+  }
+  :root .analyze-list-header {
+    border-bottom-color: rgba(240,242,245,0.08);
+  }
+  :root .analyze-list-row {
+    border-bottom-color: rgba(240,242,245,0.06);
+  }
+  :root .analyze-list-row:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .analyze-list-checkbox {
+    border-color: rgba(240,242,245,0.18);
+  }
+  :root .analyze-list-bar-track {
+    background: rgba(240,242,245,0.08);
+  }
+  :root .analyze-list-bar-fill {
+    background: rgba(240,242,245,0.18);
+  }
+  :root .analyze-cleanable-dot {
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.15);
+  }
+  :root .analyze-reveal-row-btn:hover {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .treemap-container {
+    background: linear-gradient(155deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .treemap-rect {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05),
+      inset 0 0 0 0.5px rgba(255,255,255,0.04),
+      0 2px 6px -2px rgba(0,0,0,0.25);
+  }
+  :root .treemap-drillable:hover {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05),
+      inset 0 0 0 0.5px rgba(255,255,255,0.04),
+      0 0 0 2px rgba(255,255,255,0.2),
+      0 8px 20px -6px rgba(0,0,0,0.5);
+  }
+  :root .analyze-sidebar {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .treemap-size {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .analyze-sidebar-section-label {
+    color: rgba(240,242,245,0.5);
+  }
+  :root .analyze-sidebar-path {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .analyze-sidebar-reveal-btn {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .analyze-sidebar-reveal-btn:hover {
+    background: rgba(255,255,255,0.14);
+  }
+  :root .analyze-sidebar-divider {
+    background: rgba(240,242,245,0.08);
+  }
+  :root .analyze-sidebar-list-row:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .analyze-sidebar-list-dot {
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.15);
+  }
+
+  /* ── Uninstall ────────────────────────────────────── */
+
+  :root .uninstall-empty-icon {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.22);
+  }
+  :root .uninstall-error {
+    background: rgba(253,72,65,0.1);
+    box-shadow: inset 0 0 0 0.5px rgba(253,72,65,0.2);
+  }
+  :root .uninstall-sidebar {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .uninstall-search-box {
+    background: rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.2), inset 0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .uninstall-search-icon {
+    color: rgba(240,242,245,0.45);
+  }
+  :root .uninstall-sort-controls {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .uninstall-sort-btn {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .uninstall-sort-btn.active {
+    background: rgba(255,255,255,0.12);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  :root .uninstall-app-row:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .uninstall-app-row.active {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px -2px rgba(0,0,0,0.25);
+  }
+  :root .uninstall-app-row-icon-placeholder {
+    background: rgba(240,242,245,0.04);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .uninstall-detail-panel {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      inset 14px 14px 30px -20px rgba(255,255,255,0.04),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .uninstall-detail-icon-img {
+    filter: drop-shadow(0 8px 12px rgba(0,0,0,0.4));
+  }
+  :root .uninstall-detail-icon-placeholder {
+    background: rgba(240,242,245,0.04);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .uninstall-detail-stat {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  :root .uninstall-app-row-meta {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .uninstall-detail-stat-label {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .uninstall-sensitive-warning {
+    color: #ffc940;
+    background: rgba(253,210,37,0.15);
+    box-shadow: inset 0 0 0 0.5px rgba(253,210,37,0.25);
+  }
+  :root .uninstall-file-row:hover {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .uninstall-file-name {
+    color: rgba(240,242,245,0.78);
+  }
+  :root .uninstall-btn-delete {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 6px 16px -4px rgba(229,51,43,0.4);
+  }
+  :root .uninstall-ring-check {
+    color: rgba(240,242,245,0.7);
+  }
+  :root .uninstall-equiv-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .uninstall-equiv-icon {
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .uninstall-breakdown-chip {
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+    background: rgba(255,255,255,0.06);
+  }
+  :root .uninstall-done-check {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.22);
+  }
+  :root .uninstall-error-chip {
+    box-shadow: inset 0 0 0 0.5px rgba(253,72,65,0.22);
+    background: rgba(253,72,65,0.1);
+  }
+
+  /* ── Prune ────────────────────────────────────────── */
+
+  :root .prune-idle-icon,
+  :root .prune-empty-icon {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .prune-path-input-wrap {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.2);
+  }
+  :root .prune-path-input-wrap:focus-within {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 1px rgba(31,95,255,0.4),
+      0 4px 12px -4px rgba(0,0,0,0.22);
+  }
+  :root .prune-pick-chip {
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .prune-pick-chip:hover {
+    background: rgba(255,255,255,0.08);
+  }
+  :root .prune-pick-chip.active {
+    background: rgba(255,255,255,0.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),
+      inset 0 0 0 0.5px rgba(255,255,255,0.1),
+      0 2px 6px -2px rgba(0,0,0,0.22);
+  }
+  :root .prune-detected-section {
+    box-shadow: 0 -0.5px 0 rgba(240,242,245,0.08);
+  }
+  :root .prune-detected-chip {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .prune-storage-bar {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .prune-storage-track {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .prune-storage-legend-item {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .prune-storage-legend-label {
+    color: rgba(240,242,245,0.5);
+  }
+  :root .prune-filter-chip {
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .prune-filter-chip:hover {
+    background: rgba(255,255,255,0.08);
+  }
+  :root .prune-filter-chip.active {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: 0 2px 8px -2px rgba(31,95,255,0.5);
+  }
+  :root .prune-search-box {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.2);
+  }
+  :root .prune-sort-controls {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .prune-sort-btn {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .prune-sort-btn:hover {
+    background: rgba(255,255,255,0.05);
+  }
+  :root .prune-sort-btn.active {
+    background: rgba(255,255,255,0.09);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 1px 3px rgba(0,0,0,0.2);
+  }
+  :root .prune-card {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.25);
+  }
+  :root .prune-card:hover {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 8px 20px -6px rgba(0,0,0,0.4);
+  }
+  :root .prune-card.selected {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 1.5px rgba(31,95,255,0.5),
+      0 4px 12px -4px rgba(0,0,0,0.25);
+  }
+  :root .prune-card-path,
+  :root .prune-card-type-badge {
+    color: rgba(240,242,245,0.5);
+  }
+  :root .prune-card-check {
+    box-shadow: inset 0 0 0 1px rgba(240,242,245,0.18);
+    background: rgba(255,255,255,0.1);
+  }
+  :root .prune-card-check.checked {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 2px rgba(31,95,255,0.35);
+  }
+  :root .prune-ring-check {
+    color: rgba(240,242,245,0.7);
+  }
+  :root .prune-equiv-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .prune-equiv-icon {
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .prune-breakdown-chip {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.05);
+  }
+  :root .prune-breakdown-more:hover {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+
+  /* ── Installers ───────────────────────────────────── */
+
+  :root .inst-idle-icon,
+  :root .inst-empty-icon {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .inst-detected-section {
+    box-shadow: 0 -0.5px 0 rgba(240,242,245,0.08);
+  }
+  :root .inst-detected-chip {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+  :root .inst-search-box {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.2);
+  }
+  :root .inst-sort-btn:hover {
+    background: rgba(255,255,255,0.05);
+  }
+  :root .inst-sort-btn.active {
+    background: rgba(255,255,255,0.09);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 1px 3px rgba(0,0,0,0.2);
+  }
+  :root .installers-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.05));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.25);
+  }
+  :root .installers-card:hover {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      0 8px 20px -6px rgba(0,0,0,0.4);
+  }
+  :root .installers-card.selected {
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 1.5px rgba(31,95,255,0.5),
+      0 4px 12px -4px rgba(0,0,0,0.25);
+  }
+  :root .installers-card-icon {
+    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.12), 0 3px 8px -3px rgba(0,0,0,0.35);
+  }
+  :root .installers-card-check {
+    box-shadow: inset 0 0 0 1px rgba(240,242,245,0.18);
+    background: rgba(255,255,255,0.1);
+  }
+  :root .installers-card-check.checked {
+    background: linear-gradient(180deg, #4f8bff, #1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 2px rgba(31,95,255,0.35);
+  }
+  :root .inst-ring-check {
+    color: rgba(240,242,245,0.7);
+  }
+  :root .inst-equiv-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .inst-equiv-icon {
+    background: rgba(255,255,255,0.06);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.06);
+  }
+
+  /* ── Guardian (Pawtrol) ───────────────────────────── */
+
+  :root .guardian-idle-icon,
+  :root .guardian-locked-icon,
+  :root .guardian-pulse,
+  :root .guardian-empty-icon {
+    background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 14px -4px rgba(0,0,0,0.3);
+  }
+  :root .guardian-idle-desc {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .guardian-price-period {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .guardian-feature-item svg {
+    color: #34d058;
+  }
+  :root .guardian-refresh-link {
+    color: #4f8bff;
+  }
+  :root .guardian-refresh-link:hover {
+    color: #79a8ff;
+  }
+  :root .guardian-summary-context {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .guardian-list {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 8px 24px -8px rgba(0,0,0,0.35);
+  }
+  :root .guardian-row:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .guardian-row-details {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .guardian-score-bar-track {
+    background: rgba(240,242,245,0.08);
+  }
+  :root .guardian-ring-track {
+    stroke: rgba(255,255,255,0.07);
+  }
+  :root .guardian-ring-current {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .guardian-busy-sub {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .guardian-locked-panel {
+    background: linear-gradient(155deg, rgba(255,255,255,0.1), rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.06));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.08),
+      inset 16px 16px 34px -20px rgba(255,255,255,0.06),
+      inset -14px -14px 34px -20px rgba(31,95,255,0.15),
+      0 10px 30px -8px rgba(0,0,0,0.45);
+  }
+  :root .guardian-teaser-panel {
+    background: linear-gradient(155deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .guardian-btn-primary {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 8px 20px -6px rgba(31,95,255,0.5);
+  }
+  :root .guardian-btn-secondary {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .guardian-btn-secondary:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .guardian-legend {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .guardian-sel-info {
+    color: rgba(240,242,245,0.62);
+  }
+
+  /* ── Onboarding ───────────────────────────────────── */
+
+  :root .onboarding-logo {
+    filter: drop-shadow(0 18px 20px rgba(0,0,0,0.5));
+  }
+  :root .onboarding-title {
+    color: #f0f2f5;
+  }
+  :root .onboarding-tagline,
+  :root .onboarding-desc {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .onboarding-storage-track {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .onboarding-storage-label {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .onboarding-step-num {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .onboarding-status {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.3),
+      0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .onboarding-fda-panel {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+      0 10px 30px -10px rgba(0,0,0,0.4),
+      0 0 0 0.5px rgba(240,242,245,0.06);
+  }
+  :root .onboarding-fda-header {
+    color: rgba(240,242,245,0.66);
+    border-bottom-color: rgba(240,242,245,0.08);
+  }
+  :root .onboarding-feature {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .onboarding-feature-desc,
+  :root .onboarding-bullet-desc,
+  :root .onboarding-pref-desc,
+  :root .onboarding-free-item-desc {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .onboarding-feature-placeholder {
+    border-color: rgba(240,242,245,0.15);
+    color: rgba(240,242,245,0.55);
+  }
+  :root .onboarding-bullet-icon {
+    background: rgba(240,242,245,0.06);
+    color: rgba(240,242,245,0.7);
+  }
+  :root .onboarding-feature-icon {
+    background: rgba(240,242,245,0.7);
+  }
+  :root .onboarding-prefs-note {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .onboarding-prefs-list {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 10px 30px -10px rgba(0,0,0,0.4);
+  }
+  :root .onboarding-pref-item {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+  :root .onboarding-pref-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+  :root .onboarding-toggle {
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+  }
+  :root .onboarding-toggle.off {
+    background: rgba(240,242,245,0.14);
+  }
+  :root .onboarding-toggle-knob {
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+  }
+  :root .onboarding-done-chip {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  :root .onboarding-free-item {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .onboarding-pro-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.1),
+      inset -14px -14px 30px -20px rgba(31,95,255,0.18),
+      0 10px 30px -10px rgba(0,0,0,0.4);
+  }
+  :root .onboarding-pro-badge {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+  }
+  :root .onboarding-pro-price {
+    color: rgba(240,242,245,0.6);
+  }
+  :root .onboarding-pro-pitch {
+    color: rgba(240,242,245,0.68);
+  }
+  :root .onboarding-pro-perk svg {
+    color: #34d058;
+  }
+  :root .onboarding-action-btn {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 8px 20px -6px rgba(31,95,255,0.5);
+  }
+  :root .onboarding-subscribe-btn {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -6px rgba(31,95,255,0.4);
+  }
+  :root .onboarding-subscribe-btn.unlocked {
+    color: #34d058;
+    background: rgba(42,200,82,0.2);
+  }
+  :root .onboarding-grant-btn {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 12px -4px rgba(0,0,0,0.3);
+  }
+  :root .onboarding-grant-btn.granted {
+    color: #34d058;
+    background: rgba(42,200,82,0.2);
+  }
+  :root .onboarding-demo-panel {
+    background: linear-gradient(155deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 10px 30px -10px rgba(0,0,0,0.4);
+  }
+  :root .onboarding-demo-check.pending {
+    background: rgba(240,242,245,0.12);
+  }
+  :root .onboarding-dot {
+    background: rgba(240,242,245,0.2);
+  }
+  :root .onboarding-nav .btn-secondary {
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .onboarding-nav .btn-secondary:hover {
+    background: rgba(255,255,255,0.12);
+  }
+  :root .onboarding-nav .btn-primary {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -4px rgba(31,95,255,0.45);
+  }
+
+  /* ── Optimize ─────────────────────────────────────── */
+
+  :root .opt-filter-chip {
+    background: rgba(255,255,255,0.05);
+    box-shadow: inset 0 0 0 0.5px rgba(240,242,245,0.08);
+  }
+  :root .opt-filter-chip:hover,
+  :root .opt-filter-chip.active {
+    background: rgba(255,255,255,0.09);
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 4px 12px -4px rgba(0,0,0,0.22);
+  }
+  :root .opt-card {
+    background: linear-gradient(155deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03) 60%, rgba(255,255,255,0.04));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.06),
+      0 6px 18px -6px rgba(0,0,0,0.3);
+  }
+  :root .opt-card:hover {
+    background: linear-gradient(155deg, rgba(255,255,255,0.09), rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.05));
+    box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+      inset 0 0 0 0.5px rgba(255,255,255,0.07),
+      0 8px 24px -6px rgba(0,0,0,0.38);
+  }
+  :root .opt-card-desc {
+    color: rgba(240,242,245,0.55);
+  }
+  :root .opt-run-btn.done {
+    background: rgba(42,200,82,0.18);
+    box-shadow: inset 0 0 0 0.5px rgba(42,200,82,0.22);
+    color: #34d058;
+  }
+  :root .opt-run-btn.failed {
+    background: rgba(253,72,65,0.12);
+    box-shadow: inset 0 0 0 0.5px rgba(253,72,65,0.18);
+  }
+  :root .opt-run-btn.checkmark {
+    color: #34d058;
+  }
+  :root .opt-btn-spinner {
+    border-color: rgba(240,242,245,0.12);
+  }
+  :root .opt-error {
+    background: rgba(253,72,65,0.1);
+  }
+  @keyframes opt-pulse {
+    0% {
+      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+        inset 0 0 0 0.5px rgba(255,255,255,0.06),
+        0 6px 18px -6px rgba(0,0,0,0.3),
+        0 0 0 0 rgba(42,200,82,0);
+    }
+    20% {
+      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+        inset 0 0 0 0.5px rgba(255,255,255,0.06),
+        0 6px 18px -6px rgba(0,0,0,0.3),
+        0 0 12px 0 rgba(42,200,82,0.2);
+    }
+    100% {
+      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.06),
+        inset 0 0 0 0.5px rgba(255,255,255,0.06),
+        0 6px 18px -6px rgba(0,0,0,0.3),
+        0 0 0 0 rgba(42,200,82,0);
+    }
+  }
+  :root .opt-dialog-overlay {
+    background: rgba(0,0,0,0.35);
+  }
+  :root .opt-dialog {
+    background: rgba(30,32,38,0.9);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),
+      0 30px 60px -12px rgba(0,0,0,0.7),
+      0 0 0 0.5px rgba(0,0,0,0.2);
+  }
+  :root .opt-dialog-icon {
+    background: rgba(253,72,65,0.15);
+    color: #ff6b6b;
+  }
+  :root .opt-dialog-desc {
+    color: rgba(240,242,245,0.66);
+  }
+  :root .opt-dialog-buttons .btn:first-child {
+    background: rgba(240,242,245,0.1);
+  }
+  :root .opt-dialog-buttons .btn:first-child:hover {
+    background: rgba(240,242,245,0.15);
+  }
+  :root .opt-dialog-buttons .btn:last-child {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+
+  /* ── Delete Dialog ────────────────────────────────── */
+
+  :root .delete-overlay {
+    background: rgba(0,0,0,0.4);
+  }
+  :root .delete-dialog {
+    background: rgba(30,32,38,0.9);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),
+      0 30px 60px -12px rgba(0,0,0,0.7),
+      0 0 0 0.5px rgba(0,0,0,0.2);
+  }
+  :root .delete-dialog-icon {
+    background: rgba(253,210,37,0.18);
+    box-shadow: inset 0 0 0 0.5px rgba(253,210,37,0.25);
+    color: #ffc940;
+  }
+
+  /* ── FDA Mockup ───────────────────────────────────── */
+
+  :root .fda-skeleton-icon {
+    background: rgba(240,242,245,0.08);
+  }
+  :root .fda-skeleton-text {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .fda-toggle.off {
+    background: rgba(240,242,245,0.14);
+  }
+  :root .fda-toggle-knob {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  /* ── Demo Player ──────────────────────────────────── */
+
+  :root .dm-window {
+    background: rgba(30,32,38,0.9);
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08), 0 6px 24px rgba(0,0,0,0.4);
+  }
+  :root .dm-traffic-pill {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.08);
+  }
+  :root .dm-titlebar-border {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .dm-btn-ghost {
+    background: rgba(255,255,255,0.08);
+  }
+  :root .dm-storage-track {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .dm-storage-free {
+    background: rgba(240,242,245,0.06);
+  }
+  :root .dm-checkbox {
+    border-color: rgba(240,242,245,0.14);
+  }
+  :root .dm-clean-cat.active {
+    background: rgba(255,255,255,0.06);
+  }
+  :root .dm-clean-cat-icon {
+    background: rgba(240,242,245,0.05);
+  }
+  :root .dm-clean-detail-card {
+    background: rgba(255,255,255,0.05);
+  }
+  :root .dm-clean-detail-icon {
+    background: rgba(240,242,245,0.05);
+  }
+  :root .dm-uninstall-card.selected {
+    background: rgba(255,255,255,0.07);
+  }
+  :root .dm-inst-row + .dm-inst-row {
+    border-top-color: rgba(240,242,245,0.06);
+  }
+  :root .dm-btn-primary {
+    box-shadow: 0 1px 6px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.2);
+  }
+
+}

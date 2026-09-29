@@ -147,6 +147,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
       let totalFreed = 0;
       const allErrors: string[] = [];
       const allDeletedPaths: string[] = [];
+      const allKept: UninstallResult["kept"] = [];
 
       for (const app of appsToRemove) {
         // Fetch associated files for each app
@@ -163,6 +164,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
           totalRemoved += result.items_removed;
           totalFreed += result.bytes_freed;
           allDeletedPaths.push(...result.deleted_paths);
+          allKept.push(...(result.kept ?? []));
           allErrors.push(...result.errors);
           if (allErrors.length > 50) allErrors.length = 50;
         } catch (e) {
@@ -183,6 +185,7 @@ export const useUninstallStore = create<UninstallStore>((set, get) => ({
           bytes_freed: totalFreed,
           errors: allErrors,
           deleted_paths: allDeletedPaths,
+          kept: allKept,
         },
         apps: remainingApps,
         selectedApp: null,

@@ -1,0 +1,289 @@
+/* Subscribe / restore sheets: same glass as the delete and FDA dialogs. */
+.paw-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10,20,50,0.18);
+  border-radius: 26px;
+  animation: paw-sheet-fade 0.2s ease;
+}
+
+.paw-sheet {
+  width: 340px;
+  max-width: calc(100% - 32px);
+  border-radius: 24px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--text-primary);
+  background: rgba(250,252,255,0.88);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 30px 60px -12px rgba(10,20,80,0.4), 0 0 0 0.5px rgba(10,20,60,0.1);
+  animation: paw-sheet-pop 0.3s cubic-bezier(0.2,1.3,0.4,1);
+}
+
+.paw-sheet-form {
+  display: contents;
+}
+
+.paw-sheet-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(31,95,255,0.1);
+  color: #1f5fff;
+}
+
+.paw-sheet-cat {
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.paw-sheet-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.paw-sheet-desc {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: rgba(13,21,38,0.77);
+  text-wrap: pretty;
+}
+
+.paw-sheet-desc strong {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.paw-sheet-field {
+  width: 100%;
+  height: 38px;
+  margin-top: 6px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  background: rgba(13,21,38,0.05);
+  box-shadow: inset 0 0 0 0.5px rgba(13,21,38,0.1);
+  outline: none;
+  transition: box-shadow 0.15s, background 0.15s;
+}
+
+.paw-sheet-field::placeholder {
+  color: rgba(13,21,38,0.4);
+}
+
+.paw-sheet-field:focus {
+  background: rgba(255,255,255,0.7);
+  box-shadow: inset 0 0 0 1px rgba(31,95,255,0.55), 0 0 0 3px rgba(31,95,255,0.15);
+}
+
+.paw-sheet-field[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1px rgba(229,51,43,0.6), 0 0 0 3px rgba(229,51,43,0.12);
+}
+
+.paw-sheet-code {
+  height: 46px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.45em;
+  padding-left: calc(14px + 0.45em);
+  font-variant-numeric: tabular-nums;
+}
+
+.paw-sheet-code::placeholder {
+  letter-spacing: 0.45em;
+}
+
+.paw-sheet-error {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #c62d25;
+}
+
+.paw-sheet-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(13,21,38,0.6);
+}
+
+.paw-sheet-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1f5fff;
+  animation: paw-sheet-pulse 1.4s ease-in-out infinite;
+}
+
+.paw-sheet-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.paw-sheet-btn {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(13,21,38,0.07);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s, filter 0.15s, opacity 0.15s;
+}
+
+.paw-sheet-btn:hover:not(:disabled) {
+  background: rgba(13,21,38,0.11);
+}
+
+.paw-sheet-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.paw-sheet-btn:focus-visible,
+.paw-sheet-link:focus-visible {
+  outline: 2px solid rgba(31,95,255,0.5);
+  outline-offset: 2px;
+}
+
+.paw-sheet-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.paw-sheet-btn-primary,
+.paw-sheet-btn-primary:hover:not(:disabled) {
+  color: #fff;
+  background: linear-gradient(180deg,#4f8bff,#1f5fff);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 6px 16px -4px rgba(31,95,255,0.55);
+}
+
+.paw-sheet-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.paw-sheet-links {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+.paw-sheet-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f5fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.paw-sheet-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.paw-sheet-link:disabled {
+  cursor: default;
+  color: rgba(13,21,38,0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes paw-sheet-fade {
+  from { opacity: 0; }
+}
+
+@keyframes paw-sheet-pop {
+  from { opacity: 0; transform: scale(0.9) translateY(10px); }
+}
+
+@keyframes paw-sheet-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root .paw-sheet-overlay {
+    background: rgba(0,0,0,0.35);
+  }
+  :root .paw-sheet {
+    background: rgba(30,32,38,0.9);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 30px 60px -12px rgba(0,0,0,0.7), 0 0 0 0.5px rgba(0,0,0,0.2);
+  }
+  :root .paw-sheet-desc,
+  :root .paw-sheet-status {
+    color: rgba(240,242,245,0.62);
+  }
+  :root .paw-sheet-icon {
+    background: rgba(79,139,255,0.16);
+    color: #4f8bff;
+  }
+  :root .paw-sheet-field {
+    background: rgba(240,242,245,0.08);
+    box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.1);
+  }
+  :root .paw-sheet-field::placeholder {
+    color: rgba(240,242,245,0.35);
+  }
+  :root .paw-sheet-field:focus {
+    background: rgba(240,242,245,0.12);
+    box-shadow: inset 0 0 0 1px rgba(79,139,255,0.7), 0 0 0 3px rgba(79,139,255,0.2);
+  }
+  :root .paw-sheet-error {
+    color: #ff6a63;
+  }
+  :root .paw-sheet-btn {
+    background: rgba(240,242,245,0.1);
+  }
+  :root .paw-sheet-btn:hover:not(:disabled) {
+    background: rgba(240,242,245,0.15);
+  }
+  :root .paw-sheet-btn-primary,
+  :root .paw-sheet-btn-primary:hover:not(:disabled) {
+    background: linear-gradient(180deg,#4f8bff,#1f5fff);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -4px rgba(31,95,255,0.45);
+  }
+  :root .paw-sheet-link {
+    color: #4f8bff;
+  }
+  :root .paw-sheet-link:disabled {
+    color: rgba(240,242,245,0.4);
+  }
+}

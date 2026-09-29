@@ -192,6 +192,7 @@ export interface AppInfo {
   is_system: boolean;
   is_data_sensitive: boolean;
   brew_cask: string | null;
+  last_used_secs: number | null;
 }
 
 export interface AssociatedFile {
@@ -208,11 +209,20 @@ export interface UninstallProgress {
   bytes_freed: number;
 }
 
+export interface KeptItem {
+  path: string;
+  category: string;
+  label: string;
+  size: number;
+  message: string;
+}
+
 export interface UninstallResult {
   items_removed: number;
   bytes_freed: number;
   errors: string[];
   deleted_paths: string[];
+  kept: KeptItem[];
 }
 
 // ── Uninstall Module Commands ─────────────────────────────
@@ -299,10 +309,14 @@ export async function listenAnalyzeProgress(
 
 export async function deleteAnalyzedItem(
   path: string,
-  permanent: boolean
+  permanent: boolean,
+  allowBrowserData = false
 ): Promise<number> {
-  return invoke<number>("delete_analyzed_item", { path, permanent });
+  return invoke<number>("delete_analyzed_item", { path, permanent, allowBrowserData });
 }
+
+export const isBrowserDataRefusal = (e: unknown) => String(e).includes("browser_profile_data");
+export const isProtectedDataRefusal = (e: unknown) => /browser_profile_data|protected_user_data/.test(String(e));
 
 export interface LargeFile {
   name: string;
@@ -322,6 +336,8 @@ export interface ArtifactEntry {
   artifact_type: string;
   artifact_path: string;
   size: number;
+  is_recent: boolean;
+  last_modified_secs: number;
 }
 
 export interface PruneScanProgress {
@@ -432,6 +448,13 @@ export interface AppSettings {
   notifications_enabled: boolean;
   low_disk_threshold_gb: number;
   onboarding_completed: boolean;
+  pawtrol_enabled: boolean;
+  pawtrol_auto_clean: boolean;
+  pawtrol_login_prompted: boolean;
+}
+
+export async function setTrayVisible(visible: boolean): Promise<void> {
+  return invoke<void>("set_tray_visible", { visible });
 }
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -513,44 +536,6 @@ export async function getAppIconByPath(appPath: string): Promise<string | null> 
 
 // ── Guardian Module Types ──────────────────────────────
 
-export interface ProbeReport {
-  category: string;
-  display_name: string;
-  total_bytes: number;
-  cleanable_bytes: number;
-  item_count: number;
-  last_used_secs: number | null;
-  confidence: number;
-  details: string;
-}
-
-export interface GuardianScanResult {
-  probes: ProbeReport[];
-  total_cleanable: number;
-  scan_duration_ms: number;
-}
-
-export interface ScoredProbe {
-  category: string;
-  display_name: string;
-  cleanable_bytes: number;
-  score: number;
-  confidence: number;
-  details: string;
-}
-
-export interface GuardianResult {
-  scores: ScoredProbe[];
-  total_cleanable: number;
-}
-
-export interface GuardianCleanProgress {
-  current_category: string;
-  categories_done: number;
-  categories_total: number;
-  bytes_freed: number;
-}
-
 export interface GuardianCleanResult {
   categories_cleaned: number;
   bytes_freed: number;
@@ -562,25 +547,59 @@ export interface LicenseStatus {
   expires: number | null;
 }
 
+export interface CheckoutSession {
+  short_url: string;
+  opened_by_app?: boolean;
+}
+
+export interface Account {
+  /** Masked by the worker, e.g. "j***@gmail.com". */
+  email: string;
+  status: string;
+  /** Epoch seconds of the current billing period's end. */
+  current_end: number | null;
+  cancel_at_period_end: boolean;
+  devices_count: number;
+}
+
+export type PatrolTrigger = "schedule" | "low_disk" | "manual";
+
+export interface ReviewItem {
+  id: string;
+  name: string;
+  details: string;
+  size: number;
+  score: number;
+  user_data: boolean;
+  data_loss?: string | null;
+  found_at: number;
+  /** Safe to clean, held for a one-tap OK because auto-clean is off. */
+  safe: boolean;
+}
+
+export interface PatrolRun {
+  started_at: number;
+  finished_at: number;
+  trigger: PatrolTrigger;
+  cleaned: { name: string; size: number }[];
+  freed: number;
+  review_count: number;
+  error?: string | null;
+}
+
+export interface PatrolStatus {
+  enabled: boolean;
+  auto_clean: boolean;
+  running: boolean;
+  last_patrol_at: number | null;
+  next_patrol_at: number | null;
+  freed_total: number;
+  freed_last: number;
+  pending_review: ReviewItem[];
+  history: PatrolRun[];
+}
+
 // ── Guardian Module Commands ───────────────────────────
-
-export async function guardianRunProbes(): Promise<GuardianScanResult> {
-  return invoke<GuardianScanResult>("guardian_run_probes");
-}
-
-export async function guardianScore(
-  probes: ProbeReport[],
-  deviceId: string
-): Promise<GuardianResult> {
-  return invoke<GuardianResult>("guardian_score", { probes, deviceId });
-}
-
-export async function guardianClean(
-  categories: string[],
-  permanent: boolean
-): Promise<GuardianCleanResult> {
-  return invoke<GuardianCleanResult>("guardian_clean", { categories, permanent });
-}
 
 export async function guardianCheckLicense(
   deviceId: string
@@ -592,10 +611,88 @@ export async function guardianGetDeviceId(): Promise<string> {
   return invoke<string>("guardian_get_device_id");
 }
 
-export async function listenGuardianCleanProgress(
-  callback: (progress: GuardianCleanProgress) => void
+export async function guardianCheckoutCreate(email: string): Promise<CheckoutSession> {
+  return invoke<CheckoutSession>("guardian_checkout_create", { email });
+}
+
+export async function guardianRestoreStart(email: string): Promise<void> {
+  return invoke<void>("guardian_restore_start", { email });
+}
+
+export async function guardianRestoreVerify(email: string, code: string): Promise<LicenseStatus> {
+  return invoke<LicenseStatus>("guardian_restore_verify", { email, code });
+}
+
+export async function guardianAccount(): Promise<Account | null> {
+  return invoke<Account | null>("guardian_account");
+}
+
+export async function guardianCancelSubscription(): Promise<Account> {
+  return invoke<Account>("guardian_cancel_subscription");
+}
+
+export async function getDeviceName(): Promise<string> {
+  return invoke<string>("get_device_name");
+}
+
+// The patrol engine keeps epoch milliseconds; the rest of the app uses seconds.
+const msToSecs = (ms: number) => Math.floor(ms / 1000);
+const msToSecsOpt = (ms: number | null) => (ms == null ? null : msToSecs(ms));
+
+function normalizeRun(run: PatrolRun): PatrolRun {
+  return { ...run, started_at: msToSecs(run.started_at), finished_at: msToSecs(run.finished_at) };
+}
+
+function normalizeStatus(status: PatrolStatus): PatrolStatus {
+  return {
+    ...status,
+    last_patrol_at: msToSecsOpt(status.last_patrol_at),
+    next_patrol_at: msToSecsOpt(status.next_patrol_at),
+    pending_review: status.pending_review.map((i) => ({ ...i, found_at: msToSecs(i.found_at) })),
+    history: status.history.map(normalizeRun),
+  };
+}
+
+export async function guardianPatrolStatus(): Promise<PatrolStatus> {
+  return normalizeStatus(await invoke<PatrolStatus>("guardian_patrol_status"));
+}
+
+export async function guardianPatrolNow(): Promise<PatrolRun> {
+  return normalizeRun(await invoke<PatrolRun>("guardian_patrol_now"));
+}
+
+export async function guardianReviewClean(ids: string[]): Promise<GuardianCleanResult> {
+  return invoke<GuardianCleanResult>("guardian_review_clean", { ids });
+}
+
+export async function guardianReviewDismiss(ids: string[]): Promise<void> {
+  return invoke<void>("guardian_review_dismiss", { ids });
+}
+
+export async function guardianSetPatrol(enabled: boolean, autoClean: boolean): Promise<void> {
+  return invoke<void>("guardian_set_patrol", { enabled, autoClean });
+}
+
+export async function listenPatrolStarted(
+  callback: (payload: { trigger: PatrolTrigger }) => void
 ): Promise<UnlistenFn> {
-  return listen<GuardianCleanProgress>("guardian-clean-progress", (event) => {
+  return listen<{ trigger: PatrolTrigger }>("patrol-started", (event) => {
     callback(event.payload);
+  });
+}
+
+export async function listenPatrolFinished(
+  callback: (run: PatrolRun) => void
+): Promise<UnlistenFn> {
+  return listen<PatrolRun>("patrol-finished", (event) => {
+    callback(normalizeRun(event.payload));
+  });
+}
+
+export async function listenPatrolStatus(
+  callback: (status: PatrolStatus) => void
+): Promise<UnlistenFn> {
+  return listen<PatrolStatus>("patrol-status", (event) => {
+    callback(normalizeStatus(event.payload));
   });
 }

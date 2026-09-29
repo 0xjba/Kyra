@@ -19,6 +19,7 @@ interface InstallersStore {
   progress: InstallerProgress | null;
   result: InstallerResult | null;
   error: string | null;
+  freed: number;
 
   scan: () => Promise<void>;
   toggleSelect: (path: string) => void;
@@ -36,9 +37,10 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
   progress: null,
   result: null,
   error: null,
+  freed: 0,
 
   scan: async () => {
-    set({ phase: "scanning", error: null });
+    set({ phase: "scanning", error: null, freed: 0 });
     try {
       const files = await scanInstallers();
       const allPaths = new Set(files.map((f) => f.path));
@@ -70,11 +72,15 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
     const { selected } = get();
     if (selected.size === 0) return;
 
-    set({ phase: "deleting", progress: null });
+    set({ phase: "deleting", progress: null, error: null });
 
-    const unlisten = await listenInstallerProgress((progress) => {
-      set({ progress });
-    });
+    // Progress is cosmetic; a failed subscription must not strand the UI in the busy phase.
+    let unlisten: () => void = () => {};
+    try {
+      unlisten = await listenInstallerProgress((progress) => {
+        set({ progress });
+      });
+    } catch {}
 
     try {
       const dryRun = false;
@@ -84,7 +90,7 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
       if (result.bytes_freed > 0) {
         addBytesFreed(result.bytes_freed).catch(() => {});
       }
-      set({ phase: "done", result });
+      set((s) => ({ phase: "done", result, freed: s.freed + result.bytes_freed }));
     } catch (e) {
       set({ phase: "list", error: String(e) });
     } finally {
@@ -97,10 +103,9 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
     const deletedSet = new Set(result?.deleted_paths ?? []);
     const remaining = files.filter((f) => !deletedSet.has(f.path));
     if (remaining.length === 0) {
-      set({ phase: "idle", files: [], selected: new Set(), progress: null, result: null });
+      set({ phase: "list", files: [], selected: new Set(), progress: null, result: null });
     } else {
-      const newSelected = new Set(remaining.map((f) => f.path));
-      set({ phase: "list", files: remaining, selected: newSelected, progress: null, result: null });
+      set({ phase: "list", files: remaining, selected: new Set(), progress: null, result: null });
     }
   },
 
@@ -112,6 +117,7 @@ export const useInstallersStore = create<InstallersStore>((set, get) => ({
       progress: null,
       result: null,
       error: null,
+      freed: 0,
     });
   },
 }));

@@ -1,10 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { checkFullDiskAccess } from "../lib/tauri";
 import { invoke } from "@tauri-apps/api/core";
+import catImg from "../assets/cat-tail/cat1.png";
+import "../styles/fda-prompt.css";
+
+let skippedThisLaunch = false;
+
+/** Suppress the prompt until the next launch (the user just skipped FDA in onboarding). */
+export function skipFdaPromptThisLaunch() {
+  skippedThisLaunch = true;
+}
 
 export default function FdaPrompt() {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(skippedThisLaunch);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retriesRef = useRef(0);
   const MAX_RETRIES = 30; // 60 seconds max
@@ -43,66 +52,29 @@ export default function FdaPrompt() {
   if (hasAccess === null || hasAccess || dismissed) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0, 0, 0, 0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-    >
-      <div
-        style={{
-          background: "rgba(30, 30, 30, 0.85)",
-          backdropFilter: "blur(20px) saturate(150%)",
-          WebkitBackdropFilter: "blur(20px) saturate(150%)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 12,
-          padding: "24px 28px",
-          maxWidth: 420,
-          width: "90%",
-          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
-        }}
-      >
-        <div style={{ fontSize: "var(--font-xl)", fontWeight: "var(--weight-semibold)", color: "var(--text-primary)", marginBottom: 10 }}>
-          Full Disk Access Required
-        </div>
-        <div style={{ fontSize: "var(--font-md)", color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 16 }}>
-          Kyra needs Full Disk Access to scan and clean caches, logs, and browser data
-          in protected directories.
-        </div>
-        <div style={{ fontSize: "var(--font-base)", color: "var(--text-tertiary)", lineHeight: 1.7, marginBottom: 16 }}>
-          1. Click <strong style={{ color: "var(--text-secondary)" }}>Open Settings</strong> below<br />
-          2. Click the <strong style={{ color: "var(--text-secondary)" }}>+</strong> button and add Kyra (or enable it if already listed)<br />
-          3. Click <strong style={{ color: "var(--text-secondary)" }}>Restart Kyra</strong> below to apply changes
+    <div className="fda-prompt-overlay">
+      <div className="fda-prompt">
+        <img src={catImg} alt="" className="fda-prompt-cat" />
+        <div className="fda-prompt-title">Kyra needs Full Disk Access</div>
+        <div className="fda-prompt-desc">
+          Caches, logs and browser data live in protected folders. Without access, Kyra
+          can only clean what macOS leaves open.
         </div>
 
-        <div
-          style={{
-            fontSize: "var(--font-sm)",
-            color: "var(--text-tertiary)",
-            background: "rgba(255,255,255,0.03)",
-            borderRadius: 6,
-            padding: "8px 12px",
-            marginBottom: 16,
-            lineHeight: 1.6,
-          }}
-        >
-          Without Full Disk Access, Kyra can only clean files in non-protected directories.
-          Browser caches, mail data, and some system caches won't be accessible.
-        </div>
+        <ol className="fda-prompt-steps">
+          <li><span className="fda-prompt-step-num">1</span>Open Settings</li>
+          <li><span className="fda-prompt-step-num">2</span>Turn on Kyra under Full Disk Access</li>
+          <li><span className="fda-prompt-step-num">3</span>Kyra restarts on its own</li>
+        </ol>
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button className="btn" onClick={() => setDismissed(true)}>
-            Continue with Limited Access
+        <button className="fda-prompt-btn fda-prompt-btn-primary" onClick={() => invoke("open_fda_settings")}>
+          Open Settings
+        </button>
+        <div className="fda-prompt-row">
+          <button className="fda-prompt-btn" onClick={() => setDismissed(true)}>
+            Not now
           </button>
-          <button className="btn" onClick={() => invoke("open_fda_settings")}>
-            Open Settings
-          </button>
-          <button className="btn btn-primary" onClick={() => invoke("restart_app")}>
+          <button className="fda-prompt-btn" onClick={() => invoke("restart_app")}>
             Restart Kyra
           </button>
         </div>

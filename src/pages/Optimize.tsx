@@ -1,176 +1,153 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useOptimizeStore } from "../stores/optimizeStore";
-import { ShieldAlert, Copy, Check } from "lucide-react";
+import { LockKeyhole, Copy, Check, Sparkles } from "lucide-react";
 import type { OptTask } from "../lib/tauri";
-import { askAiOptimize, canAskAiOptimize } from "../utils/askAi";
-import AskAiCoachMark from "../components/AskAiCoachMark";
+import { askAiOptimize } from "../utils/askAi";
+import cat1 from "../assets/cat-tail/cat1.png";
+import cat2 from "../assets/cat-tail/cat2.png";
+import cat3 from "../assets/cat-tail/cat3.png";
+import cat4 from "../assets/cat-tail/cat4.png";
+import cat5 from "../assets/cat-tail/cat5.png";
+import cat6 from "../assets/cat-tail/cat6.png";
+import cat7 from "../assets/cat-tail/cat7.png";
 import "../styles/optimize.css";
 
-type Category = "safe" | "restart" | "admin";
-type Filter = "all" | "safe" | "restart" | "admin";
+type Kind = "safe" | "restart" | "admin";
 
-function categorize(task: OptTask): Category {
+const CAT_FRAMES = [cat1, cat2, cat3, cat4, cat5, cat6, cat7, cat6, cat5, cat4, cat3, cat2];
+
+const KIND_META: Record<Kind, { color: string; label: string }> = {
+  safe: { color: "#2AC852", label: "Safe to run" },
+  restart: { color: "#FDB022", label: "Needs restart" },
+  admin: { color: "#FD4841", label: "Admin required" },
+};
+
+const GROUPS: { name: string; ids: string[] }[] = [
+  { name: "Network", ids: ["dns_flush", "network_flush", "bluetooth_reset", "prevent_network_dsstore"] },
+  { name: "Caches", ids: ["cache_refresh", "icon_cache", "dock_refresh", "saved_state", "font_cache"] },
+  { name: "Databases & Indexes", ids: ["sqlite_vacuum", "launch_services", "spotlight_rebuild"] },
+  {
+    name: "System",
+    ids: ["memory_purge", "periodic_maintenance", "disk_verify", "disk_permissions", "plist_repair", "shared_file_list_repair"],
+  },
+  {
+    name: "Security & Privacy",
+    ids: ["firewall_enable", "quarantine_cleanup", "login_items_audit", "launch_agents_cleanup", "notification_cleanup", "coreduet_cleanup"],
+  },
+];
+
+const TASK_RESULTS: Record<string, string> = {
+  dns_flush: "DNS resolver cache cleared",
+  cache_refresh: "Thumbnail and preview caches refreshed",
+  saved_state: "Saved window state data removed",
+  launch_services: "Launch Services database rebuilt",
+  icon_cache: "App icon cache refreshed",
+  sqlite_vacuum: "Databases compacted",
+  plist_repair: "Preference files validated",
+  font_cache: "Font caches cleared",
+  memory_purge: "Inactive memory returned to system",
+  network_flush: "Network stack flushed and renewed",
+  disk_permissions: "Disk permissions repaired",
+  bluetooth_reset: "Bluetooth module reset",
+  spotlight_rebuild: "Spotlight re-indexing started",
+  dock_refresh: "Dock refreshed and reloaded",
+  firewall_enable: "Firewall enabled",
+  quarantine_cleanup: "Gatekeeper quarantine records cleared",
+  prevent_network_dsstore: "Network .DS_Store creation disabled",
+  launch_agents_cleanup: "Stale Launch Agents removed",
+  periodic_maintenance: "Periodic maintenance scripts executed",
+  shared_file_list_repair: "Shared file lists repaired",
+  notification_cleanup: "Old notification records cleaned",
+  disk_verify: "Disk filesystem verified OK",
+  coreduet_cleanup: "Usage history records trimmed",
+  login_items_audit: "Login items audited",
+};
+
+function kindOf(task: OptTask): Kind {
   if (task.needs_admin) return "admin";
   if (task.warning) return "restart";
   return "safe";
 }
 
-const CATEGORY_META: Record<Category, { label: string; dot: string }> = {
-  safe: { label: "Safe to run", dot: "green" },
-  restart: { label: "Needs restart", dot: "amber" },
-  admin: { label: "Admin required", dot: "red" },
-};
+const RING_LEN = 364.4;
 
-/* ── Admin Warning Dialog ──────────────────────────────── */
-
-function AdminWarningDialog({
-  visible,
-  adminCount,
-  onContinue,
-  onCancel,
-}: {
-  visible: boolean;
-  adminCount: number;
-  onContinue: () => void;
-  onCancel: () => void;
-}) {
-  if (!visible) return null;
-
-  return (
-    <div className="opt-dialog-overlay" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="opt-dialog">
-        <div className="opt-dialog-icon">
-          <ShieldAlert size={28} strokeWidth={1.6} />
-        </div>
-        <div className="opt-dialog-title">Admin Access Required</div>
-        <div className="opt-dialog-desc">
-          You selected {adminCount} admin task{adminCount !== 1 ? "s" : ""}. Each will prompt for your password. This may take a few minutes.
-        </div>
-        <div className="opt-dialog-buttons">
-          <button className="btn" onClick={onCancel}>Cancel</button>
-          <button className="btn btn-primary" onClick={onContinue}>Continue</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Task Card ──────────────────────────────────────── */
-
-function TaskCard({
+function TaskRow({
   task,
   status,
-  checked,
+  first,
   globalRunning,
-  onToggle,
   onRun,
 }: {
   task: OptTask;
   status: { status: string; message?: string };
-  checked: boolean;
+  first: boolean;
   globalRunning: boolean;
-  onToggle: () => void;
   onRun: () => void;
 }) {
   const actualStatus = status.status;
   const [displayStatus, setDisplayStatus] = useState(actualStatus);
   const runStartRef = useRef<number>(0);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (actualStatus === "running") {
       runStartRef.current = Date.now();
       setDisplayStatus("running");
     } else if (actualStatus === "done" || actualStatus === "error" || actualStatus === "skipped") {
-      // Ensure spinner shows for at least 800ms
-      const elapsed = Date.now() - runStartRef.current;
-      const remaining = Math.max(0, 800 - elapsed);
+      const remaining = Math.max(0, 900 - (Date.now() - runStartRef.current));
       if (remaining > 0) {
         const timer = setTimeout(() => setDisplayStatus(actualStatus), remaining);
         return () => clearTimeout(timer);
-      } else {
-        setDisplayStatus(actualStatus);
       }
+      setDisplayStatus(actualStatus);
     } else {
       setDisplayStatus(actualStatus);
     }
   }, [actualStatus]);
 
-  const [showCheckmark, setShowCheckmark] = useState(false);
-  const [cardPulse, setCardPulse] = useState(false);
-  const [copied, setCopied] = useState(false);
-
+  const kind = kindOf(task);
   const isRunning = displayStatus === "running";
   const isDone = displayStatus === "done";
   const isError = displayStatus === "error";
   const isSkipped = displayStatus === "skipped";
   const isFinished = isDone || isError || isSkipped;
 
-  // Trigger checkmark animation and card pulse when done
-  useEffect(() => {
-    if (isDone) {
-      setShowCheckmark(true);
-      setCardPulse(true);
-      const pulseTimer = setTimeout(() => setCardPulse(false), 1200);
-      const checkTimer = setTimeout(() => setShowCheckmark(false), 1800);
-      return () => { clearTimeout(pulseTimer); clearTimeout(checkTimer); };
-    }
-  }, [isDone]);
-
-  // Friendly fallback messages per task
-  const TASK_RESULTS: Record<string, string> = {
-    dns_flush: "DNS resolver cache cleared",
-    cache_refresh: "Thumbnail and preview caches refreshed",
-    saved_state: "Saved window state data removed",
-    launch_services: "Launch Services database rebuilt",
-    icon_cache: "App icon cache refreshed",
-    sqlite_vacuum: "Databases compacted",
-    plist_repair: "Preference files validated",
-    font_cache: "Font caches cleared",
-    memory_purge: "Inactive memory returned to system",
-    network_flush: "Network stack flushed and renewed",
-    disk_permissions: "Disk permissions repaired",
-    bluetooth_reset: "Bluetooth module reset",
-    spotlight_rebuild: "Spotlight re-indexing started",
-    dock_refresh: "Dock refreshed and reloaded",
-    firewall_enable: "Firewall enabled",
-    quarantine_cleanup: "Gatekeeper quarantine records cleared",
-    prevent_network_dsstore: "Network .DS_Store creation disabled",
-    launch_agents_cleanup: "Stale Launch Agents removed",
-    periodic_maintenance: "Periodic maintenance scripts executed",
-    shared_file_list_repair: "Shared file lists repaired",
-    notification_cleanup: "Old notification records cleaned",
-    disk_verify: "Disk filesystem verified OK",
-    coreduet_cleanup: "Usage history records trimmed",
-    login_items_audit: "Login items audited",
-  };
-
-  const resultMessage = isDone
-    ? TASK_RESULTS[task.id] || status.message?.trim() || "Completed successfully"
-    : null;
+  const btnState = isDone ? " done" : isError ? " failed" : isSkipped ? " skipped" : isRunning ? " running" : "";
+  const btnLabel = isDone
+    ? "Done"
+    : isError
+      ? "Failed"
+      : isSkipped
+        ? "Skipped"
+        : isRunning
+          ? "Running…"
+          : kind === "admin"
+            ? "Run…"
+            : "Run";
 
   return (
-    <div className={`opt-card${cardPulse ? " opt-card-pulse" : ""}`}>
-      <input
-        type="checkbox"
-        className="checkbox"
-        checked={checked}
-        onChange={onToggle}
-        disabled={globalRunning || isFinished}
-      />
-      <div className="opt-card-info">
-        <div className="opt-card-name-row">
-          <span className="opt-card-name">{task.name}</span>
-          {task.needs_admin && <span className="opt-admin-badge">admin</span>}
+    <div className={`opt-task${first ? "" : " divided"}`}>
+      <div className="opt-task-prog" style={{ width: isRunning ? "100%" : "0%" }} />
+      <div className="opt-task-info">
+        <div className="opt-task-name-row">
+          <span className="opt-task-name">{task.name}</span>
+          <span
+            className="opt-task-dot"
+            style={{ background: KIND_META[kind].color }}
+            title={task.warning ? `${KIND_META[kind].label}: ${task.warning}` : KIND_META[kind].label}
+          />
         </div>
         <div
-          className={`opt-card-desc${isDone ? " opt-card-desc-done" : isError ? " opt-card-desc-error" : isSkipped ? " opt-card-desc-skip" : ""}`}
+          className={`opt-task-desc${isError ? " error" : isSkipped ? " skipped" : ""}`}
           title={isError && status.message ? status.message : undefined}
         >
-          {isDone && resultMessage ? resultMessage
-            : isError && status.message ? (<>
-              <span className="opt-error-text">{status.message}</span>
+          {isDone ? (
+            TASK_RESULTS[task.id] || status.message?.trim() || task.description
+          ) : isError && status.message ? (
+            <>
+              <span className="opt-task-error-text">{status.message}</span>
               <button
-                className="opt-error-copy"
+                className="opt-task-copy"
                 onClick={(e) => {
                   e.stopPropagation();
                   navigator.clipboard.writeText(status.message!);
@@ -180,233 +157,180 @@ function TaskCard({
               >
                 {copied ? <Check size={11} /> : <Copy size={11} />}
               </button>
-            </>)
-            : isSkipped && status.message ? status.message
-            : task.description}
+            </>
+          ) : isSkipped && status.message ? (
+            status.message
+          ) : (
+            task.description
+          )}
         </div>
-        {!isFinished && task.warning ? (
-          <div className="opt-card-warning">{"\u26A0"} {task.warning}</div>
-        ) : null}
       </div>
-
-      <div className="opt-card-action">
-        {isRunning ? (
-          <button className="btn opt-run-btn running" disabled>
-            <span className="opt-btn-spinner" />
-          </button>
-        ) : isDone && showCheckmark ? (
-          <button className="btn opt-run-btn checkmark" disabled>
-            <svg className="opt-checkmark" width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path className="opt-checkmark-path" d="M3 7L6 10L11 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        ) : isDone ? (
-          <button className="btn opt-run-btn done" disabled>Done</button>
-        ) : isError ? (
-          <button className="btn opt-run-btn failed" disabled>Failed</button>
-        ) : isSkipped ? (
-          <button className="btn opt-run-btn skipped" disabled>Skipped</button>
-        ) : (
-          <button
-            className="btn opt-run-btn"
-            onClick={onRun}
-            disabled={globalRunning}
-          >
-            Run
-          </button>
-        )}
-      </div>
+      <button
+        className="opt-task-ai"
+        title="Ask AI about this task"
+        onClick={() => askAiOptimize([task], new Set([task.id]))}
+      >
+        <Sparkles size={13} strokeWidth={1.8} />
+      </button>
+      <button
+        className={`opt-task-btn${btnState}`}
+        onClick={onRun}
+        disabled={globalRunning && !isRunning && !isFinished}
+      >
+        {isDone && <Check size={11} strokeWidth={3} />}
+        {btnLabel}
+      </button>
     </div>
   );
 }
-
-/* ── Optimize Page ──────────────────────────────────── */
 
 export default function Optimize() {
   const tasks = useOptimizeStore((s) => s.tasks);
   const statuses = useOptimizeStore((s) => s.statuses);
   const running = useOptimizeStore((s) => s.running);
   const error = useOptimizeStore((s) => s.error);
-  const enabledIds = useOptimizeStore((s) => s.enabledIds);
   const loadTasks = useOptimizeStore((s) => s.loadTasks);
   const runSingle = useOptimizeStore((s) => s.runSingle);
   const runTaskIds = useOptimizeStore((s) => s.runTaskIds);
-  const toggleTask = useOptimizeStore((s) => s.toggleTask);
-  const markSkipped = useOptimizeStore((s) => s.markSkipped);
 
-  const [filter, setFilter] = useState<Filter>("all");
-  const [showAdminDialog, setShowAdminDialog] = useState(false);
-  const [pendingAdminIds, setPendingAdminIds] = useState<string[]>([]);
-  const [executionDone, setExecutionDone] = useState(false);
+  const [adminTask, setAdminTask] = useState<OptTask | null>(null);
+  const [frame, setFrame] = useState(0);
 
   useEffect(() => {
-    if (tasks.length === 0) {
-      loadTasks();
-    }
+    if (tasks.length === 0) loadTasks();
   }, [tasks.length, loadTasks]);
 
-  // Group tasks by category
-  const grouped = useMemo(() => {
-    const groups: Record<Category, OptTask[]> = { safe: [], restart: [], admin: [] };
-    for (const task of tasks) {
-      groups[categorize(task)].push(task);
+  useEffect(() => {
+    const t = setInterval(() => setFrame((f) => (f + 1) % CAT_FRAMES.length), 220);
+    return () => clearInterval(t);
+  }, []);
+
+  const groups = useMemo(() => {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const used = new Set<string>();
+    const out: { name: string; tasks: OptTask[] }[] = [];
+    for (const g of GROUPS) {
+      const list = g.ids.map((id) => byId.get(id)).filter((t): t is OptTask => !!t);
+      list.forEach((t) => used.add(t.id));
+      if (list.length) out.push({ name: g.name, tasks: list });
     }
-    return groups;
+    const rest = tasks.filter((t) => !used.has(t.id));
+    if (rest.length) out.push({ name: "Other", tasks: rest });
+    return out;
   }, [tasks]);
 
-  // Summary counts (only after execution completes)
-  const summary = useMemo(() => {
-    if (!executionDone) return null;
-    let completed = 0, skipped = 0, failed = 0;
-    for (const s of Object.values(statuses)) {
-      if (s.status === "done") completed++;
-      else if (s.status === "skipped") skipped++;
-      else if (s.status === "error") failed++;
-    }
-    if (completed === 0 && skipped === 0 && failed === 0) return null;
-    return { completed, skipped, failed };
-  }, [statuses, executionDone]);
+  const statusOf = useCallback(
+    (id: string) => statuses[id]?.status ?? "ready",
+    [statuses],
+  );
 
-  // Header context text
-  const headerContext = summary
-    ? `${summary.completed} completed${summary.skipped > 0 ? `, ${summary.skipped} skipped` : ""}${summary.failed > 0 ? `, ${summary.failed} failed` : ""}`
-    : `${tasks.length} tasks available`;
+  const total = tasks.length;
+  const doneCount = tasks.filter((t) => statusOf(t.id) === "done").length;
+  const safeLeftIds = tasks
+    .filter((t) => kindOf(t) === "safe" && statusOf(t.id) !== "done")
+    .map((t) => t.id);
+  const safeLeft = safeLeftIds.length;
 
-  // Count selected
-  const selectedCount = enabledIds.size;
+  const legend = (Object.keys(KIND_META) as Kind[]).map((k) => ({
+    ...KIND_META[k],
+    n: tasks.filter((t) => kindOf(t) === k).length,
+  }));
 
-  // Categories to show based on filter
-  const visibleCategories: Category[] = filter === "all"
-    ? (["safe", "restart", "admin"] as Category[]).filter((c) => grouped[c].length > 0)
-    : grouped[filter].length > 0
-      ? [filter]
-      : [];
+  const heroTitle = total > 0 && doneCount === total ? "Fully tuned" : running ? "Tuning up…" : "Tune-up";
+  const heroSub = running
+    ? "Kyra is working through the list. You can keep using your Mac."
+    : safeLeft
+      ? `${safeLeft} task${safeLeft !== 1 ? "s" : ""} can run right now without a password or restart.`
+      : total > 0
+        ? "Safe tasks are done. The rest need a restart or your password."
+        : "Loading tasks…";
+  const allLabel = running
+    ? "Running…"
+    : safeLeft
+      ? `Run ${safeLeft} safe task${safeLeft !== 1 ? "s" : ""}`
+      : "All safe tasks done";
 
-  // Run Selected handler — phased execution
-  const handleRunSelected = useCallback(async () => {
-    const selectedTasks = tasks.filter((t) => enabledIds.has(t.id));
-    if (selectedTasks.length === 0) return;
+  const ringOff = RING_LEN * (1 - (total ? doneCount / total : 0));
 
-    const nonAdminIds = selectedTasks.filter((t) => !t.needs_admin).map((t) => t.id);
-    const adminIds = selectedTasks.filter((t) => t.needs_admin).map((t) => t.id);
+  const handleRunAll = () => {
+    if (running || safeLeft === 0) return;
+    runTaskIds(safeLeftIds);
+  };
 
-    setExecutionDone(false);
+  const handleRun = (task: OptTask) => {
+    const st = statusOf(task.id);
+    if (running || st === "running" || st === "done" || st === "error" || st === "skipped") return;
+    if (task.needs_admin) setAdminTask(task);
+    else runSingle(task.id);
+  };
 
-    // Phase 1: Run non-admin tasks
-    if (nonAdminIds.length > 0) {
-      await runTaskIds(nonAdminIds);
-    }
-
-    // Phase 2: Handle admin tasks
-    if (adminIds.length > 0) {
-      setPendingAdminIds(adminIds);
-      setShowAdminDialog(true);
-    } else {
-      setExecutionDone(true);
-    }
-  }, [tasks, enabledIds, runTaskIds]);
-
-  // Admin dialog: Continue
-  const handleAdminContinue = useCallback(async () => {
-    setShowAdminDialog(false);
-    const ids = pendingAdminIds;
-    setPendingAdminIds([]);
-    await runTaskIds(ids);
-    setExecutionDone(true);
-  }, [pendingAdminIds, runTaskIds]);
-
-  // Admin dialog: Cancel
-  const handleAdminCancel = useCallback(() => {
-    setShowAdminDialog(false);
-    markSkipped(pendingAdminIds, "Cancelled by user");
-    setPendingAdminIds([]);
-    setExecutionDone(true);
-  }, [pendingAdminIds, markSkipped]);
+  const handleAdminContinue = () => {
+    const t = adminTask;
+    setAdminTask(null);
+    if (t) runSingle(t.id);
+  };
 
   return (
-    <div className="opt-container">
-      {error && <div className="opt-error">{error}</div>}
-
-      {/* Header */}
-      <div className="opt-header">
-        <div className="opt-header-left">
-          <span className="opt-header-title">Optimize</span>
-          <span className="opt-header-context">{headerContext}</span>
+    <div className="opt-layout">
+      <div className="opt-panel">
+        <div className="opt-ring">
+          <svg width="132" height="132" viewBox="0 0 132 132" className="opt-ring-svg">
+            <circle cx="66" cy="66" r="58" fill="none" className="opt-ring-track" strokeWidth="9" />
+            <circle
+              cx="66"
+              cy="66"
+              r="58"
+              fill="none"
+              stroke="url(#optg)"
+              strokeWidth="9"
+              strokeLinecap="round"
+              strokeDasharray={RING_LEN}
+              strokeDashoffset={ringOff}
+              className="opt-ring-fill"
+            />
+            <defs>
+              <linearGradient id="optg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#22B8F0" />
+                <stop offset="1" stopColor="#2AC852" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <div className="opt-ring-center">
+            <span className="opt-ring-num">{doneCount}</span>
+            <span className="opt-ring-sub">of {total} done</span>
+          </div>
         </div>
-      </div>
-
-      {/* Filter chips */}
-      <div className="opt-filters">
-        <button
-          className={`opt-filter-chip${filter === "all" ? " active" : ""}`}
-          onClick={() => setFilter("all")}
-        >
-          All
+        <div className="opt-hero-title">{heroTitle}</div>
+        <div className="opt-hero-sub">{heroSub}</div>
+        <button className="opt-run-all" onClick={handleRunAll} disabled={running || safeLeft === 0}>
+          {allLabel}
         </button>
-        <button
-          className={`opt-filter-chip${filter === "safe" ? " active" : ""}`}
-          onClick={() => setFilter("safe")}
-        >
-          <span className="opt-filter-dot green" />
-          Safe
-        </button>
-        <button
-          className={`opt-filter-chip${filter === "restart" ? " active" : ""}`}
-          onClick={() => setFilter("restart")}
-        >
-          <span className="opt-filter-dot amber" />
-          Needs restart
-        </button>
-        <button
-          className={`opt-filter-chip${filter === "admin" ? " active" : ""}`}
-          onClick={() => setFilter("admin")}
-        >
-          <span className="opt-filter-dot red" />
-          Admin
-        </button>
-      </div>
-
-      {/* Summary bar */}
-      {summary && (
-        <div className="opt-summary">
-          <span className="opt-summary-stat">
-            <span className="opt-summary-dot green" />
-            {summary.completed} completed
-          </span>
-          {summary.skipped > 0 && (
-            <span className="opt-summary-stat">
-              <span className="opt-summary-dot amber" />
-              {summary.skipped} skipped
-            </span>
-          )}
-          {summary.failed > 0 && (
-            <span className="opt-summary-stat">
-              <span className="opt-summary-dot red" />
-              {summary.failed} failed
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Task list */}
-      <div className="opt-task-list">
-        {visibleCategories.map((cat) => (
-          <div key={cat} className="opt-category-group">
-            <div className="opt-category-header">
-              <span className={`opt-category-dot ${CATEGORY_META[cat].dot}`} />
-              <span className="opt-category-name">{CATEGORY_META[cat].label}</span>
-              <span className="opt-category-count">{"\u00B7"} {grouped[cat].length} task{grouped[cat].length !== 1 ? "s" : ""}</span>
+        <div className="opt-legend">
+          {legend.map((l) => (
+            <div key={l.label} className="opt-legend-row">
+              <span className="opt-legend-dot" style={{ background: l.color }} />
+              <span className="opt-legend-label">{l.label}</span>
+              <span className="opt-legend-n">{l.n}</span>
             </div>
-            <div className="opt-cards">
-              {grouped[cat].map((task) => (
-                <TaskCard
+          ))}
+        </div>
+        <img src={CAT_FRAMES[frame]} className="opt-cat" alt="" draggable={false} />
+      </div>
+
+      <div className="opt-list">
+        {error && <div className="opt-error">{error}</div>}
+        {groups.map((g) => (
+          <div key={g.name} className="opt-group">
+            <div className="opt-group-name">{g.name}</div>
+            <div className="opt-group-card">
+              {g.tasks.map((task, i) => (
+                <TaskRow
                   key={task.id}
                   task={task}
+                  first={i === 0}
                   status={statuses[task.id] || { status: "ready" }}
-                  checked={enabledIds.has(task.id)}
                   globalRunning={running}
-                  onToggle={() => toggleTask(task.id)}
-                  onRun={() => runSingle(task.id)}
+                  onRun={() => handleRun(task)}
                 />
               ))}
             </div>
@@ -414,42 +338,28 @@ export default function Optimize() {
         ))}
       </div>
 
-      {/* Footer */}
-      <div className="module-footer">
-        <span className="module-footer-info">
-          {selectedCount} of {tasks.length} tasks selected
-        </span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <span
-            className="tooltip-wrap"
-            data-tooltip={selectedCount > 0 && !canAskAiOptimize(tasks, enabledIds) ? "Select fewer items to Ask AI" : undefined}
-          >
-            <AskAiCoachMark />
-            <button
-              className="btn"
-              disabled={selectedCount === 0 || !canAskAiOptimize(tasks, enabledIds)}
-              onClick={() => askAiOptimize(tasks, enabledIds)}
-            >
-              Ask AI
-            </button>
-          </span>
-          <button
-            className="btn btn-primary"
-            onClick={handleRunSelected}
-            disabled={running || selectedCount === 0}
-          >
-            Run Selected
-          </button>
+      {adminTask && (
+        <div className="opt-admin-overlay" onClick={() => setAdminTask(null)}>
+          <div className="opt-admin-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="opt-admin-icon">
+              <LockKeyhole size={22} strokeWidth={2} />
+            </div>
+            <div className="opt-admin-title">Admin access required</div>
+            <div className="opt-admin-text">
+              {adminTask.name} needs your administrator password. macOS will ask for it next.
+              {adminTask.warning ? ` ${adminTask.warning}.` : ""}
+            </div>
+            <div className="opt-admin-btns">
+              <button className="opt-admin-btn cancel" onClick={() => setAdminTask(null)}>
+                Cancel
+              </button>
+              <button className="opt-admin-btn continue" onClick={handleAdminContinue}>
+                Continue
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* Admin warning dialog */}
-      <AdminWarningDialog
-        visible={showAdminDialog}
-        adminCount={pendingAdminIds.length}
-        onContinue={handleAdminContinue}
-        onCancel={handleAdminCancel}
-      />
+      )}
     </div>
   );
 }

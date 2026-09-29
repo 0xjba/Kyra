@@ -1,515 +1,358 @@
-import { useState, useMemo, useEffect, useRef } from "react";
-import { Download, Search, Check } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Check } from "lucide-react";
 import { useInstallersStore } from "../stores/installersStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { formatSize } from "../utils/format";
-import { pickEquivalenceCard, type EquivalenceCard } from "../utils/equivalenceCards";
+import { downloadedAgo } from "../utils/relativeTime";
+import { getSystemStats, getTotalBytesFreed, type InstallerFile } from "../lib/tauri";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import SuccessOverlay from "../components/SuccessOverlay";
+import cat1 from "../assets/cat-tail/cat1.png";
+import cat2 from "../assets/cat-tail/cat2.png";
+import cat3 from "../assets/cat-tail/cat3.png";
+import cat4 from "../assets/cat-tail/cat4.png";
+import cat5 from "../assets/cat-tail/cat5.png";
+import cat6 from "../assets/cat-tail/cat6.png";
+import cat7 from "../assets/cat-tail/cat7.png";
 import "../styles/installers.css";
 
-/* ── Date formatter ── */
-function formatDate(secs: number): string {
-  if (secs === 0) return "\u2014";
-  return new Date(secs * 1000).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+const CAT_FRAMES = [cat1, cat2, cat3, cat4, cat5, cat6, cat7, cat6, cat5, cat4, cat3, cat2];
+
+const EXT_COLORS: Record<string, string> = {
+  dmg: "#3A7BFF",
+  pkg: "#FD8C34",
+  mpkg: "#FD8C34",
+  iso: "#8E5CF6",
+  xip: "#13D1BB",
+  app: "#FD4841",
+  zip: "#D99A00",
+};
+
+const GB = 1024 * 1024 * 1024;
+const MB = 1024 * 1024;
+
+function fmt(bytes: number): string {
+  if (bytes >= 0.995 * GB) return `${(bytes / GB).toFixed(1)} GB`;
+  if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
+  if (bytes > 0) return formatSize(bytes);
+  return "0 MB";
 }
 
-/* ── What gets detected ── */
-const DETECTED_TYPES = [
-  { label: ".dmg", color: "#3A7BFF" },
-  { label: ".pkg", color: "#FD8C34" },
-  { label: ".iso", color: "#8E5CF6" },
-  { label: ".xip", color: "#13D1BB" },
-  { label: ".app", color: "#FD4841" },
-];
+function locationOf(path: string): string {
+  if (path.includes("/Telegram Desktop")) return "Telegram";
+  if (path.includes("Mail Downloads")) return "Mail";
+  if (path.includes("com~apple~CloudDocs")) return "iCloud Drive";
+  const m = path.match(/^\/Users\/[^/]+\/(Downloads|Desktop|Documents)\//);
+  if (m) return m[1];
+  if (path.includes("/Library/Downloads")) return "Library";
+  return "other folders";
+}
 
-/* ── Sort modes ── */
-type SortMode = "size" | "name" | "date";
+function locationsLabel(files: InstallerFile[]): string {
+  const bytes = new Map<string, number>();
+  for (const f of files) {
+    const loc = locationOf(f.path);
+    bytes.set(loc, (bytes.get(loc) ?? 0) + f.size);
+  }
+  const locs = [...bytes.entries()].sort((a, b) => b[1] - a[1]).map(([l]) => l);
+  if (locs.length === 0) return "left to toss";
+  if (locs.length === 1) return `in ${locs[0]}`;
+  if (locs.length <= 3) return `in ${locs.slice(0, -1).join(", ")} and ${locs[locs.length - 1]}`;
+  return `across ${locs.length} folders`;
+}
 
-/* ── Idle View ── */
-function IdleView() {
+function useCatFrame() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => (f + 1) % CAT_FRAMES.length), 220);
+    return () => clearInterval(id);
+  }, []);
+  return CAT_FRAMES[frame];
+}
+
+function HeaderCard({
+  headline,
+  subline,
+  error,
+  total,
+  totalSub,
+}: {
+  headline: string;
+  subline: string;
+  error?: string | null;
+  total?: string;
+  totalSub?: string;
+}) {
+  const catSrc = useCatFrame();
+  return (
+    <div className="ins-head">
+      <img className="ins-head-cat" src={catSrc} alt="" />
+      <div className="ins-head-text">
+        <div className="ins-head-title">{headline}</div>
+        <div className={`ins-head-sub${error ? " error" : ""}`}>{error || subline}</div>
+      </div>
+      {total !== undefined && (
+        <div className="ins-head-total">
+          <div className="ins-head-total-value">{total}</div>
+          <div className="ins-head-total-sub">{totalSub}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocIcon({ ext }: { ext: string }) {
+  const e = ext.toLowerCase();
+  return (
+    <div className="ins-doc">
+      <span className="ins-doc-tag" style={{ background: EXT_COLORS[e] ?? "#3A7BFF" }}>
+        .{e}
+      </span>
+    </div>
+  );
+}
+
+function Footer({ info, children }: { info: ReactNode; children: ReactNode }) {
+  return (
+    <div className="ins-footer">
+      <span className="ins-footer-info">{info}</span>
+      <div className="ins-footer-actions">{children}</div>
+    </div>
+  );
+}
+
+function ErrorView() {
   const scan = useInstallersStore((s) => s.scan);
   const error = useInstallersStore((s) => s.error);
 
   return (
-    <div className="centered">
-      <div className="inst-idle-icon">
-        <Download size={26} strokeWidth={1.5} />
-      </div>
-
-      <div className="inst-idle-title">Find installer files</div>
-      <div className="inst-idle-desc">
-        Scans Downloads, Desktop, Documents, and other locations for DMG, PKG,
-        and installer files. Typically recovers 0.5–5 GB.
-      </div>
-
-      <button className="btn btn-primary" onClick={scan}>
-        Start Scan
-      </button>
-
-      {error && <div className="inst-error">{error}</div>}
-
-      <div className="inst-detected-section">
-        <span className="inst-detected-label">WHAT GETS DETECTED</span>
-        <div className="inst-detected-types">
-          {DETECTED_TYPES.map((t) => (
-            <span key={t.label} className="inst-detected-chip">
-              <span className="inst-detected-dot" style={{ backgroundColor: t.color }} />
-              {t.label}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
+    <>
+      <HeaderCard
+        headline="I couldn't finish looking."
+        subline="Something got in the way while checking your folders."
+        error={error}
+      />
+      <div className="ins-flex-spacer" />
+      <Footer info="Scan failed">
+        <button className="ins-btn-primary" onClick={scan}>
+          Try again
+        </button>
+      </Footer>
+    </>
   );
 }
 
-/* ── Scanning View ── */
 function ScanningView() {
   return (
-    <div className="centered">
-      <div className="spinner" />
-      <div className="inst-scanning-text">Scanning for installers...</div>
-    </div>
+    <>
+      <HeaderCard
+        headline="Sniffing out installers…"
+        subline="Checking Downloads, Desktop, Documents, Mail, iCloud and Homebrew downloads."
+      />
+      <div className="ins-grid">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="ins-card ins-card-skeleton" style={{ animationDelay: `${i * 120}ms` }}>
+            <div className="ins-card-top">
+              <div className="ins-doc ins-doc-skeleton" />
+              <div className="ins-card-meta">
+                <div className="ins-skel-line" style={{ width: "80%" }} />
+                <div className="ins-skel-line short" style={{ width: "55%" }} />
+              </div>
+            </div>
+            <div className="ins-card-bottom">
+              <div className="ins-skel-line size" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <Footer info="Scanning…">
+        <button className="ins-btn-primary" disabled>
+          Move to Trash
+        </button>
+      </Footer>
+    </>
   );
 }
 
-/* ── Empty State ── */
-function EmptyView() {
-  const reset = useInstallersStore((s) => s.reset);
-
-  return (
-    <div className="centered">
-      <div className="inst-empty-icon">
-        <Check size={26} strokeWidth={1.5} />
-      </div>
-      <div className="inst-idle-title">All clear</div>
-      <div className="inst-idle-desc">
-        No installer files were found. Your system is already clean.
-      </div>
-      <button className="btn" onClick={reset} style={{ marginTop: 8 }}>
-        Scan Again
-      </button>
-    </div>
-  );
-}
-
-/* ── List View ── */
 function ListView() {
+  const phase = useInstallersStore((s) => s.phase);
   const files = useInstallersStore((s) => s.files);
   const selected = useInstallersStore((s) => s.selected);
+  const progress = useInstallersStore((s) => s.progress);
+  const error = useInstallersStore((s) => s.error);
+  const freed = useInstallersStore((s) => s.freed);
   const toggleSelect = useInstallersStore((s) => s.toggleSelect);
   const selectAll = useInstallersStore((s) => s.selectAll);
   const deselectAll = useInstallersStore((s) => s.deselectAll);
   const deleteSelected = useInstallersStore((s) => s.deleteSelected);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("size");
+  const scan = useInstallersStore((s) => s.scan);
+  const useTrash = useSettingsStore((s) => s.settings.use_trash);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  const deleting = phase === "deleting";
+  const sorted = useMemo(() => [...files].sort((a, b) => b.size - a.size), [files]);
   const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  const selectedFiles = files.filter((f) => selected.has(f.path));
+  const selectedSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
   const allSelected = files.length > 0 && selected.size === files.length;
+  const empty = files.length === 0;
 
-  const selectedSize = files
-    .filter((f) => selected.has(f.path))
-    .reduce((sum, f) => sum + f.size, 0);
+  const btnLabel = deleting
+    ? `${useTrash ? "Moving" : "Deleting"}… ${
+        progress && progress.items_total > 0
+          ? Math.round((progress.items_done / progress.items_total) * 100)
+          : 0
+      }%`
+    : selected.size > 0
+      ? useTrash
+        ? `Move ${fmt(selectedSize)} to Trash`
+        : `Delete ${fmt(selectedSize)}`
+      : useTrash
+        ? "Move to Trash"
+        : "Delete";
 
-  // Filter and sort
-  const filtered = useMemo(() => {
-    let list = [...files];
+  const headline = empty
+    ? "No installers lying around."
+    : freed > 0
+      ? `Tossed ${fmt(freed)}. The rest look like keepers.`
+      : `Found ${files.length} installer${files.length === 1 ? "" : "s"}. Toss them?`;
+  const subline = empty
+    ? "Checked Downloads, Desktop, Documents, Mail, iCloud and Homebrew downloads."
+    : "Installers are safe to delete once the app is in Applications.";
 
-    // Search
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter((f) => f.name.toLowerCase().includes(q));
-    }
-
-    // Sort
-    list.sort((a, b) => {
-      if (sortMode === "size") return b.size - a.size;
-      if (sortMode === "name") return a.name.localeCompare(b.name);
-      // date — newest first
-      return b.modified_secs - a.modified_secs;
-    });
-
-    return list;
-  }, [files, searchQuery, sortMode]);
-
-  if (files.length === 0) {
-    return <EmptyView />;
-  }
+  const info = deleting
+    ? progress?.current_item
+      ? `Removing ${progress.current_item}…`
+      : "Starting…"
+    : `${selected.size} of ${files.length} selected`;
 
   return (
     <>
-      {/* Header */}
-      <div className="inst-list-header">
-        <div className="inst-list-summary">
-          <span className="inst-list-title">Installers</span>
-          <span className="inst-list-size">{formatSize(totalSize)}</span>
-          <span className="inst-list-context">
-            items found across {files.length} file{files.length === 1 ? "" : "s"}
-          </span>
-        </div>
-        <div className="inst-list-actions">
+      <HeaderCard
+        headline={headline}
+        subline={subline}
+        total={fmt(totalSize)}
+        totalSub={locationsLabel(files)}
+      />
+
+      <div className="ins-grid">
+        {sorted.map((file) => {
+          const on = selected.has(file.path);
+          return (
+            <div
+              key={file.path}
+              className={`ins-card${on ? " selected" : ""}${deleting && on ? " leaving" : ""}`}
+              onClick={() => !deleting && toggleSelect(file.path)}
+            >
+              <div className="ins-card-top">
+                <DocIcon ext={file.extension} />
+                <div className="ins-card-meta">
+                  <div className="ins-card-name" title={file.name}>{file.name}</div>
+                  <div className="ins-card-age">{downloadedAgo(file.modified_secs)}</div>
+                </div>
+                <span className={`ins-check${on ? " checked" : ""}`}>
+                  {on && <Check size={11} strokeWidth={3} />}
+                </span>
+              </div>
+              <div className="ins-card-bottom">
+                <span className="ins-card-size">{fmt(file.size)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Footer info={error ? <span className="ins-footer-error">{error}</span> : info}>
+        {empty ? (
+          <button className="ins-btn-secondary" onClick={scan}>
+            Scan Again
+          </button>
+        ) : (
           <button
-            className="btn"
-            style={{ minWidth: 90 }}
+            className="ins-btn-secondary"
+            disabled={deleting}
             onClick={allSelected ? deselectAll : selectAll}
           >
             {allSelected ? "Deselect All" : "Select All"}
           </button>
-        </div>
-      </div>
-
-      {/* Search + Sort */}
-      <div className="inst-search-row">
-        <div className="inst-search-box">
-          <Search size={13} className="inst-search-icon" />
-          <input
-            type="text"
-            className="inst-search-input"
-            placeholder="Search files..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="inst-sort-controls">
-          <span className="inst-sort-label">Sort</span>
-          <button
-            className={`inst-sort-btn ${sortMode === "size" ? "active" : ""}`}
-            onClick={() => setSortMode("size")}
-          >
-            Size
-          </button>
-          <button
-            className={`inst-sort-btn ${sortMode === "name" ? "active" : ""}`}
-            onClick={() => setSortMode("name")}
-          >
-            Name
-          </button>
-          <button
-            className={`inst-sort-btn ${sortMode === "date" ? "active" : ""}`}
-            onClick={() => setSortMode("date")}
-          >
-            Date
-          </button>
-        </div>
-      </div>
-
-      {/* File List */}
-      <div className="inst-file-list">
-        <div className="inst-card">
-          {filtered.map((file) => (
-            <label key={file.path} className="inst-row">
-              <input
-                type="checkbox"
-                className="checkbox"
-                checked={selected.has(file.path)}
-                onChange={() => toggleSelect(file.path)}
-              />
-              <div className="inst-row-info">
-                <div className="inst-row-name">{file.name}</div>
-                <div className="inst-row-meta">{formatDate(file.modified_secs)}</div>
-              </div>
-              <div className="inst-row-size">{formatSize(file.size)}</div>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="module-footer">
-        <span className="module-footer-info">
-          {selected.size} of {files.length} selected
-        </span>
+        )}
         <button
-          className="btn btn-primary"
-          style={{ minWidth: 120 }}
-          disabled={selected.size === 0}
+          className="ins-btn-primary"
+          disabled={deleting || selected.size === 0}
           onClick={() => setShowConfirm(true)}
         >
-          Delete {selected.size > 0 ? formatSize(selectedSize) : ""}
+          {btnLabel}
         </button>
-      </div>
+      </Footer>
 
       <DeleteConfirmDialog
         visible={showConfirm}
-        title={`Delete ${selected.size} file${selected.size === 1 ? "" : "s"} (${formatSize(selectedSize)})?`}
-        onConfirm={() => { setShowConfirm(false); deleteSelected(); }}
+        title={`${useTrash ? "Move" : "Delete"} ${selected.size} file${selected.size === 1 ? "" : "s"} (${formatSize(selectedSize)})${useTrash ? " to Trash" : ""}?`}
+        onConfirm={() => {
+          setShowConfirm(false);
+          deleteSelected();
+        }}
         onCancel={() => setShowConfirm(false)}
       />
     </>
   );
 }
 
-/* ── Confetti ── */
-const CONFETTI_COLORS = [
-  "rgba(255, 255, 255, 0.6)",
-  "rgba(255, 255, 255, 0.4)",
-  "rgba(255, 255, 255, 0.3)",
-  "rgba(253, 72, 65, 0.35)",
-  "rgba(42, 200, 82, 0.35)",
-  "rgba(58, 123, 255, 0.3)",
-  "rgba(253, 210, 37, 0.3)",
-  "rgba(142, 92, 246, 0.3)",
-];
-
-interface Particle {
-  x: number; y: number; vx: number; vy: number;
-  rotation: number; rotationSpeed: number;
-  size: number; color: string; opacity: number;
-  life: number; maxLife: number;
-}
-
-function InstConfetti({ active }: { active: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    if (!active) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
-    ctx.scale(2, 2);
-
-    const w = canvas.offsetWidth;
-    const h = canvas.offsetHeight;
-
-    const particles: Particle[] = [];
-    for (let i = 0; i < 20; i++) {
-      particles.push({
-        x: w / 2 + (Math.random() - 0.5) * 60,
-        y: h * 0.3,
-        vx: (Math.random() - 0.5) * 3,
-        vy: -(Math.random() * 2 + 1),
-        rotation: Math.random() * 360,
-        rotationSpeed: (Math.random() - 0.5) * 8,
-        size: Math.random() * 4 + 2,
-        color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
-        opacity: 1, life: 0,
-        maxLife: 1600 + Math.random() * 1800,
-      });
-    }
-
-    let animId: number;
-    let lastTime = performance.now();
-
-    function animate(now: number) {
-      const dt = Math.min(now - lastTime, 32);
-      lastTime = now;
-      ctx!.clearRect(0, 0, w, h);
-      let alive = 0;
-      for (const p of particles) {
-        p.life += dt;
-        if (p.life > p.maxLife) continue;
-        alive++;
-        p.vy += 0.03;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.rotation += p.rotationSpeed;
-        p.opacity = 1 - Math.pow(p.life / p.maxLife, 2);
-        ctx!.save();
-        ctx!.translate(p.x, p.y);
-        ctx!.rotate((p.rotation * Math.PI) / 180);
-        ctx!.globalAlpha = p.opacity;
-        ctx!.fillStyle = p.color;
-        ctx!.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
-        ctx!.restore();
-      }
-      if (alive > 0) animId = requestAnimationFrame(animate);
-    }
-
-    animId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animId);
-  }, [active]);
-
-  if (!active) return null;
-  return <canvas ref={canvasRef} className="inst-confetti" />;
-}
-
-/* ── SSD Icon for milestone cards ── */
-function SsdIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="6" width="18" height="12" rx="2" />
-      <line x1="7" y1="10" x2="7" y2="14" />
-      <line x1="11" y1="10" x2="11" y2="14" />
-      <line x1="15" y1="10" x2="15" y2="14" />
-    </svg>
-  );
-}
-
-/* ── Deleting / Done View ── */
-function DeletingView() {
-  const phase = useInstallersStore((s) => s.phase);
-  const progress = useInstallersStore((s) => s.progress);
+function DoneView() {
   const result = useInstallersStore((s) => s.result);
+  const files = useInstallersStore((s) => s.files);
   const dismissDone = useInstallersStore((s) => s.dismissDone);
-  const isDone = phase === "done";
+  const useTrash = useSettingsStore((s) => s.settings.use_trash);
+  const [diskTotal, setDiskTotal] = useState(0);
+  const [diskFree, setDiskFree] = useState(0);
+  const [lifetimeBytes, setLifetimeBytes] = useState(0);
 
-  // Staggered animation state
-  const [showCard, setShowCard] = useState(false);
-  const [showDoneBtn, setShowDoneBtn] = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
-
-  // Pick equivalence card once when done
-  const cardRef = useRef<EquivalenceCard | null>(null);
-  const bytesFreed = isDone && result ? result.bytes_freed : (progress?.bytes_freed || 0);
-  if (isDone && !cardRef.current && bytesFreed > 0) {
-    cardRef.current = pickEquivalenceCard(bytesFreed);
-  }
-
-  // Reset animation state when leaving done
   useEffect(() => {
-    if (!isDone) {
-      setShowCard(false);
-      setShowDoneBtn(false);
-      setShowConfetti(false);
-      cardRef.current = null;
-      return;
-    }
+    getSystemStats()
+      .then((s) => {
+        setDiskTotal(s.disk_total);
+        setDiskFree(s.disk_free);
+      })
+      .catch(() => {});
+    getTotalBytesFreed().then(setLifetimeBytes).catch(() => {});
+  }, []);
 
-    // Staggered reveal
-    const t1 = setTimeout(() => { setShowConfetti(true); setShowCard(true); }, 500);
-    const t2 = setTimeout(() => setShowDoneBtn(true), 1050);
-
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [isDone]);
-
-  const percent = isDone
-    ? 100
-    : progress && progress.items_total > 0
-      ? Math.round((progress.items_done / progress.items_total) * 100)
-      : 0;
-
-  // SVG ring dimensions
-  const ringSize = 120;
-  const strokeWidth = 6;
-  const radius = (ringSize - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference - (percent / 100) * circumference;
-
-  // Extract file name from current_item for display
-  const currentLabel = progress?.current_item
-    ? `Removing ${progress.current_item}...`
-    : "Starting...";
-
-  const card = cardRef.current;
+  const deleted = new Set(result?.deleted_paths ?? []);
+  const categoryCount = new Set(
+    files.filter((f) => deleted.has(f.path)).map((f) => f.extension.toLowerCase()),
+  ).size;
 
   return (
-    <div className={`centered${isDone ? " inst-done" : ""}`}>
-      <InstConfetti active={showConfetti} />
-
-      {/* Circular progress ring */}
-      <div className="inst-ring-wrap">
-        <svg
-          className="inst-ring-svg"
-          width={ringSize}
-          height={ringSize}
-          viewBox={`0 0 ${ringSize} ${ringSize}`}
-        >
-          <defs>
-            <linearGradient id="inst-ring-glass" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.35)" />
-              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.18)" />
-              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.30)" />
-            </linearGradient>
-            <linearGradient id="inst-ring-glass-done" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.5)" />
-              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.28)" />
-              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.45)" />
-            </linearGradient>
-            <filter id="inst-ring-glow">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          {/* Background track */}
-          <circle
-            cx={ringSize / 2}
-            cy={ringSize / 2}
-            r={radius}
-            fill="none"
-            stroke="rgba(255, 255, 255, 0.06)"
-            strokeWidth={strokeWidth}
-          />
-          {/* Filled arc — glass gradient */}
-          <circle
-            cx={ringSize / 2}
-            cy={ringSize / 2}
-            r={radius}
-            fill="none"
-            stroke={isDone ? "url(#inst-ring-glass-done)" : "url(#inst-ring-glass)"}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={dashOffset}
-            className="inst-ring-fill"
-            filter={isDone ? "url(#inst-ring-glow)" : undefined}
-          />
-        </svg>
-        {isDone ? (
-          <Check size={32} strokeWidth={2.5} className="inst-ring-check" />
-        ) : (
-          <span className="inst-ring-percent">{percent}%</span>
-        )}
-      </div>
-
-      {/* Status text */}
-      <div className="inst-ring-freed">
-        {isDone && result ? formatSize(result.bytes_freed) : (progress ? formatSize(progress.bytes_freed) : "0 B")} reclaimed
-      </div>
-
-      <div className="inst-ring-current">
-        {isDone
-          ? `${result ? result.items_removed : 0} items removed`
-          : currentLabel}
-      </div>
-
-      {/* Equivalence card */}
-      {isDone && card && (
-        <div className={`inst-equiv-card${showCard ? " visible" : ""}`}>
-          <div className="inst-equiv-icon">
-            {card.isMilestone ? <SsdIcon /> : <span className="inst-equiv-emoji">{card.emoji}</span>}
-          </div>
-          <div className="inst-equiv-text">
-            <div className="inst-equiv-title">{card.title}</div>
-            <div className="inst-equiv-desc">{card.description}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Done button */}
-      {isDone && (
-        <button
-          className={`btn inst-done-btn${showDoneBtn ? " visible" : ""}`}
-          onClick={dismissDone}
-        >
-          Done
-        </button>
-      )}
-    </div>
+    <SuccessOverlay
+      headline="Tossed"
+      freedGB={(result?.bytes_freed ?? 0) / GB}
+      detail={useTrash ? "of installers moved to the Trash" : "of installers deleted"}
+      itemCount={result?.items_removed ?? 0}
+      categoryCount={categoryCount}
+      lifetimeGB={lifetimeBytes / GB}
+      storageUsedGB={(diskTotal - diskFree) / GB}
+      storageTotalGB={diskTotal / GB}
+      showPawtrolUpsell={true}
+      onDone={dismissDone}
+    />
   );
 }
 
-/* ── Main ── */
 export default function Installers() {
   const phase = useInstallersStore((s) => s.phase);
+  const error = useInstallersStore((s) => s.error);
+  const scan = useInstallersStore((s) => s.scan);
+
+  useEffect(() => {
+    if (useInstallersStore.getState().phase === "idle" && !useInstallersStore.getState().error) scan();
+  }, [scan]);
 
   return (
-    <div className="inst-container">
-      {phase === "idle" && <IdleView />}
+    <div className="ins-root">
+      {phase === "idle" && (error ? <ErrorView /> : <ScanningView />)}
       {phase === "scanning" && <ScanningView />}
-      {phase === "list" && <ListView />}
-      {(phase === "deleting" || phase === "done") && <DeletingView />}
+      {(phase === "list" || phase === "deleting") && <ListView />}
+      {phase === "done" && <DoneView />}
     </div>
   );
 }
-

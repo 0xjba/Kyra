@@ -1,66 +1,49 @@
-import { ChevronRight, type LucideIcon } from "lucide-react";
+import { type LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { memo, type ReactNode } from "react";
+import { memo } from "react";
 
 interface ModuleCardProps {
   title: string;
-  description: string;
   icon: LucideIcon;
   route: string;
+  value?: string;
   meta?: string;
-  stat?: string;
-  statLabel?: string;
-  children?: ReactNode;
+  size?: "wide" | "big" | "small";
+  tint?: "red" | "yellow" | "green";
+  flag?: boolean;
   style?: React.CSSProperties;
 }
 
 function ModuleCard({
   title,
-  description,
   icon: Icon,
   route,
+  value,
   meta,
-  stat,
-  statLabel,
-  children,
+  size = "small",
+  tint,
+  flag,
   style,
 }: ModuleCardProps) {
   const navigate = useNavigate();
+  const tintClass = tint ? ` module-card-tinted-${tint}` : "";
 
   return (
     <div
-      className="module-card"
+      className={`module-card module-card-${size}${tintClass}`}
       onClick={() => navigate(route)}
       style={style}
     >
       <div className="module-card-header">
-        <div className="module-card-icon">
-          <Icon size={13} color="var(--text-secondary)" strokeWidth={1.7} />
-        </div>
+        <Icon size={15} color="currentColor" strokeWidth={1.7} />
         <span className="module-card-title">{title}</span>
+        {flag && <span className="module-card-flag" />}
       </div>
 
-      {description && (
-        <div className="module-card-desc">{description}</div>
-      )}
-
-      {children}
-
-      {stat && (
-        <div className="module-card-stat">
-          <div className="module-card-stat-value">{stat}</div>
-          {statLabel && (
-            <div className="module-card-stat-label">{statLabel}</div>
-          )}
-        </div>
-      )}
-
-      {meta && !stat && (
-        <div className="module-card-meta">
-          <span className="module-card-meta-text">{meta}</span>
-          <ChevronRight size={13} color="var(--text-tertiary)" strokeWidth={1.5} />
-        </div>
-      )}
+      <div className="module-card-footer">
+        {value && <div className="module-card-value">{value}</div>}
+        {meta && <div className="module-card-meta-text">{meta}</div>}
+      </div>
     </div>
   );
 }

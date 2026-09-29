@@ -1,167 +1,124 @@
-/* ── FDA Settings Mockup ── */
-
 .fda-mockup {
   width: 100%;
-  max-width: 320px;
-  position: relative;
-  margin-bottom: 16px;
+  max-width: 400px;
+  margin-top: 8px;
+  border-radius: 20px;
+  overflow: hidden;
+  text-align: left;
+  background: rgba(255,255,255,0.43);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 10px 30px -10px rgba(20,40,120,0.25), 0 0 0 0.5px rgba(13,21,38,0.08);
 }
 
-/* ── App Row ── */
-.fda-row {
+.fda-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(13,21,38,0.77);
+  border-bottom: 0.5px solid rgba(13,21,38,0.08);
 }
 
-/* Kyra row — highlighted */
+.fda-header svg {
+  flex-shrink: 0;
+}
+
+.fda-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 14px;
+  background: transparent;
+  transition: background .3s;
+}
+
 .fda-row-kyra {
-  background: rgba(58, 123, 255, 0.2);
-  border-radius: 8px;
-  padding: 8px 12px;
-  transition: background 0.3s;
+  background: rgba(31,95,255,0.08);
 }
 
 .fda-row-kyra.granted {
-  background: rgba(58, 123, 255, 0.28);
+  background: rgba(42,200,82,0.1);
 }
 
-/* ── Skeleton rows ── */
-.fda-row-skeleton {
-  opacity: 0.4;
-}
-
-.fda-skeleton-icon {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.08);
+.fda-app-icon {
+  width: 24px;
+  height: 24px;
+  image-rendering: auto;
   flex-shrink: 0;
 }
 
-.fda-skeleton-text {
-  width: 90px;
-  height: 10px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  flex: none;
-  margin-right: auto;
-}
-
-.fda-skeleton-text-short {
-  width: 60px;
-}
-
-/* ── App Icon ── */
-.fda-app-icon-img {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  flex-shrink: 0;
+.fda-app-icon.pixel {
+  image-rendering: pixelated;
 }
 
 .fda-app-name {
   flex: 1;
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0d1526;
 }
 
-.fda-app-name-kyra {
-  color: var(--text-primary);
-  font-weight: var(--weight-medium);
+.fda-row-kyra .fda-app-name {
+  font-weight: 700;
 }
 
-/* ── Toggle Switch ── */
 .fda-toggle {
-  width: 28px;
-  height: 16px;
-  border-radius: 8px;
-  flex-shrink: 0;
   position: relative;
-  transition: background 0.3s ease;
-  cursor: default;
-}
-
-.fda-toggle.off {
-  background: rgba(255, 255, 255, 0.12);
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: rgba(13,21,38,0.16);
+  transition: background .3s;
 }
 
 .fda-toggle.on {
-  background: var(--blue);
+  background: #2AC852;
 }
 
 .fda-toggle-knob {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: white;
   position: absolute;
   top: 2px;
-  transition: left 0.3s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.fda-toggle.off .fda-toggle-knob {
   left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: left .3s cubic-bezier(.3,1.5,.5,1);
 }
 
 .fda-toggle.on .fda-toggle-knob {
-  left: 14px;
+  left: 16px;
 }
 
-/* ── Animated Cursor ── */
-.fda-cursor {
-  position: absolute;
-  pointer-events: none;
-  z-index: 10;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
-  transition: top 0.8s cubic-bezier(0.4, 0, 0.2, 1),
-              right 0.8s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.3s;
-}
-
-.fda-cursor-idle {
-  top: 80%;
-  right: 40%;
-  opacity: 0;
-}
-
-.fda-cursor-moving {
-  top: 46%;
-  right: 3%;
-  opacity: 1;
-}
-
-.fda-cursor-clicking {
-  top: 46%;
-  right: 3%;
-  opacity: 1;
-}
-
-.fda-cursor-done {
-  top: 80%;
-  right: 40%;
-  opacity: 0;
-  transition: top 1.2s cubic-bezier(0.4, 0, 0.2, 1),
-              right 1.2s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.6s 0.8s;
-}
-
-/* Click ripple */
-.fda-cursor-ripple {
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: rgba(58, 123, 255, 0.3);
-  animation: fda-ripple 0.3s ease-out forwards;
-}
-
-@keyframes fda-ripple {
-  0%   { transform: scale(0.5); opacity: 1; }
-  100% { transform: scale(2); opacity: 0; }
+@media (prefers-color-scheme: dark) {
+  :root .fda-mockup {
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px -10px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  :root .fda-header {
+    color: rgba(240,242,245,0.66);
+    border-bottom-color: rgba(255,255,255,0.08);
+  }
+  :root .fda-app-name {
+    color: rgba(240,242,245,0.95);
+  }
+  :root .fda-row-kyra {
+    background: rgba(31,95,255,0.16);
+  }
+  :root .fda-row-kyra.granted {
+    background: rgba(42,200,82,0.14);
+  }
+  :root .fda-toggle.off {
+    background: rgba(240,242,245,0.16);
+  }
+  :root .fda-toggle.on {
+    background: #2AC852;
+  }
+  :root .fda-toggle-knob {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  }
 }

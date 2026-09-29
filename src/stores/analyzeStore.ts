@@ -9,6 +9,7 @@ import {
   type LargeFile,
 } from "../lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { useSettingsStore } from "./settingsStore";
 
 type AnalyzePhase = "idle" | "scanning" | "ready";
 type AnalyzeTab = "tree" | "large-files";
@@ -33,6 +34,8 @@ interface AnalyzeStore {
   // Large files
   largeFiles: LargeFile[];
   largeFilesLoading: boolean;
+  largeFilesKey: string | null;
+  largeFilesCapped: boolean;
 
   setScanPath: (path: string) => void;
   scan: () => Promise<void>;
@@ -46,8 +49,22 @@ interface AnalyzeStore {
   reset: () => void;
   removeNodeByPath: (path: string, freedSize: number) => void;
   loadLargeFiles: () => Promise<void>;
+  ensureLargeFiles: () => Promise<void>;
   removeLargeFile: (path: string) => void;
 }
+
+const LARGE_FILES_CAP = 50;
+
+function largeFilesKeyFor(path: string, thresholdMb: number): string {
+  return `${path}|${thresholdMb}`;
+}
+
+function currentThresholdMb(): number {
+  return useSettingsStore.getState().settings.large_file_threshold_mb || 100;
+}
+
+let largeFilesRequest = 0;
+let pendingLargeFilesKey: string | null = null;
 
 function removeChildByPath(node: DirNode, targetPath: string, freedSize: number): DirNode {
   return {
@@ -79,6 +96,8 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
   scanCache: {},
   largeFiles: [],
   largeFilesLoading: false,
+  largeFilesKey: null,
+  largeFilesCapped: false,
 
   setScanPath: (path: string) => {
     set({ scanPath: path });
@@ -103,7 +122,6 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
       });
 
       // Use scan depth from settings, fallback to 8
-      const { useSettingsStore } = await import("./settingsStore");
       const depth = useSettingsStore.getState().settings.analyze_scan_depth || 8;
       const root = await analyzePath(scanPath, depth);
       set({
@@ -156,12 +174,7 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
 
   setActiveTab: (tab: AnalyzeTab) => {
     set({ activeTab: tab });
-    if (tab === "large-files") {
-      const { largeFiles, largeFilesLoading } = get();
-      if (largeFiles.length === 0 && !largeFilesLoading) {
-        get().loadLargeFiles();
-      }
-    }
+    if (tab === "large-files") get().ensureLargeFiles();
   },
 
   reveal: (path: string) => {
@@ -213,18 +226,37 @@ export const useAnalyzeStore = create<AnalyzeStore>((set, get) => ({
   },
 
   loadLargeFiles: async () => {
+    const request = ++largeFilesRequest;
+    const scanPath = get().scanPath;
+    const threshold = currentThresholdMb();
+    pendingLargeFilesKey = largeFilesKeyFor(scanPath, threshold);
     set({ largeFilesLoading: true });
     try {
-      const { useSettingsStore } = await import("./settingsStore");
-      const threshold = useSettingsStore.getState().settings.large_file_threshold_mb || 100;
-      const files = await findLargeFiles(threshold, get().scanPath || undefined);
-      set({ largeFiles: files, largeFilesLoading: false });
+      const files = await findLargeFiles(threshold, scanPath || undefined);
+      if (request !== largeFilesRequest) return;
+      set({
+        largeFiles: [...files].sort((a, b) => b.size - a.size),
+        largeFilesLoading: false,
+        largeFilesKey: largeFilesKeyFor(scanPath, threshold),
+        largeFilesCapped: files.length >= LARGE_FILES_CAP,
+      });
     } catch {
-      set({ largeFilesLoading: false });
+      if (request !== largeFilesRequest) return;
+      set({ largeFiles: [], largeFilesLoading: false, largeFilesKey: null, largeFilesCapped: false });
     }
   },
 
+  ensureLargeFiles: async () => {
+    const threshold = currentThresholdMb();
+    const { scanPath, largeFilesKey, largeFilesLoading } = get();
+    const key = largeFilesKeyFor(scanPath, threshold);
+    if (key === (largeFilesLoading ? pendingLargeFilesKey : largeFilesKey)) return;
+    await get().loadLargeFiles();
+  },
+
   removeLargeFile: (path: string) => {
-    set({ largeFiles: get().largeFiles.filter((f) => f.path !== path) });
+    set({
+      largeFiles: get().largeFiles.filter((f) => f.path !== path && !f.path.startsWith(path + "/")),
+    });
   },
 }));

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Trash2,
   Zap,
@@ -7,16 +8,24 @@ import {
   Activity,
   Package,
   Download,
-  Settings as SettingsIcon,
-  Shield,
 } from "lucide-react";
 import ModuleCard from "../components/ModuleCard";
 import { useUninstallStore } from "../stores/uninstallStore";
+import { useSummaryStore } from "../stores/summaryStore";
+import { useSystemStore } from "../stores/systemStore";
 import { getTotalBytesFreed } from "../lib/tauri";
-import { formatSize } from "../utils/format";
+import { homeSpeech, tileValue, daysSinceOptimized } from "../utils/homeSummary";
+import catFrame1 from "../assets/cat-tail/cat1.png";
+import catFrame2 from "../assets/cat-tail/cat2.png";
+import catFrame3 from "../assets/cat-tail/cat3.png";
+import catFrame4 from "../assets/cat-tail/cat4.png";
+import catFrame5 from "../assets/cat-tail/cat5.png";
+import catFrame6 from "../assets/cat-tail/cat6.png";
+import catFrame7 from "../assets/cat-tail/cat7.png";
 import "../styles/dashboard.css";
 
 export default function Home() {
+  const navigate = useNavigate();
   const [totalFreed, setTotalFreed] = useState(0);
   const uninstallApps = useUninstallStore((s) => s.apps);
   const uninstallPhase = useUninstallStore((s) => s.phase);
@@ -59,93 +68,147 @@ export default function Home() {
     }
   }, [uninstallPhase, scanApps]);
 
-  /* 4-col × 3-row bento (12 cells total)
-   * ┌──────────┬──────┬──────┐
-   * │  Clean   │Optim.│Uninst│
-   * │  (2×2)   ├──────┼──────┤
-   * │          │Status│Settn.│
-   * ├────┬─────┼──────┴──────┤
-   * │Purg│Inst.│  Analyze    │
-   * └────┴─────┴─────────────┘
-   */
+  // Cat sprite animation
+  const catFrames = [catFrame1, catFrame2, catFrame3, catFrame4, catFrame5, catFrame6, catFrame7, catFrame6, catFrame5, catFrame4, catFrame3, catFrame2];
+  const [catIdx, setCatIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setCatIdx(i => (i + 1) % 12), 220);
+    return () => clearInterval(id);
+  }, []);
+
+  const summaries = useSummaryStore();
+  const stats = useSystemStore((s) => s.stats);
+  const fetchStats = useSystemStore((s) => s.fetchStats);
+  useEffect(() => {
+    fetchStats();
+    const id = setInterval(fetchStats, 3000);
+    return () => clearInterval(id);
+  }, [fetchStats]);
+
+  const GB = 1024 * 1024 * 1024;
+  const reclaimedGB = displayBytes / GB;
+
+  const diskUsed = stats ? stats.disk_total - stats.disk_free : 0;
+  const diskPct = stats && stats.disk_total > 0 ? Math.round((diskUsed / stats.disk_total) * 100) : 0;
+
+  const speech = homeSpeech(summaries, stats);
+
+  const heroSub = summaries.firstCleanAt
+    ? `since ${new Date(summaries.firstCleanAt).toLocaleDateString(undefined, { month: "short", year: "numeric" })} · ${summaries.cleans} ${summaries.cleans === 1 ? "clean" : "cleans"}`
+    : totalFreed > 0 ? "all-time total" : "No cleans yet";
+
+  const optimizeDays = daysSinceOptimized(summaries.optimizedAt);
 
   return (
     <div className="home-container">
       <div className="bento-grid">
-        <ModuleCard
-          title="Clean"
-          description="System caches, logs, and temporary files"
-          icon={Trash2}
-          route="/clean"
-          stat={displayBytes > 0 ? formatSize(displayBytes) : "—"}
-          statLabel="All time space reclaimed"
-          style={{ gridColumn: "span 2", gridRow: "span 2" }}
-        />
+        {/* Row 1 — Hero banner */}
+        <div className="hero-banner" style={{ gridColumn: "1 / 5" }}>
+          <img
+            src={catFrames[catIdx]}
+            alt=""
+            className="hero-cat"
+          />
+          <div className="hero-middle">
+            <div className="hero-bubble">
+              {speech.a}<span style={{ color: "#1f5fff" }}>{speech.b}</span>{speech.c}
+            </div>
+            <div className="hero-actions">
+              <button className="btn btn-primary" style={{ height: 34, padding: "0 16px", borderRadius: 999 }} onClick={() => navigate(speech.to)}>
+                {speech.cta}
+              </button>
+            </div>
+          </div>
+          <div className="hero-content">
+            <div className="hero-label">Reclaimed together</div>
+            <div className="hero-counter">
+              <span className="hero-number">
+                {reclaimedGB.toFixed(1)}
+              </span>
+              <span className="hero-unit">GB</span>
+            </div>
+            <div className="hero-sub">
+              {heroSub}
+            </div>
+          </div>
+        </div>
 
-        <ModuleCard
-          title="Optimize"
-          description="Refresh caches, repair configs and tune performance"
-          icon={Zap}
-          route="/optimize"
-          meta="14 tasks available"
-        />
-
-        <ModuleCard
-          title="Uninstall"
-          description="Remove apps with all associated files"
-          icon={Grid2x2Plus}
-          route="/uninstall"
-          meta={uninstallApps.length > 0 ? `${uninstallApps.length} apps installed` : "Scan apps"}
-        />
-
-        <ModuleCard
-          title="Status"
-          description="CPU, memory, disk, & network"
-          icon={Activity}
-          route="/status"
-          meta="Live monitoring"
-        />
-
-        <ModuleCard
-          title="Settings"
-          description="Preferences"
-          icon={SettingsIcon}
-          route="/settings"
-          meta="Configure"
-        />
-
+        {/* Row 2 — Tinted tiles */}
         <ModuleCard
           title="Prune"
-          description="Developer artifacts"
           icon={Package}
           route="/prune"
-          meta="node_modules, dist, target"
+          size="wide"
+          value={tileValue(summaries.prune?.bytes)}
+          meta={summaries.prune
+            ? summaries.prune.bytes > 0
+              ? `Build artifacts in ${summaries.prune.projects} ${summaries.prune.projects === 1 ? "project" : "projects"}`
+              : "No stale builds"
+            : "node_modules, dist, target"}
+          tint="red"
+          flag={(summaries.prune?.bytes ?? 0) > 0}
+          style={{ gridColumn: "span 2" }}
         />
 
         <ModuleCard
           title="Installers"
-          description="Find .dmg, .pkg, .iso"
           icon={Download}
           route="/installers"
-          meta="Scan downloads"
+          size="big"
+          value={tileValue(summaries.installers?.bytes)}
+          meta={summaries.installers
+            ? summaries.installers.count > 0
+              ? `${summaries.installers.count} installer ${summaries.installers.count === 1 ? "file" : "files"}`
+              : "No installers found"
+            : "Scan downloads"}
+          tint="yellow"
+          flag={(summaries.installers?.bytes ?? 0) > 0}
         />
 
+        <ModuleCard
+          title="Clean"
+          icon={Trash2}
+          route="/clean"
+          size="big"
+          value={tileValue(summaries.clean?.bytes)}
+          meta={summaries.clean
+            ? summaries.clean.bytes > 0 ? "Caches and logs" : "Caches are tidy"
+            : "System caches & logs"}
+          tint="green"
+          flag={(summaries.clean?.bytes ?? 0) > 0}
+        />
+
+        {/* Row 3 — Small neutral tiles */}
         <ModuleCard
           title="Analyze"
-          description="Explore disk usage"
           icon={HardDrive}
           route="/analyze"
-          meta="Scan to explore"
-          style={{ gridColumn: "span 2" }}
+          value={stats ? `${Math.round(diskUsed / GB)} GB` : undefined}
+          meta={stats ? `${diskPct}% of ${Math.round(stats.disk_total / GB)} GB used` : "Disk usage"}
         />
 
         <ModuleCard
-          title="Guardian"
-          description="AI-powered auto-clean"
-          icon={Shield}
-          route="/guardian"
-          meta="Scan to score"
-          style={{ gridColumn: "span 2" }}
+          title="Status"
+          icon={Activity}
+          route="/status"
+          value={stats ? `CPU ${Math.round(stats.cpu_usage)}%` : undefined}
+          meta={stats ? `Memory ${Math.round(stats.memory_percent)}%` : "Live monitoring"}
+        />
+
+        <ModuleCard
+          title="Uninstall"
+          icon={Grid2x2Plus}
+          route="/uninstall"
+          value={uninstallApps.length > 0 ? `${uninstallApps.length} apps` : undefined}
+          meta={uninstallApps.length > 0 ? "Installed apps" : "Scan apps"}
+        />
+
+        <ModuleCard
+          title="Optimize"
+          icon={Zap}
+          route="/optimize"
+          value={optimizeDays === null ? undefined : optimizeDays === 0 ? "Today" : `${optimizeDays} ${optimizeDays === 1 ? "day" : "days"}`}
+          meta={optimizeDays === null ? "No tune-up yet" : optimizeDays === 0 ? "Tuned up" : "since last tune-up"}
         />
       </div>
     </div>

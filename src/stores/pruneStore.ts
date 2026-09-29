@@ -31,6 +31,28 @@ interface PruneStore {
   reset: () => void;
 }
 
+const DAY_SECS = 86400;
+export const IDLE_DEFAULT_DAYS = 30;
+
+export function idleDaysByProject(artifacts: ArtifactEntry[]): Map<string, number | null> {
+  const newest = new Map<string, number>();
+  for (const a of artifacts) {
+    newest.set(a.project_path, Math.max(newest.get(a.project_path) ?? 0, a.last_modified_secs || 0));
+  }
+  const now = Date.now() / 1000;
+  const out = new Map<string, number | null>();
+  for (const [key, secs] of newest) {
+    out.set(key, secs > 0 ? Math.max(0, Math.floor((now - secs) / DAY_SECS)) : null);
+  }
+  return out;
+}
+
+function defaultSelection(artifacts: ArtifactEntry[]): Set<string> {
+  const idle = idleDaysByProject(artifacts);
+  const stale = artifacts.filter((a) => (idle.get(a.project_path) ?? -1) >= IDLE_DEFAULT_DAYS);
+  return new Set((stale.length > 0 ? stale : artifacts).map((a) => a.artifact_path));
+}
+
 function defaultRootPath(): string {
   return "~/Projects";
 }
@@ -50,8 +72,7 @@ export const usePruneStore = create<PruneStore>((set, get) => ({
     set({ phase: "scanning", artifacts: [], selectedPaths: new Set(), error: null });
     try {
       const artifacts = await scanArtifacts(get().rootPath);
-      const allPaths = new Set(artifacts.map((a) => a.artifact_path));
-      set({ phase: "list", artifacts, selectedPaths: allPaths });
+      set({ phase: "list", artifacts, selectedPaths: defaultSelection(artifacts) });
     } catch (e) {
       set({ phase: "idle", error: String(e) });
     }
@@ -85,9 +106,13 @@ export const usePruneStore = create<PruneStore>((set, get) => ({
 
     set({ phase: "pruning", progress: null, error: null });
 
-    const unlisten = await listenPruneProgress((progress) => {
-      set({ progress });
-    });
+    // Progress is cosmetic; a failed subscription must not strand the UI in the busy phase.
+    let unlisten: () => void = () => {};
+    try {
+      unlisten = await listenPruneProgress((progress) => {
+        set({ progress });
+      });
+    } catch {}
 
     try {
       const dryRun = false;
@@ -112,8 +137,7 @@ export const usePruneStore = create<PruneStore>((set, get) => ({
     if (remaining.length === 0) {
       set({ phase: "idle", artifacts: [], selectedPaths: new Set(), progress: null, result: null });
     } else {
-      const newSelected = new Set(remaining.map((a) => a.artifact_path));
-      set({ phase: "list", artifacts: remaining, selectedPaths: newSelected, progress: null, result: null });
+      set({ phase: "list", artifacts: remaining, selectedPaths: defaultSelection(remaining), progress: null, result: null });
     }
   },
 

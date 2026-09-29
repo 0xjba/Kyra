@@ -1,26 +1,120 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { SlidersHorizontal, Siren, ScanSearch, Bell, EyeOff, Database, X, type LucideIcon } from "lucide-react";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useGuardianStore } from "../stores/guardianStore";
 import {
   resetLifetimeStats,
   getStoragePath,
   getTotalBytesFreed,
   pickFolder,
   revealLogInFinder,
+  saveSettings,
 } from "../lib/tauri";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { formatSize } from "../utils/format";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
-import logoSrc from "../assets/logo.png";
+import { formatSize } from "../utils/format";
+import { devicesLine, formatPlanDate, planLine } from "../utils/pawtrolAccount";
+import SubscribeSheet from "../components/SubscribeSheet";
+import RestoreSheet from "../components/RestoreSheet";
+import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import cat1 from "../assets/cat-tail/cat1.png";
+import cat2 from "../assets/cat-tail/cat2.png";
+import cat3 from "../assets/cat-tail/cat3.png";
+import cat4 from "../assets/cat-tail/cat4.png";
+import cat5 from "../assets/cat-tail/cat5.png";
+import cat6 from "../assets/cat-tail/cat6.png";
+import cat7 from "../assets/cat-tail/cat7.png";
 import "../styles/settings.css";
+
+const CAT_FRAMES = [cat1, cat2, cat3, cat4, cat5, cat6, cat7, cat6, cat5, cat4, cat3, cat2];
 
 const LARGE_FILE_OPTIONS = [50, 100, 250, 500, 1000];
 const SCAN_DEPTH_OPTIONS = [4, 6, 8, 10, 12];
 const LOW_DISK_OPTIONS = [5, 10, 15, 20, 25];
 
+type SectionId = "general" | "pawtrol" | "scanning" | "alerts" | "ignore" | "data";
+
+const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
+  { id: "general", label: "General", icon: SlidersHorizontal },
+  { id: "pawtrol", label: "Pawtrol Pro", icon: Siren },
+  { id: "scanning", label: "Scanning", icon: ScanSearch },
+  { id: "alerts", label: "Alerts & Updates", icon: Bell },
+  { id: "ignore", label: "Ignore List", icon: EyeOff },
+  { id: "data", label: "Data", icon: Database },
+];
+
+function stepOption(options: number[], current: number, dir: 1 | -1): number {
+  const idx = options.indexOf(current);
+  const next = Math.max(0, Math.min(options.length - 1, (idx < 0 ? 0 : idx) + dir));
+  return options[next];
+}
+
+function Row({ name, desc, children, mono }: { name: ReactNode; desc?: ReactNode; children?: ReactNode; mono?: boolean }) {
+  return (
+    <div className="st-row">
+      <div className="st-row-info">
+        <div className="st-row-name">{name}</div>
+        {desc != null && desc !== "" && <div className={`st-row-desc${mono ? " st-mono" : ""}`}>{desc}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      className={`st-toggle${on ? " on" : ""}`}
+      onClick={() => onChange(!on)}
+      disabled={disabled}
+    >
+      <span className="st-toggle-knob" />
+    </button>
+  );
+}
+
+function Stepper({ value, onDec, onInc }: { value: string; onDec: () => void; onInc: () => void }) {
+  return (
+    <div className="st-stepper">
+      <button type="button" className="st-stepper-btn" onClick={onDec} aria-label="Decrease">&minus;</button>
+      <span className="st-stepper-value">{value}</span>
+      <button type="button" className="st-stepper-btn" onClick={onInc} aria-label="Increase">+</button>
+    </div>
+  );
+}
+
+function Pill({ children, onClick, variant, disabled }: { children: ReactNode; onClick?: () => void; variant?: "primary" | "danger"; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`st-pill${variant ? ` st-pill-${variant}` : ""}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Section({ id, label, children }: { id: SectionId; label: string; children: ReactNode }) {
+  return (
+    <div className="st-section" data-sec={id}>
+      <div className="st-section-label">{label}</div>
+      <div className="st-card">{children}</div>
+    </div>
+  );
+}
+
 export default function Settings() {
+  const navigate = useNavigate();
   const settings = useSettingsStore((s) => s.settings);
   const loaded = useSettingsStore((s) => s.loaded);
   const load = useSettingsStore((s) => s.load);
@@ -31,17 +125,34 @@ export default function Settings() {
   const setCheckForUpdates = useSettingsStore((s) => s.setCheckForUpdates);
   const setNotificationsEnabled = useSettingsStore((s) => s.setNotificationsEnabled);
   const setLowDiskThreshold = useSettingsStore((s) => s.setLowDiskThreshold);
+  const setOnboardingCompleted = useSettingsStore((s) => s.setOnboardingCompleted);
+  const setPawtrolEnabled = useSettingsStore((s) => s.setPawtrolEnabled);
+  const setPawtrolAutoClean = useSettingsStore((s) => s.setPawtrolAutoClean);
   const addWhitelist = useSettingsStore((s) => s.addWhitelist);
   const removeWhitelist = useSettingsStore((s) => s.removeWhitelist);
 
+  const license = useGuardianStore((s) => s.license);
+  const deviceName = useGuardianStore((s) => s.deviceName);
+  const checkLicense = useGuardianStore((s) => s.checkLicense);
+  const account = useGuardianStore((s) => s.account);
+  const accountError = useGuardianStore((s) => s.accountError);
+  const loadAccount = useGuardianStore((s) => s.loadAccount);
+  const cancelSubscription = useGuardianStore((s) => s.cancelSubscription);
+
+  const [active, setActive] = useState<SectionId>("general");
+  const [frame, setFrame] = useState(0);
   const [showInput, setShowInput] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [storagePath, setStoragePath] = useState("");
   const [totalFreed, setTotalFreed] = useState(0);
   const [statsReset, setStatsReset] = useState(false);
+  const [sheet, setSheet] = useState<"subscribe" | "restore" | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date">("idle");
   const [autoStartSynced, setAutoStartSynced] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +163,22 @@ export default function Settings() {
     return () => { cancelled = true; };
   }, [loaded, load]);
 
-  // Sync autostart toggle with actual OS state on mount
+  useEffect(() => {
+    checkLicense();
+  }, [checkLicense]);
+
+  useEffect(() => {
+    if (license.active) loadAccount();
+  }, [license.active, loadAccount]);
+
+  const closeSheet = useCallback(() => setSheet(null), []);
+  const closeCancel = useCallback(() => setConfirmCancel(false), []);
+
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => (f + 1) % CAT_FRAMES.length), 220);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     if (loaded && !autoStartSynced) {
       isEnabled().then((enabled) => {
@@ -64,6 +190,35 @@ export default function Settings() {
     }
   }, [loaded, autoStartSynced, settings.launch_at_login, setLaunchAtLogin]);
 
+  const jumpLock = useRef<{ id: SectionId; until: number } | null>(null);
+
+  const sectionTop = (root: HTMLElement, el: HTMLElement) =>
+    el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+
+  const jump = useCallback((id: SectionId) => {
+    const root = scrollRef.current;
+    const el = root?.querySelector<HTMLElement>(`[data-sec="${id}"]`);
+    if (root && el) {
+      jumpLock.current = { id, until: Date.now() + 800 };
+      root.scrollTo({ top: Math.max(0, sectionTop(root, el) - 4), behavior: "smooth" });
+    }
+    setActive(id);
+  }, []);
+
+  const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    // Smooth scroll to a short trailing section can't bring it to the top; keep the clicked item active.
+    if (jumpLock.current && Date.now() < jumpLock.current.until) return;
+    jumpLock.current = null;
+    const secs = Array.from(el.querySelectorAll<HTMLElement>("[data-sec]"));
+    let cur = secs[0]?.dataset.sec as SectionId | undefined;
+    secs.forEach((x) => { if (sectionTop(el, x) - el.scrollTop < 60) cur = x.dataset.sec as SectionId; });
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2 && secs.length) {
+      cur = secs[secs.length - 1].dataset.sec as SectionId;
+    }
+    if (cur) setActive((prev) => (prev === cur ? prev : cur!));
+  }, []);
+
   if (!loaded) return null;
 
   const handleAutoStartToggle = async (enabled: boolean) => {
@@ -74,9 +229,14 @@ export default function Settings() {
         await disable();
       }
       await setLaunchAtLogin(enabled);
-    } catch {
-      // Revert on failure
-    }
+    } catch {}
+  };
+
+  const handleCancelSubscription = async () => {
+    setConfirmCancel(false);
+    setCancelling(true);
+    await cancelSubscription();
+    setCancelling(false);
   };
 
   const handleCheckForUpdate = async () => {
@@ -134,7 +294,6 @@ export default function Settings() {
   };
 
   const handleResetSettings = async () => {
-    const { saveSettings } = await import("../lib/tauri");
     const defaults = {
       dry_run: false,
       whitelist: [],
@@ -146,199 +305,188 @@ export default function Settings() {
       notifications_enabled: true,
       low_disk_threshold_gb: 10,
       onboarding_completed: false,
+      pawtrol_enabled: true,
+      pawtrol_auto_clean: true,
+      pawtrol_login_prompted: settings.pawtrol_login_prompted,
     };
-    // Also disable autostart if it was enabled
     try { await disable(); } catch {}
     await saveSettings(defaults);
     await load();
   };
 
+  const link = (url: string) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    openUrl(url).catch(console.error);
+  };
+
+  const periodEnd = account?.current_end ?? license.expires;
+  const cancelDesc = periodEnd
+    ? `It stays on until ${formatPlanDate(periodEnd)}. You can resubscribe any time.`
+    : "It stays on until the end of this billing period. You can resubscribe any time.";
+  const versionLabel = appVersion ? `Kyra ${appVersion}` : "Kyra";
+  const largeLabel = settings.large_file_threshold_mb >= 1000
+    ? `${settings.large_file_threshold_mb / 1000} GB`
+    : `${settings.large_file_threshold_mb} MB`;
+
+  const updateDesc =
+    updateStatus === "checking" ? "Checking for updates…" :
+    updateStatus === "available" ? "A new version is available" :
+    updateStatus === "downloading" ? "Downloading update…" :
+    updateStatus === "up-to-date" ? "You're up to date" :
+    `${versionLabel} is installed`;
+  const updateLabel =
+    updateStatus === "checking" ? "Checking…" :
+    updateStatus === "downloading" ? "Installing…" :
+    updateStatus === "up-to-date" ? "Up to date" :
+    "Check now";
+
   return (
-    <div className="settings-container">
-      <div className="settings-header">Settings</div>
-
-      <div className="settings-scroll">
-      {/* ── General ── */}
-      <div className="settings-section">
-        <div className="settings-section-label">General</div>
-        <div className="settings-card">
-          <label className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Launch at Login</div>
-              <div className="settings-row-desc">Start Kyra automatically when you log in</div>
-            </div>
-            <input
-              type="checkbox"
-              className="settings-toggle"
-              checked={settings.launch_at_login}
-              onChange={(e) => handleAutoStartToggle(e.target.checked)}
-            />
-          </label>
-          <label className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Move to Trash</div>
-              <div className="settings-row-desc">Send files to Trash instead of permanent deletion</div>
-            </div>
-            <input
-              type="checkbox"
-              className="settings-toggle"
-              checked={settings.use_trash}
-              onChange={(e) => setUseTrash(e.target.checked)}
-            />
-          </label>
+    <div className="st-container">
+      <nav className="st-nav">
+        {SECTIONS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className={`st-nav-item${active === id ? " active" : ""}`}
+            onClick={() => jump(id)}
+          >
+            <Icon size={14} strokeWidth={2} className="st-nav-icon" />
+            {label}
+          </button>
+        ))}
+        <div className="st-nav-about">
+          <img src={CAT_FRAMES[frame]} alt="" className="st-nav-cat" draggable={false} />
+          <div className="st-nav-version">{versionLabel}</div>
+          <div className="st-nav-tagline">Nine lives for your storage</div>
         </div>
-      </div>
+      </nav>
 
-      {/* ── Scanning ── */}
-      <div className="settings-section">
-        <div className="settings-section-label">Scanning</div>
-        <div className="settings-card">
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Large File Threshold</div>
-              <div className="settings-row-desc">Minimum size shown in Analyze → Large Files</div>
-            </div>
-            <select
-              className="settings-select"
-              value={settings.large_file_threshold_mb}
-              onChange={(e) => setLargeFileThreshold(Number(e.target.value))}
-            >
-              {LARGE_FILE_OPTIONS.map((mb) => (
-                <option key={mb} value={mb}>
-                  {mb >= 1000 ? `${mb / 1000} GB` : `${mb} MB`}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Analyze Scan Depth</div>
-              <div className="settings-row-desc">Folder levels to scan. Higher values find more but take longer</div>
-            </div>
-            <select
-              className="settings-select"
-              value={settings.analyze_scan_depth}
-              onChange={(e) => setAnalyzeScanDepth(Number(e.target.value))}
-            >
-              {SCAN_DEPTH_OPTIONS.map((d) => (
-                <option key={d} value={d}>
-                  {d} levels
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
+      <div className="st-scroll" ref={scrollRef} onScroll={onScroll}>
+        <Section id="general" label="General">
+          <Row name="Launch at login" desc="Start Kyra when you log in">
+            <Toggle label="Launch at login" on={settings.launch_at_login} onChange={handleAutoStartToggle} />
+          </Row>
+          <Row name="Move to Trash" desc="Send files to Trash instead of deleting them">
+            <Toggle label="Move to Trash" on={settings.use_trash} onChange={setUseTrash} />
+          </Row>
+        </Section>
 
-      {/* ── Notifications & Updates ── */}
-      <div className="settings-section">
-        <div className="settings-section-label">Notifications & Updates</div>
-        <div className="settings-card">
-          <label className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Notifications</div>
-              <div className="settings-row-desc">Enable system notifications for alerts</div>
-            </div>
-            <input
-              type="checkbox"
-              className="settings-toggle"
-              checked={settings.notifications_enabled}
-              onChange={(e) => setNotificationsEnabled(e.target.checked)}
+        <Section id="pawtrol" label="Pawtrol Pro">
+          {license.active ? (
+            <>
+              {account && <Row name="Account" desc={account.email} />}
+              {account === undefined && accountError && (
+                <Row name="Account" desc={<span className="st-row-error">{accountError}</span>}>
+                  <Pill onClick={loadAccount}>Retry</Pill>
+                </Row>
+              )}
+              <Row name="Plan" desc={planLine(account ?? null, license.expires)} />
+              {account && <Row name="Devices" desc={devicesLine(account)} />}
+              <Row name="Run automatically" desc="Runs daily and when space runs low">
+                <Toggle label="Run automatically" on={settings.pawtrol_enabled} onChange={setPawtrolEnabled} />
+              </Row>
+              <Row name="Auto-clean safe items" desc="Clears regenerable caches on its own. Anything risky waits for you.">
+                <Toggle
+                  label="Auto-clean safe items"
+                  on={settings.pawtrol_auto_clean}
+                  onChange={setPawtrolAutoClean}
+                  disabled={!settings.pawtrol_enabled}
+                />
+              </Row>
+              {account && (
+                <Row
+                  name="Cancel subscription"
+                  desc={accountError
+                    ? <span className="st-row-error">{accountError}</span>
+                    : account.cancel_at_period_end
+                      ? "Cancelled. Pawtrol stays on until the period ends."
+                      : "Pawtrol stays on until the end of this billing period"}
+                >
+                  <Pill
+                    variant="danger"
+                    onClick={() => setConfirmCancel(true)}
+                    disabled={cancelling || account.cancel_at_period_end}
+                  >
+                    {account.cancel_at_period_end ? "Cancelled" : cancelling ? "Cancelling…" : "Cancel"}
+                  </Pill>
+                </Row>
+              )}
+            </>
+          ) : (
+            <>
+              <Row name="Subscription" desc={`Keeps your ${deviceName || "Mac"} clean on its own · $0.99/mo`}>
+                <Pill variant="primary" onClick={() => setSheet("subscribe")}>Subscribe</Pill>
+              </Row>
+              <Row name="Already subscribed?" desc="Restore Pawtrol with the email you subscribed with">
+                <Pill onClick={() => setSheet("restore")}>Restore</Pill>
+              </Row>
+            </>
+          )}
+        </Section>
+
+        <Section id="scanning" label="Scanning">
+          <Row name="Large file threshold" desc="Flag files bigger than">
+            <Stepper
+              value={largeLabel}
+              onDec={() => setLargeFileThreshold(stepOption(LARGE_FILE_OPTIONS, settings.large_file_threshold_mb, -1))}
+              onInc={() => setLargeFileThreshold(stepOption(LARGE_FILE_OPTIONS, settings.large_file_threshold_mb, 1))}
             />
-          </label>
-          <label className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Check for Updates</div>
-              <div className="settings-row-desc">Automatically check for updates on launch</div>
-            </div>
-            <input
-              type="checkbox"
-              className="settings-toggle"
-              checked={settings.check_for_updates}
-              onChange={(e) => setCheckForUpdates(e.target.checked)}
+          </Row>
+          <Row name="Analyze scan depth" desc="Folder levels to map">
+            <Stepper
+              value={`${settings.analyze_scan_depth} levels`}
+              onDec={() => setAnalyzeScanDepth(stepOption(SCAN_DEPTH_OPTIONS, settings.analyze_scan_depth, -1))}
+              onInc={() => setAnalyzeScanDepth(stepOption(SCAN_DEPTH_OPTIONS, settings.analyze_scan_depth, 1))}
             />
-          </label>
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Low Disk Space Alert</div>
-              <div className="settings-row-desc">Warn when free space drops below threshold</div>
-            </div>
-            <select
-              className="settings-select"
-              value={settings.low_disk_threshold_gb}
-              onChange={(e) => setLowDiskThreshold(Number(e.target.value))}
-            >
-              {LOW_DISK_OPTIONS.map((gb) => (
-                <option key={gb} value={gb}>
-                  {gb} GB
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Software Update</div>
-              <div className="settings-row-desc">
-                {updateStatus === "checking" ? "Checking..." :
-                 updateStatus === "available" ? "Update available" :
-                 updateStatus === "downloading" ? "Downloading..." :
-                 updateStatus === "up-to-date" ? "You're up to date" :
-                 "Check for the latest version"}
-              </div>
-            </div>
+          </Row>
+        </Section>
+
+        <Section id="alerts" label="Alerts & Updates">
+          <Row name="Notifications" desc="Low disk space and update alerts">
+            <Toggle label="Notifications" on={settings.notifications_enabled} onChange={setNotificationsEnabled} />
+          </Row>
+          <Row name="Low disk space alert" desc="Warn when free space drops below">
+            <Stepper
+              value={`${settings.low_disk_threshold_gb} GB`}
+              onDec={() => setLowDiskThreshold(stepOption(LOW_DISK_OPTIONS, settings.low_disk_threshold_gb, -1))}
+              onInc={() => setLowDiskThreshold(stepOption(LOW_DISK_OPTIONS, settings.low_disk_threshold_gb, 1))}
+            />
+          </Row>
+          <Row name="Check for updates" desc="Automatically on launch">
+            <Toggle label="Check for updates" on={settings.check_for_updates} onChange={setCheckForUpdates} />
+          </Row>
+          <Row name="Software update" desc={updateDesc}>
             {updateStatus === "available" ? (
-              <button className="btn settings-btn-sm" onClick={handleDownloadUpdate}>
-                Update
-              </button>
+              <Pill variant="primary" onClick={handleDownloadUpdate}>Update</Pill>
             ) : (
-              <button
-                className="btn settings-btn-sm"
+              <Pill
                 onClick={handleCheckForUpdate}
                 disabled={updateStatus === "checking" || updateStatus === "downloading"}
               >
-                {updateStatus === "checking" ? "Checking" :
-                 updateStatus === "downloading" ? "Installing" :
-                 updateStatus === "up-to-date" ? "Up to date" :
-                 "Check Now"}
-              </button>
+                {updateLabel}
+              </Pill>
             )}
-          </div>
-        </div>
-      </div>
+          </Row>
+        </Section>
 
-      {/* ── Ignore List ── */}
-      <div className="settings-section">
-        <div className="settings-section-label">Ignore List</div>
-        <div className="settings-card">
-          <div className="settings-ignore-desc">
-            Paths added here will never be cleaned or deleted by any module
-          </div>
-
-          {settings.whitelist.length > 0 && (
-            <div className="settings-ignore-list">
-              {settings.whitelist.map((path) => (
-                <div key={path} className="settings-ignore-item">
-                  <svg className="settings-ignore-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14.5 13.5h-13a1 1 0 01-1-1v-8a1 1 0 011-1h4l2 2h7a1 1 0 011 1v6a1 1 0 01-1 1z" />
-                  </svg>
-                  <span className="settings-ignore-path">{path}</span>
-                  <button
-                    className="settings-ignore-remove"
-                    onClick={() => removeWhitelist(path)}
-                    title="Remove"
-                  >
-                    &times;
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
+        <Section id="ignore" label="Ignore List">
+          {settings.whitelist.map((path) => (
+            <Row key={path} name={<span className="st-path" title={path}>{path}</span>}>
+              <button
+                type="button"
+                className="st-path-remove"
+                onClick={() => removeWhitelist(path)}
+                aria-label={`Remove ${path}`}
+              >
+                <X size={12} strokeWidth={2.25} />
+              </button>
+            </Row>
+          ))}
           {showInput ? (
-            <div className="settings-ignore-input-row">
+            <div className="st-row">
               <input
                 type="text"
-                className="settings-ignore-input"
+                className="st-input"
                 placeholder="/path/to/protect"
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
@@ -351,93 +499,58 @@ export default function Settings() {
                 }}
                 autoFocus
               />
-              <button className="btn" onClick={handleAddPath}>
-                Add
-              </button>
+              <Pill onClick={() => { setShowInput(false); setNewPath(""); }}>Cancel</Pill>
+              <Pill variant="primary" onClick={handleAddPath}>Add</Pill>
             </div>
           ) : (
-            <div className="settings-ignore-actions">
-              <button className="settings-ignore-add" onClick={() => setShowInput(true)}>
-                + Type Path
-              </button>
-              <button className="settings-ignore-add" onClick={handleBrowse}>
-                + Browse
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Data ── */}
-      <div className="settings-section">
-        <div className="settings-section-label">Data</div>
-        <div className="settings-card">
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Lifetime Stats</div>
-              <div className="settings-row-desc">
-                Total space reclaimed: {totalFreed > 0 ? formatSize(totalFreed) : "—"}
+            <Row name="Add a folder" desc="Kyra won't scan or clean anything inside it">
+              <div className="st-pill-group">
+                <Pill onClick={() => setShowInput(true)}>Type path…</Pill>
+                <Pill onClick={handleBrowse}>Choose…</Pill>
               </div>
-            </div>
-            <button
-              className="btn settings-btn-sm"
-              onClick={handleResetStats}
-              disabled={statsReset}
-            >
-              {statsReset ? "Reset ✓" : "Reset"}
-            </button>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Storage Location</div>
-              <div className="settings-row-desc settings-mono">{storagePath || "—"}</div>
-            </div>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Export Logs</div>
-              <div className="settings-row-desc">Reveal operation logs in Finder for sharing or debugging</div>
-            </div>
-            <button
-              className="btn settings-btn-sm"
-              onClick={() => revealLogInFinder()}
-            >
-              Show in Finder
-            </button>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-info">
-              <div className="settings-row-name">Reset All Settings</div>
-              <div className="settings-row-desc">Restore all settings to their defaults</div>
-            </div>
-            <button
-              className="btn settings-btn-sm settings-btn-danger"
-              onClick={handleResetSettings}
-            >
-              Reset
-            </button>
-          </div>
+            </Row>
+          )}
+        </Section>
+
+        <Section id="data" label="Data">
+          <Row
+            name="Lifetime stats"
+            desc={totalFreed > 0 ? `${formatSize(totalFreed)} reclaimed` : "Nothing reclaimed yet"}
+          >
+            <Pill onClick={handleResetStats} disabled={statsReset}>{statsReset ? "Reset ✓" : "Reset"}</Pill>
+          </Row>
+          <Row name="Storage location" desc={storagePath || "—"} mono />
+          <Row name="Export logs" desc="Reveal operation logs in Finder">
+            <Pill onClick={() => revealLogInFinder()}>Reveal</Pill>
+          </Row>
+          <Row name="Replay onboarding" desc="See the welcome tour again">
+            <Pill onClick={() => { navigate("/"); setOnboardingCompleted(false); }}>Replay</Pill>
+          </Row>
+          <Row name="Reset all settings" desc="Restore every setting to its default">
+            <Pill variant="danger" onClick={handleResetSettings}>Reset</Pill>
+          </Row>
+        </Section>
+
+        <div className="st-footer">
+          <a href="#" onClick={link("https://github.com/0xjba/Kyra")}>GitHub</a>
+          <a href="#" onClick={link("https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md")}>Changelog</a>
+          <a href="#" onClick={link("https://github.com/0xjba/Kyra/blob/main/LICENSE")}>License</a>
+          <span className="st-footer-dev">Developed by Jobin Ayathil</span>
         </div>
       </div>
 
-      {/* ── About ── */}
-      <div className="settings-section">
-        <div className="settings-section-label">About</div>
-        <div className="settings-about">
-          <img src={logoSrc} alt="Kyra" className="settings-about-logo" />
-          <div className="settings-about-name">Kyra <span className="settings-about-version">{appVersion ? `v${appVersion}` : ""}</span></div>
-          <div className="settings-about-desc">NINE LIVES FOR YOUR STORAGE</div>
-          <div className="settings-about-links">
-            <a href="#" onClick={(e) => { e.preventDefault(); openUrl("https://github.com/0xjba/Kyra").catch(console.error); }}>GitHub</a>
-            <span className="settings-about-sep">·</span>
-            <a href="#" onClick={(e) => { e.preventDefault(); openUrl("https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md").catch(console.error); }}>Changelog</a>
-            <span className="settings-about-sep">·</span>
-            <a href="#" onClick={(e) => { e.preventDefault(); openUrl("https://github.com/0xjba/Kyra/blob/main/LICENSE").catch(console.error); }}>License</a>
-          </div>
-          <div className="settings-about-dev">Developed by Jobin Ayathil</div>
-        </div>
-      </div>
-      </div>
+      <SubscribeSheet open={sheet === "subscribe"} onClose={closeSheet} />
+      <RestoreSheet open={sheet === "restore"} onClose={closeSheet} />
+      <DeleteConfirmDialog
+        visible={confirmCancel}
+        title="Cancel Pawtrol?"
+        description={cancelDesc}
+        confirmLabel="Cancel subscription"
+        cancelLabel="Keep Pawtrol"
+        destructive
+        onConfirm={handleCancelSubscription}
+        onCancel={closeCancel}
+      />
     </div>
   );
 }

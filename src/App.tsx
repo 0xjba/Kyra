@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { HashRouter, Routes, Route } from "react-router-dom";
+import { enable as enableAutostart } from "@tauri-apps/plugin-autostart";
 import { useSettingsStore } from "./stores/settingsStore";
-import AccentBar from "./components/AccentBar";
+import { useGuardianStore } from "./stores/guardianStore";
+import { setTrayVisible } from "./lib/tauri";
 import TitleBar from "./components/TitleBar";
 import FdaPrompt from "./components/FdaPrompt";
 
@@ -61,6 +63,34 @@ async function checkForAppUpdate() {
   }
 }
 
+// Menu-bar presence for Pawtrol: tray visibility and one-time launch at login.
+export function PawtrolPresence() {
+  const licensed = useGuardianStore((s) => s.license.active);
+  const settingsLoaded = useSettingsStore((s) => s.loaded);
+  const onboarded = useSettingsStore((s) => s.settings.onboarding_completed);
+  const loginPrompted = useSettingsStore((s) => s.settings.pawtrol_login_prompted);
+
+  useEffect(() => {
+    setTrayVisible(licensed).catch(() => {});
+  }, [licensed]);
+
+  useEffect(() => {
+    if (!licensed || !settingsLoaded || !onboarded || loginPrompted) return;
+    const { settings, setLaunchAtLogin, setPawtrolLoginPrompted } = useSettingsStore.getState();
+    (async () => {
+      if (!settings.launch_at_login) {
+        try {
+          await enableAutostart();
+          await setLaunchAtLogin(true);
+        } catch {}
+      }
+      await setPawtrolLoginPrompted(true);
+    })().catch(() => {});
+  }, [licensed, settingsLoaded, onboarded, loginPrompted]);
+
+  return null;
+}
+
 export default function App() {
   const loadSettings = useSettingsStore((s) => s.load);
   const settingsLoaded = useSettingsStore((s) => s.loaded);
@@ -88,9 +118,9 @@ export default function App() {
 
   return (
     <HashRouter>
+      <PawtrolPresence />
       <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
         <TitleBar />
-        <div style={{ height: 1, background: "rgba(255, 255, 255, 0.06)", flexShrink: 0 }} />
         {showOnboarding ? (
           <Suspense fallback={null}>
             <Onboarding />
@@ -117,7 +147,6 @@ export default function App() {
             </div>
           </>
         )}
-        <AccentBar />
       </div>
     </HashRouter>
   );

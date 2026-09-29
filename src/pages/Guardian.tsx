@@ -1,359 +1,516 @@
-import { useEffect, useState } from "react";
-import { Shield, Check, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, Clock, Hand, LockKeyhole, Radar, Siren } from "lucide-react";
 import { useGuardianStore } from "../stores/guardianStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatSize } from "../utils/format";
+import { agoLabel, dataLossCopy, nextPatrolLabel, patrolStatusLine, runSummary } from "../utils/patrol";
+import type { PatrolRun, PatrolStatus, PatrolTrigger, ReviewItem } from "../lib/tauri";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
+import SubscribeSheet from "../components/SubscribeSheet";
+import RestoreSheet from "../components/RestoreSheet";
+import cat1 from "../assets/cat-tail/cat1.png";
+import cat2 from "../assets/cat-tail/cat2.png";
+import cat3 from "../assets/cat-tail/cat3.png";
+import cat4 from "../assets/cat-tail/cat4.png";
+import cat5 from "../assets/cat-tail/cat5.png";
+import cat6 from "../assets/cat-tail/cat6.png";
+import cat7 from "../assets/cat-tail/cat7.png";
+import walk1 from "../assets/cat-walking/cat_walking_01.png";
+import walk2 from "../assets/cat-walking/cat_walking_02.png";
+import walk3 from "../assets/cat-walking/cat_walking_03.png";
+import walk4 from "../assets/cat-walking/cat_walking_04.png";
+import walk5 from "../assets/cat-walking/cat_walking_05.png";
 import "../styles/guardian.css";
 
-/* ── Score badge helpers ── */
-function scoreTier(score: number): "high" | "mid" | "low" {
-  if (score > 70) return "high";
-  if (score >= 40) return "mid";
-  return "low";
+const TAIL_FRAMES = [cat1, cat2, cat3, cat4, cat5, cat6, cat7, cat6, cat5, cat4, cat3, cat2];
+const WALK_FRAMES = [walk1, walk2, walk3, walk4, walk5, walk4, walk3, walk2];
+
+const PERKS = [
+  "Runs daily and when space runs low",
+  "Auto-cleans safe caches on its own",
+  "Asks before touching your data",
+];
+
+const TEASER = [
+  { name: "Freed 2.3 GB", tier: "#2AC852" },
+  { name: "Docker Data", tier: "#FDB022" },
+  { name: "Xcode Archives", tier: "#FDB022" },
+];
+
+const TRIGGERS: Record<PatrolTrigger, { icon: typeof Clock; label: string }> = {
+  schedule: { icon: Clock, label: "Daily run" },
+  low_disk: { icon: AlertTriangle, label: "Low disk" },
+  manual: { icon: Hand, label: "You asked" },
+};
+
+function tierColor(score: number): string {
+  if (score > 70) return "#2AC852";
+  if (score >= 40) return "#FDB022";
+  return "#FD4841";
 }
 
-function ScoreBadge({ score }: { score: number }) {
-  const tier = scoreTier(score);
-  return (
-    <span className={`guardian-score-badge guardian-score-${tier}`}>
-      {Math.round(score)}
-    </span>
-  );
+function useFrame(length: number, ms: number) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setI((n) => (n + 1) % length), ms);
+    return () => clearInterval(id);
+  }, [length, ms]);
+  return i;
 }
 
-/* ── Idle ── */
-function IdleView({ onScan }: { onScan: () => void }) {
+function useNow(ms: number) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return now;
+}
+
+function TailCat({ className }: { className: string }) {
+  const i = useFrame(TAIL_FRAMES.length, 130);
+  return <img src={TAIL_FRAMES[i]} className={className} alt="" draggable={false} />;
+}
+
+function WalkCat({ className }: { className: string }) {
+  const i = useFrame(WALK_FRAMES.length, 130);
+  return <img src={WALK_FRAMES[i]} className={className} alt="" draggable={false} />;
+}
+
+function SirenBadge() {
+  const blink = useFrame(2, 650) === 1;
+  const a = blink ? "#1f5fff" : "#FD4841";
+  const b = blink ? "#FD4841" : "#1f5fff";
   return (
-    <div className="centered">
-      <div className="guardian-idle-icon">
-        <Shield size={26} strokeWidth={1.5} />
-      </div>
-
-      <div className="guardian-idle-title">Guardian</div>
-      <div className="guardian-idle-desc">
-        Analyzes your system and scores reclaimable data by confidence
-        and safety, so you can auto-clean what's truly safe to remove.
-      </div>
-
-      <button className="btn btn-primary" onClick={onScan}>
-        Scan Now
-      </button>
+    <div className="guardian-siren-badge">
+      <svg width="0" height="0" className="guardian-svg-defs" aria-hidden="true">
+        <defs>
+          <linearGradient id="guardian-siren-grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="24" y2="0">
+            <stop offset="0.5" stopColor={a} />
+            <stop offset="0.5" stopColor={b} />
+          </linearGradient>
+        </defs>
+      </svg>
+      <Siren size={24} strokeWidth={2} stroke="url(#guardian-siren-grad)" />
     </div>
   );
 }
 
-/* ── Scanning / Scoring ── */
-function ScanningView({ label }: { label: string }) {
+function LockedView({ onSubscribe, onRestore }: { onSubscribe: () => void; onRestore: () => void }) {
+  const deviceName = useGuardianStore((s) => s.deviceName);
+
   return (
-    <div className="centered">
-      <div className="guardian-pulse">
-        <Shield size={22} strokeWidth={1.5} />
+    <div className="guardian-locked">
+      <div className="guardian-hero">
+        <div className="guardian-hero-cat">
+          <TailCat className="guardian-hero-cat-img" />
+          <SirenBadge />
+        </div>
+        <div className="guardian-hero-body">
+          <div className="guardian-hero-heading">
+            <span className="guardian-hero-title">Pawtrol</span>
+            <span className="guardian-pro-pill">PRO</span>
+          </div>
+          <div className="guardian-hero-desc">
+            Pawtrol looks after your {deviceName || "Mac"} every day and when space runs low, clears what's
+            safe on its own, and asks you before touching anything that matters.
+          </div>
+          <div className="guardian-perks">
+            {PERKS.map((k) => (
+              <div key={k} className="guardian-perk">
+                <span className="guardian-perk-check">
+                  <Check size={11} strokeWidth={3} />
+                </span>
+                {k}
+              </div>
+            ))}
+          </div>
+          <div className="guardian-cta-row">
+            <button className="guardian-btn-subscribe" onClick={onSubscribe}>
+              Subscribe
+            </button>
+            <div className="guardian-price">
+              <span className="guardian-price-amount">$0.99</span>
+              <span className="guardian-price-period">/month</span>
+            </div>
+          </div>
+          <button className="guardian-refresh-link" onClick={onRestore}>
+            Already subscribed? Restore
+          </button>
+        </div>
       </div>
-      <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{label}</div>
+
+      <div className="guardian-teaser">
+        <div className="guardian-teaser-blur" aria-hidden="true">
+          {TEASER.map((c) => (
+            <div key={c.name} className="guardian-teaser-row">
+              <span className="guardian-teaser-name">{c.name}</span>
+              <span className="guardian-score-pill guardian-teaser-pill" style={{ background: c.tier }} />
+              <span className="guardian-teaser-size" />
+            </div>
+          ))}
+        </div>
+        <div className="guardian-teaser-lock">
+          <LockKeyhole size={14} strokeWidth={2} />
+          Your patrol reports show up here
+        </div>
+      </div>
     </div>
   );
 }
 
-/* ── Category row ── */
-function CategoryRow({
-  category,
-  displayName,
-  cleanableBytes,
-  score,
-  details,
-  selected,
+function DutyHero({ status, now }: { status: PatrolStatus | null; now: number }) {
+  const setPatrol = useGuardianStore((s) => s.setPatrol);
+  const patrolError = useGuardianStore((s) => s.patrolError);
+
+  const running = status?.running ?? false;
+  const paused = status ? !status.enabled : false;
+  const mode = running ? "running" : paused ? "paused" : "on";
+
+  let freedSub = "since Pawtrol started";
+  if (status && status.freed_last > 0) freedSub = `${formatSize(status.freed_last)} last run`;
+  else if (status?.last_patrol_at) freedSub = "nothing to clear last run";
+
+  return (
+    <section className={`guardian-duty guardian-duty-${mode}`}>
+      <div className="guardian-duty-cat">
+        {running ? (
+          <WalkCat className="guardian-duty-cat-img" />
+        ) : paused ? (
+          <img src={TAIL_FRAMES[0]} className="guardian-duty-cat-img guardian-duty-cat-paused" alt="" draggable={false} />
+        ) : (
+          <TailCat className="guardian-duty-cat-img" />
+        )}
+      </div>
+
+      <div className="guardian-duty-body">
+        <div className="guardian-duty-heading">
+          <span className="guardian-duty-title">{paused ? "Pawtrol is paused" : "Pawtrol is on duty"}</span>
+          <span className="guardian-active-pill">Pro</span>
+        </div>
+        <div className="guardian-duty-status">
+          <span className="guardian-duty-dot" />
+          <span>{status ? patrolStatusLine(status, now) : "Checking in…"}</span>
+        </div>
+        <div className="guardian-duty-actions">
+          {paused && status && (
+            <button className="guardian-pill guardian-pill-primary" onClick={() => setPatrol(true, status.auto_clean)}>
+              Resume Pawtrol
+            </button>
+          )}
+        </div>
+        {patrolError && <div className="guardian-duty-error">{patrolError}</div>}
+      </div>
+
+      <div className="guardian-duty-stat">
+        <div className="guardian-duty-freed">
+          <span className="guardian-duty-freed-size">{formatSize(status?.freed_total ?? 0)}</span>
+          <span className="guardian-duty-freed-label">freed</span>
+        </div>
+        <div className="guardian-duty-freed-sub">{freedSub}</div>
+      </div>
+    </section>
+  );
+}
+
+function ReviewRow({
+  item,
+  checked,
+  busy,
   onToggle,
+  onClean,
+  onDismiss,
 }: {
-  category: string;
-  displayName: string;
-  cleanableBytes: number;
-  score: number;
-  details: string;
-  selected: boolean;
-  onToggle: (category: string) => void;
+  item: ReviewItem;
+  checked: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onClean: () => void;
+  onDismiss: () => void;
 }) {
   return (
-    <div className="guardian-row" onClick={() => onToggle(category)}>
+    <div className={`guardian-review-row${busy ? " guardian-review-row-busy" : ""}`} data-review-id={item.id}>
       <input
         type="checkbox"
         className="checkbox"
-        checked={selected}
-        onChange={() => onToggle(category)}
-        onClick={(e) => e.stopPropagation()}
+        checked={checked}
+        disabled={busy}
+        onChange={onToggle}
+        aria-label={`Select ${item.name}`}
       />
       <div className="guardian-row-main">
-        <div className="guardian-row-top">
-          <span className="guardian-row-name">{displayName}</span>
-          <ScoreBadge score={score} />
-          <span className="guardian-row-size">{formatSize(cleanableBytes)}</span>
-        </div>
-        <div className="guardian-row-details">{details}</div>
+        <div className="guardian-row-name">{item.name}</div>
+        {item.details && <div className="guardian-row-details">{item.details}</div>}
+        {item.user_data && item.data_loss && (
+          <div className="guardian-row-warning">
+            <AlertTriangle size={11} strokeWidth={2.2} />
+            <span>{item.data_loss}</span>
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-/* ── Results ── */
-function ResultsView() {
-  const scores = useGuardianStore((s) => s.scores);
-  const selected = useGuardianStore((s) => s.selected);
-  const totalCleanable = useGuardianStore((s) => s.totalCleanable);
-  const toggleCategory = useGuardianStore((s) => s.toggleCategory);
-  const selectAll = useGuardianStore((s) => s.selectAll);
-  const deselectAll = useGuardianStore((s) => s.deselectAll);
-  const clean = useGuardianStore((s) => s.clean);
-  const useTrash = useSettingsStore((s) => s.settings.use_trash);
-
-  const [showConfirm, setShowConfirm] = useState(false);
-
-  if (scores.length === 0) {
-    return (
-      <div className="centered">
-        <div className="guardian-empty-icon">
-          <Check size={26} strokeWidth={1.5} />
-        </div>
-        <div className="guardian-empty-title">All clean</div>
-        <div className="guardian-empty-desc">
-          No reclaimable data was found. Your system is already in great shape.
-        </div>
-        <button className="btn" onClick={() => useGuardianStore.getState().scan()} style={{ marginTop: 8 }}>
-          Scan Again
-        </button>
-      </div>
-    );
-  }
-
-  const sorted = [...scores].sort((a, b) => b.score - a.score);
-  const allSelected = scores.length > 0 && scores.every((s) => selected.has(s.category));
-  const selectedSize = sorted
-    .filter((s) => selected.has(s.category))
-    .reduce((sum, s) => sum + s.cleanable_bytes, 0);
-
-  return (
-    <>
-      <div className="guardian-summary-bar">
-        <div className="guardian-summary-left">
-          <span className="guardian-summary-title">Guardian</span>
-          <span className="guardian-summary-size">{formatSize(totalCleanable)}</span>
-          <span className="guardian-summary-context">
-            reclaimable across {sorted.length} categories
+      <div className="guardian-review-side">
+        <div className="guardian-review-meta">
+          <span className="guardian-score-pill" style={{ background: tierColor(item.score) }}>
+            {Math.round(item.score)}
           </span>
+          <span className="guardian-row-size">{formatSize(item.size)}</span>
         </div>
-        <button className="btn" style={{ minWidth: 90 }} onClick={allSelected ? deselectAll : selectAll}>
-          {allSelected ? "Deselect All" : "Select All"}
-        </button>
-      </div>
-
-      <div className="guardian-list">
-        {sorted.map((s) => (
-          <CategoryRow
-            key={s.category}
-            category={s.category}
-            displayName={s.display_name}
-            cleanableBytes={s.cleanable_bytes}
-            score={s.score}
-            details={s.details}
-            selected={selected.has(s.category)}
-            onToggle={toggleCategory}
-          />
-        ))}
-      </div>
-
-      <div className="module-footer guardian-footer">
-        <span className="module-footer-info">
-          {selected.size} of {sorted.length} categories selected
-        </span>
-        <button
-          className="btn btn-primary"
-          style={{ minWidth: 140 }}
-          disabled={selected.size === 0}
-          onClick={() => setShowConfirm(true)}
-        >
-          Clean Selected {selectedSize > 0 ? formatSize(selectedSize) : ""}
-        </button>
-      </div>
-
-      <DeleteConfirmDialog
-        visible={showConfirm}
-        title={`Clean ${selected.size} categories (${formatSize(selectedSize)})?`}
-        onConfirm={() => { setShowConfirm(false); clean(!useTrash); }}
-        onCancel={() => setShowConfirm(false)}
-      />
-    </>
-  );
-}
-
-/* ── Cleaning ── */
-function CleaningView() {
-  const progress = useGuardianStore((s) => s.progress);
-
-  const total = progress?.categories_total ?? 0;
-  const done = progress?.categories_done ?? 0;
-  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
-
-  const ringSize = 120;
-  const strokeWidth = 6;
-  const radius = (ringSize - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference - (percent / 100) * circumference;
-
-  return (
-    <div className="centered">
-      <div className="guardian-ring-wrap">
-        <svg
-          className="guardian-ring-svg"
-          width={ringSize}
-          height={ringSize}
-          viewBox={`0 0 ${ringSize} ${ringSize}`}
-        >
-          <defs>
-            <linearGradient id="guardian-ring-glass" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.35)" />
-              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.18)" />
-              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.30)" />
-            </linearGradient>
-          </defs>
-          <circle
-            cx={ringSize / 2} cy={ringSize / 2} r={radius}
-            fill="none" stroke="rgba(255, 255, 255, 0.06)" strokeWidth={strokeWidth}
-          />
-          <circle
-            cx={ringSize / 2} cy={ringSize / 2} r={radius}
-            fill="none" stroke="url(#guardian-ring-glass)"
-            strokeWidth={strokeWidth} strokeLinecap="round"
-            strokeDasharray={circumference} strokeDashoffset={dashOffset}
-            className="guardian-ring-fill"
-          />
-        </svg>
-        <span className="guardian-ring-percent">{percent}%</span>
-      </div>
-
-      <div className="guardian-ring-freed">
-        {progress ? formatSize(progress.bytes_freed) : "0 B"} reclaimed
-      </div>
-
-      <div className="guardian-ring-current">
-        {progress?.current_category
-          ? `Cleaning ${progress.current_category}…`
-          : "Starting…"}
+        <div className="guardian-review-actions">
+          <button className="guardian-row-btn" onClick={onDismiss} disabled={busy}>
+            Not now
+          </button>
+          <button className="guardian-row-btn guardian-row-btn-clean" onClick={onClean} disabled={busy}>
+            Clean
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-/* ── Success ── */
-function SuccessView() {
-  const cleanResult = useGuardianStore((s) => s.cleanResult);
-  const reset = useGuardianStore((s) => s.reset);
+function ReviewPanel({ status }: { status: PatrolStatus | null }) {
+  const reviewClean = useGuardianStore((s) => s.reviewClean);
+  const reviewDismiss = useGuardianStore((s) => s.reviewDismiss);
+  const reviewBusy = useGuardianStore((s) => s.reviewBusy);
+  const reviewError = useGuardianStore((s) => s.reviewError);
+  const useTrash = useSettingsStore((s) => s.settings.use_trash);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [confirm, setConfirm] = useState<ReviewItem[] | null>(null);
 
-  const ringSize = 120;
-  const strokeWidth = 6;
-  const radius = (ringSize - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
+  const items = status?.pending_review ?? [];
+  const { safe, risky } = useMemo(() => {
+    const byScore = [...items].sort((a, b) => b.score - a.score);
+    return { safe: byScore.filter((i) => i.safe), risky: byScore.filter((i) => !i.safe) };
+  }, [items]);
+
+  const selected = items.filter((i) => picked.has(i.id));
+  const selectedSize = selected.reduce((sum, i) => sum + i.size, 0);
+  const safeSize = safe.reduce((sum, i) => sum + i.size, 0);
+
+  const forget = (targets: ReviewItem[]) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      targets.forEach((t) => next.delete(t.id));
+      return next;
+    });
+
+  const clean = (targets: ReviewItem[]) => {
+    forget(targets);
+    reviewClean(targets.map((t) => t.id));
+  };
+
+  const requestClean = (targets: ReviewItem[]) => {
+    if (targets.length === 0) return;
+    if (targets.some((t) => t.user_data)) setConfirm(targets);
+    else clean(targets);
+  };
+
+  const dismiss = (targets: ReviewItem[]) => {
+    forget(targets);
+    reviewDismiss(targets.map((t) => t.id));
+  };
+
+  const toggle = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const renderRow = (item: ReviewItem) => (
+    <ReviewRow
+      key={item.id}
+      item={item}
+      checked={picked.has(item.id)}
+      busy={reviewBusy.includes(item.id)}
+      onToggle={() => toggle(item.id)}
+      onClean={() => requestClean([item])}
+      onDismiss={() => dismiss([item])}
+    />
+  );
+
+  const confirmSize = confirm?.reduce((sum, i) => sum + i.size, 0) ?? 0;
+  const confirmTitle = !confirm
+    ? ""
+    : confirm.length === 1
+      ? `Clean ${confirm[0].name}?`
+      : `Clean ${confirm.length} items (${formatSize(confirmSize)})?`;
+  const confirmDesc = confirm
+    ? dataLossCopy(
+        confirm.filter((i) => i.user_data).map((i) => i.data_loss || `${i.name} holds your own data`),
+        useTrash,
+      )
+    : undefined;
 
   return (
-    <div className="centered guardian-done">
-      <div className="guardian-ring-wrap">
-        <svg
-          className="guardian-ring-svg"
-          width={ringSize}
-          height={ringSize}
-          viewBox={`0 0 ${ringSize} ${ringSize}`}
-        >
-          <defs>
-            <linearGradient id="guardian-ring-glass-done" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="rgba(255, 255, 255, 0.5)" />
-              <stop offset="50%" stopColor="rgba(255, 255, 255, 0.28)" />
-              <stop offset="100%" stopColor="rgba(255, 255, 255, 0.45)" />
-            </linearGradient>
-            <filter id="guardian-ring-glow">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          <circle
-            cx={ringSize / 2} cy={ringSize / 2} r={radius}
-            fill="none" stroke="rgba(255, 255, 255, 0.06)" strokeWidth={strokeWidth}
-          />
-          <circle
-            cx={ringSize / 2} cy={ringSize / 2} r={radius}
-            fill="none" stroke="url(#guardian-ring-glass-done)"
-            strokeWidth={strokeWidth} strokeLinecap="round"
-            strokeDasharray={circumference} strokeDashoffset={0}
-            className="guardian-ring-fill"
-            filter="url(#guardian-ring-glow)"
-          />
-        </svg>
-        <Check size={32} strokeWidth={2.5} className="guardian-ring-check" />
+    <section className="guardian-panel guardian-review">
+      <div className="guardian-panel-head">
+        <span className="guardian-panel-title">Needs your review</span>
+        {items.length > 0 && <span className="guardian-count-pill">{items.length}</span>}
       </div>
 
-      <div className="guardian-ring-freed">
-        {cleanResult ? formatSize(cleanResult.bytes_freed) : "0 B"} reclaimed
-      </div>
-
-      <div className="guardian-ring-current">
-        {cleanResult ? cleanResult.categories_cleaned : 0} categories cleaned
-      </div>
-
-      {cleanResult && cleanResult.errors.length > 0 && (
-        <div style={{
-          fontSize: 11,
-          color: "rgba(255,255,255,0.4)",
-          marginTop: 4,
-        }}>
-          {cleanResult.errors.length} item{cleanResult.errors.length !== 1 ? "s" : ""} couldn't be removed
+      {items.length === 0 ? (
+        <div className="guardian-panel-empty">
+          <TailCat className="guardian-empty-cat" />
+          <div className="guardian-panel-empty-title">Nothing needs you. I'll keep watching.</div>
+        </div>
+      ) : (
+        <div className="guardian-panel-body">
+          {safe.length > 0 && (
+            <>
+              <div className="guardian-group-head">
+                <span className="guardian-group-label">
+                  Safe to clean{status && !status.auto_clean ? " · waiting because auto-clean is off" : ""}
+                </span>
+                <button
+                  className="guardian-btn-clean guardian-btn-compact"
+                  onClick={() => requestClean(safe)}
+                  disabled={safe.every((i) => reviewBusy.includes(i.id))}
+                >
+                  Clean all safe ({formatSize(safeSize)})
+                </button>
+              </div>
+              {safe.map(renderRow)}
+            </>
+          )}
+          {risky.length > 0 && safe.length > 0 && (
+            <div className="guardian-group-head">
+              <span className="guardian-group-label">Your call</span>
+            </div>
+          )}
+          {risky.map(renderRow)}
         </div>
       )}
 
-      <button className="btn" onClick={reset} style={{ marginTop: 12 }}>
-        Done
-      </button>
+      {reviewError && <div className="guardian-panel-error">{reviewError}</div>}
+
+      {selected.length > 0 && (
+        <div className="guardian-panel-foot">
+          <span className="guardian-sel-info">
+            {selected.length} selected · {formatSize(selectedSize)}
+          </span>
+          <button className="guardian-btn-secondary" onClick={() => dismiss(selected)}>
+            Not now
+          </button>
+          <button className="guardian-btn-clean guardian-btn-compact" onClick={() => requestClean(selected)}>
+            Clean {formatSize(selectedSize)}
+          </button>
+        </div>
+      )}
+
+      <DeleteConfirmDialog
+        visible={!!confirm}
+        title={confirmTitle}
+        description={confirmDesc}
+        confirmLabel={useTrash ? "Move to Trash" : "Delete"}
+        destructive
+        onConfirm={() => {
+          if (confirm) clean(confirm);
+          setConfirm(null);
+        }}
+        onCancel={() => setConfirm(null)}
+      />
+    </section>
+  );
+}
+
+function ActivityRow({ run, now }: { run: PatrolRun; now: number }) {
+  const trigger = TRIGGERS[run.trigger] ?? TRIGGERS.schedule;
+  const Icon = trigger.icon;
+  const { title, detail } = runSummary(run);
+  return (
+    <div className={`guardian-activity-row${run.error ? " guardian-activity-row-error" : ""}`}>
+      <span className={`guardian-activity-icon guardian-activity-${run.trigger}`} title={trigger.label}>
+        <Icon size={13} strokeWidth={2.2} aria-label={trigger.label} />
+      </span>
+      <div className="guardian-activity-main">
+        <div className="guardian-activity-title">{title}</div>
+        <div className="guardian-activity-detail">{detail}</div>
+      </div>
+      <span className="guardian-activity-time">{agoLabel(run.finished_at || run.started_at, now)}</span>
     </div>
   );
 }
 
-/* ── Error ── */
-function ErrorView() {
-  const error = useGuardianStore((s) => s.error);
-  const reset = useGuardianStore((s) => s.reset);
+function ActivityPanel({ status, now }: { status: PatrolStatus | null; now: number }) {
+  const history = useMemo(
+    () => [...(status?.history ?? [])].sort((a, b) => b.started_at - a.started_at),
+    [status?.history],
+  );
 
   return (
-    <div className="centered">
-      <div className="guardian-empty-icon">
-        <RotateCcw size={24} strokeWidth={1.5} />
+    <section className="guardian-panel guardian-activity">
+      <div className="guardian-panel-head">
+        <span className="guardian-panel-title">Activity</span>
       </div>
-      <div className="guardian-empty-title">Something went wrong</div>
-      <div className="guardian-empty-desc">{error || "An unexpected error occurred."}</div>
-      <button className="btn btn-primary" onClick={reset} style={{ marginTop: 8 }}>
-        Try Again
-      </button>
+      <div className="guardian-panel-body">
+        {status?.running && (
+          <div className="guardian-activity-row guardian-activity-live">
+            <span className="guardian-activity-icon guardian-activity-manual">
+              <Radar size={13} strokeWidth={2.2} />
+            </span>
+            <div className="guardian-activity-main">
+              <div className="guardian-activity-title">Pawtrol is checking…</div>
+              <div className="guardian-activity-detail">Checking caches, logs and dev tools</div>
+            </div>
+          </div>
+        )}
+        {history.map((run) => (
+          <ActivityRow key={`${run.started_at}-${run.trigger}`} run={run} now={now} />
+        ))}
+        {history.length === 0 && !status?.running && (
+          <div className="guardian-activity-empty">
+            {status?.next_patrol_at
+              ? `Pawtrol hasn't run yet. First run ${nextPatrolLabel(status.next_patrol_at, now).replace(/^next /, "")}.`
+              : "Pawtrol hasn't run yet."}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Dashboard() {
+  const status = useGuardianStore((s) => s.patrolStatus);
+  const now = useNow(60_000);
+  return (
+    <div className="guardian-dash">
+      <DutyHero status={status} now={now} />
+      <div className="guardian-panels">
+        <ReviewPanel status={status} />
+        <ActivityPanel status={status} now={now} />
+      </div>
     </div>
   );
 }
 
-/* ── Main ── */
 export default function Guardian() {
-  const phase = useGuardianStore((s) => s.phase);
-  const scan = useGuardianStore((s) => s.scan);
+  const licensed = useGuardianStore((s) => s.license.active);
   const checkLicense = useGuardianStore((s) => s.checkLicense);
+  const loadPatrolStatus = useGuardianStore((s) => s.loadPatrolStatus);
 
   useEffect(() => {
     checkLicense();
   }, [checkLicense]);
 
+  useEffect(() => {
+    if (licensed) loadPatrolStatus();
+  }, [licensed, loadPatrolStatus]);
+
+  const [sheet, setSheet] = useState<"subscribe" | "restore" | null>(null);
+  const closeSheet = useCallback(() => setSheet(null), []);
+
+  // Sheets live outside LockedView so a restore can show its success step after the license flips.
   return (
     <div className="guardian-container">
-      {phase === "idle" && <IdleView onScan={scan} />}
-      {phase === "scanning" && <ScanningView label="Scanning your system…" />}
-      {phase === "scoring" && <ScanningView label="Analyzing…" />}
-      {phase === "results" && <ResultsView />}
-      {phase === "cleaning" && <CleaningView />}
-      {phase === "success" && <SuccessView />}
-      {phase === "error" && <ErrorView />}
+      {licensed ? (
+        <Dashboard />
+      ) : (
+        <LockedView onSubscribe={() => setSheet("subscribe")} onRestore={() => setSheet("restore")} />
+      )}
+      <SubscribeSheet open={sheet === "subscribe"} onClose={closeSheet} />
+      <RestoreSheet open={sheet === "restore"} onClose={closeSheet} />
     </div>
   );
 }

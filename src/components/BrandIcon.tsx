@@ -45,7 +45,7 @@ const RULE_BRAND: Record<string, string> = {
   // Dev — iOS/macOS
   dev_cocoapods_cache: "cocoapods", dev_flutter_cache: "flutter",
   dev_xcode_derived: "xcode", dev_xcode_simulators: "xcode",
-  dev_xcode_archives: "xcode", dev_xcode_device_support: "xcode",
+  dev_xcode_device_support: "xcode",
   dev_xcode_docsets: "xcode",
   // Dev — Ruby/PHP
   dev_rubygems_cache: "rubygems", dev_composer_cache: "php",
@@ -78,7 +78,7 @@ export default function BrandIcon({ ruleId, size = 18 }: BrandIconProps) {
 
   // For very dark icons (black), lighten them for dark theme
   const color = icon.hex === "000000" || icon.hex === "191919" || icon.hex === "313131" || icon.hex === "302E31"
-    ? "rgba(255, 255, 255, 0.7)"
+    ? "rgba(13, 21, 38, 0.7)"
     : `#${icon.hex}`;
 
   // Render inside a rounded-square container matching macOS app icon style
@@ -91,7 +91,7 @@ export default function BrandIcon({ ruleId, size = 18 }: BrandIconProps) {
         width: size,
         height: size,
         borderRadius: Math.round(size * 0.22), // match macOS app icon radius
-        background: "rgba(255, 255, 255, 0.06)",
+        background: "rgba(13, 21, 38, 0.06)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

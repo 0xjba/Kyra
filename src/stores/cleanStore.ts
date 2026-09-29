@@ -42,8 +42,11 @@ export const useCleanStore = create<CleanStore>((set, get) => ({
     set({ phase: "scanning", items: [], error: null });
     try {
       const items = await scanForCleanables();
-      const allIds = new Set(items.map((item) => item.rule_id));
-      set({ phase: "results", items, selectedIds: allIds });
+      // Leftovers of uninstalled apps are opt-in: a misdetected "uninstalled" app once cost users their data.
+      const defaultIds = new Set(
+        items.filter((item) => item.category !== "Orphaned Data").map((item) => item.rule_id),
+      );
+      set({ phase: "results", items, selectedIds: defaultIds });
     } catch (e) {
       set({ phase: "idle", error: String(e) });
     }

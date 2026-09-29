@@ -1,786 +1,746 @@
-/* ── Uninstall Module ────────────────────────────────────── */
+/* ── Uninstall Module ── Liquid Glass ────────────────────── */
 
 .uninstall-container {
-  padding: 12px;
-  overflow-y: auto;
-  overflow-x: hidden;
   height: 100%;
+  padding: 0 14px 14px;
   display: flex;
   flex-direction: column;
-}
-
-
-.uninstall-empty-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.uninstall-idle-title {
-  font-size: var(--font-xl);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-}
-
-.uninstall-idle-desc {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
-  text-align: center;
-  max-width: 340px;
-  line-height: var(--leading-relaxed);
-}
-
-
-.uninstall-scanning-text {
-  font-size: var(--font-md);
-  color: var(--text-secondary);
+  overflow: hidden;
+  color: #0d1526;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 }
 
 .uninstall-error {
-  font-size: var(--font-base);
-  color: var(--red);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #e5332b;
   padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 12px;
   background: rgba(253, 72, 65, 0.08);
-  border-radius: 6px;
-  margin-bottom: 8px;
+  box-shadow: inset 0 0 0 0.5px rgba(253, 72, 65, 0.18);
 }
 
-/* ── List Header ── */
-.uninstall-list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-bottom: 10px;
-  margin-bottom: 0;
-}
-
-.uninstall-list-summary {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.uninstall-list-title {
-  font-size: var(--font-3xl);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-}
-
-.uninstall-list-context {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
-}
-
-.uninstall-list-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-/* ── Search + Sort Row ── */
-.uninstall-search-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.uninstall-search-box {
+.uninstall-layout {
   flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 10px;
+}
+
+/* ── Sidebar ── */
+
+.uninstall-sidebar {
+  border-radius: 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  background: linear-gradient(155deg, rgba(255,255,255,0.33), rgba(255,255,255,0.14));
+  box-shadow:
+    inset 0 1px 0.5px rgba(255,255,255,0.3),
+    inset 0 0 0 0.5px rgba(255,255,255,0.33),
+    0 8px 24px -8px rgba(20, 40, 120, 0.18);
+}
+
+.uninstall-sidebar-controls {
+  padding: 10px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.uninstall-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.42);
+  box-shadow:
+    inset 0 1px 2px rgba(20, 40, 120, 0.1),
+    inset 0 0 0 0.5px rgba(13, 21, 38, 0.08);
 }
 
 .uninstall-search-icon {
-  color: var(--text-tertiary);
   flex-shrink: 0;
+  color: rgba(13,21,38,0.64);
 }
 
 .uninstall-search-input {
   flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
   background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text-primary);
-  font-size: var(--font-base);
-  font-family: inherit;
+  font: inherit;
+  font-size: 13px;
+  color: #0d1526;
 }
 
 .uninstall-search-input::placeholder {
-  color: var(--text-tertiary);
+  color: rgba(13,21,38,0.64);
 }
 
-.uninstall-sort-controls {
+.uninstall-sort {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(13, 21, 38, 0.06);
 }
 
-.uninstall-sort-label {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-  margin-right: 2px;
-}
-
-.uninstall-sort-btn {
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: var(--font-sm);
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-
-.uninstall-sort-btn:hover {
-  color: var(--text-secondary);
-}
-
-.uninstall-sort-btn.active {
-  background: var(--bg-card);
-  border-color: var(--border);
-  color: var(--text-primary);
-}
-
-/* ── Quick Filters ── */
-.uninstall-quick-filters {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.uninstall-filter-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--font-sm);
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-}
-
-.uninstall-filter-btn:hover {
-  background: var(--bg-card);
-  border-color: var(--border-hover);
-  color: var(--text-primary);
-}
-
-.uninstall-filter-btn.active {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: var(--border-hover);
-  color: var(--text-primary);
-}
-
-.uninstall-filter-count {
-  font-size: var(--font-xs);
-  color: var(--text-tertiary);
-  background: var(--bg-card);
-  padding: 0 5px;
-  border-radius: 3px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── App Grid ── */
-.uninstall-grid-scroll {
+.uninstall-sort-opt {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  min-height: 0;
-  padding-right: 6px;
-}
-
-.uninstall-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  padding-bottom: 4px;
-}
-
-@media (max-width: 680px) {
-  .uninstall-grid { grid-template-columns: repeat(4, 1fr); }
-}
-
-@media (max-width: 520px) {
-  .uninstall-grid { grid-template-columns: repeat(3, 1fr); }
-}
-
-@media (max-width: 380px) {
-  .uninstall-grid { grid-template-columns: repeat(2, 1fr); }
-}
-
-/* ── App Card ── */
-.uninstall-card {
-  position: relative;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 14px 8px 10px;
-  border-radius: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  cursor: default;
-  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
-  aspect-ratio: 1 / 1;
   justify-content: center;
-  overflow: hidden;
-}
-
-.uninstall-card:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--border-hover);
-}
-
-.uninstall-card-selected {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: var(--border-hover);
-}
-
-.uninstall-card-system {
-  opacity: 0.4;
-  pointer-events: none;
-}
-
-/* Checkbox — top left */
-.uninstall-card-checkbox {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-}
-
-/* Info button — top right */
-.uninstall-card-info-btn {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: none;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: rgba(13,21,38,0.73);
   background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s, color 0.12s;
+  box-shadow: none;
+  transition: background 0.2s;
 }
 
-.uninstall-card-info-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
+.uninstall-sort-opt.on {
+  color: #0d1526;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 3px rgba(20, 40, 120, 0.15);
 }
 
-/* App icon */
-.uninstall-card-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  cursor: pointer;
+.uninstall-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 6px 8px;
 }
 
-.uninstall-card-icon-img {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  object-fit: contain;
-}
-
-.uninstall-card-icon-placeholder {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-tertiary);
-}
-
-/* App name */
-.uninstall-card-name {
-  font-size: var(--font-md);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-  text-align: center;
-  width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-/* Size label */
-.uninstall-card-size {
-  font-size: var(--font-sm);
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Detail View — Hero Header ── */
-.uninstall-detail-hero {
+.uninstall-list-note {
+  height: 100%;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 0 12px;
-  gap: 4px;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: rgba(13,21,38,0.73);
 }
 
-.uninstall-detail-icon-wrap {
+.uninstall-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 8px;
+  border-radius: 14px;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.15s, opacity 0.35s, transform 0.35s;
+}
+
+.uninstall-row:hover {
+  background: rgba(255,255,255,0.36);
+}
+
+.uninstall-row.active {
+  background: rgba(255,255,255,0.48);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 2px 8px -2px rgba(20, 40, 120, 0.15);
+}
+
+.uninstall-row.removing {
+  opacity: 0.45;
+  transform: translateX(-6px) scale(0.98);
+}
+
+.uninstall-row.system {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.uninstall-row.system:hover {
+  background: transparent;
+}
+
+.uninstall-row-icon {
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
-  margin-bottom: 4px;
-}
-
-.uninstall-detail-icon-img {
-  width: 64px;
-  height: 64px;
-  border-radius: 12px;
   object-fit: contain;
 }
 
-.uninstall-detail-icon-placeholder {
-  width: 64px;
-  height: 64px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-tertiary);
+.uninstall-row-text {
+  flex: 1;
+  min-width: 0;
 }
 
-.uninstall-detail-name {
-  font-size: var(--font-xl);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-  text-align: center;
-}
-
-.uninstall-detail-meta {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-  text-align: center;
-  max-width: 100%;
+.uninstall-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.uninstall-row-sub {
+  font-size: 11.5px;
+  color: rgba(13,21,38,0.73);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uninstall-row-size {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(13,21,38,0.74);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* ── Stats Row (single glass card, 3 segments) ── */
-.uninstall-detail-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  margin-bottom: 14px;
+.uninstall-icon-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  color: rgba(13,21,38,0.64);
+  background: rgba(255,255,255,0.36);
+  box-shadow: inset 0 0 0 0.5px rgba(13, 21, 38, 0.08);
 }
 
-.uninstall-detail-stat {
+/* ── Detail panel ── */
+
+.uninstall-detail {
+  position: relative;
+  min-height: 0;
+  border-radius: 22px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 14px 10px;
+  overflow: hidden;
+  background: linear-gradient(155deg, rgba(255,255,255,0.36), rgba(255,255,255,0.16));
+  box-shadow:
+    inset 0 1px 0.5px rgba(255,255,255,0.3),
+    inset 0 0 0 0.5px rgba(255,255,255,0.33),
+    inset 14px 14px 30px -20px rgba(255,255,255,0.5),
+    0 8px 24px -8px rgba(20, 40, 120, 0.18);
 }
 
-.uninstall-detail-stat + .uninstall-detail-stat {
-  border-left: 1px solid var(--border);
+.uninstall-detail-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  animation: uninstall-panel-in 0.35s cubic-bezier(0.2, 0.9, 0.25, 1);
 }
 
-.uninstall-detail-stat-value {
-  font-size: var(--font-3xl);
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: var(--tracking-tight);
+@keyframes uninstall-panel-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
-.uninstall-detail-stat-label {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-}
-
-/* ── Sensitive Warning ── */
-.uninstall-sensitive-warning {
+.uninstall-hero {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: var(--font-sm);
-  color: rgba(253, 210, 37, 0.85);
-  background: rgba(253, 210, 37, 0.08);
-  border: 1px solid rgba(253, 210, 37, 0.18);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin-bottom: 12px;
+  gap: 14px;
+  padding: 18px 18px 12px;
 }
 
-/* ── Section Header ── */
-.uninstall-detail-section-header {
+.uninstall-hero-icon {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 12px rgba(20, 40, 120, 0.25));
+}
+
+.uninstall-hero-icon.uninstall-icon-ph {
+  border-radius: 16px;
+  filter: none;
+}
+
+.uninstall-hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.uninstall-hero-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uninstall-hero-meta {
+  font-size: 12.5px;
+  color: rgba(13,21,38,0.74);
+  overflow-wrap: anywhere;
+}
+
+.uninstall-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.uninstall-badge {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #8a6400;
+  background: rgba(253, 210, 37, 0.3);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.uninstall-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 18px;
+}
+
+.uninstall-stat {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.36);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+  min-width: 0;
+}
+
+.uninstall-stat-v {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.uninstall-stat-k {
+  font-size: 11.5px;
+  color: rgba(13,21,38,0.73);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uninstall-section {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.uninstall-detail-section-title {
-  font-size: var(--font-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-}
-
-
-/* ── File List ── */
-.uninstall-file-list {
-  flex: 1;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding-right: 6px;
-  display: flex;
-  flex-direction: column;
-}
-
-.uninstall-file-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.uninstall-file-empty {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.uninstall-file-row {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 14px 18px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(13,21,38,0.67);
+}
+
+.uninstall-section-toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #1f5fff;
   cursor: pointer;
-  transition: background 0.12s;
 }
 
-.uninstall-file-row + .uninstall-file-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+.uninstall-section-toggle:hover {
+  text-decoration: underline;
 }
 
-.uninstall-file-row:hover {
-  background: rgba(255, 255, 255, 0.02);
+.uninstall-files {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 10px;
 }
 
-.uninstall-file-row-bundle {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+.uninstall-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.uninstall-file.bundle {
   cursor: default;
 }
 
-.uninstall-file-row-bundle:hover {
-  background: transparent;
+.uninstall-file:hover {
+  background: rgba(255,255,255,0.3);
 }
 
-.uninstall-file-row-bundle .uninstall-file-name {
-  font-weight: var(--weight-semibold);
+.uninstall-file .checkbox {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
 }
 
-.uninstall-file-name {
-  font-size: var(--font-md);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
+.uninstall-file .checkbox:checked::after {
+  font-size: 9px;
+}
+
+.uninstall-file-check-spacer {
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.uninstall-file.off .uninstall-file-icon,
+.uninstall-file.off .uninstall-file-path,
+.uninstall-file.off .uninstall-file-size {
+  opacity: 0.45;
+}
+
+.uninstall-file-icon {
+  flex-shrink: 0;
+  color: rgba(13,21,38,0.67);
+}
+
+.uninstall-file-path {
+  flex: 1;
   min-width: 0;
+  font: 12px/1.35 ui-monospace, "SF Mono", Menlo, monospace;
+  color: rgba(13,21,38,0.84);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.uninstall-file-badge {
-  font-size: var(--font-xs);
-  color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 6px;
+.uninstall-file-tag {
   flex-shrink: 0;
-  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1f5fff;
+  background: rgba(31, 95, 255, 0.12);
+  padding: 2px 6px;
+  border-radius: 6px;
 }
 
 .uninstall-file-size {
-  font-size: var(--font-base);
-  font-weight: var(--weight-medium);
-  color: var(--text-secondary);
   flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(13,21,38,0.74);
   font-variant-numeric: tabular-nums;
-  min-width: 50px;
-  text-align: right;
-  margin-left: auto;
+  white-space: nowrap;
 }
 
-/* ── Progress Ring View ── */
-.uninstall-ring-wrap {
-  position: relative;
+.uninstall-files-note {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 120px;
-  height: 120px;
-  margin-bottom: 4px;
+  gap: 10px;
+  padding: 10px 8px;
+  font-size: 12.5px;
+  color: rgba(13,21,38,0.73);
 }
 
-.uninstall-ring-svg {
-  transform: rotate(-90deg);
-  overflow: visible;
+.uninstall-files-note .spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
 }
 
-.uninstall-ring-fill {
-  transition: stroke-dashoffset 0.3s ease;
+.uninstall-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px 16px;
 }
 
-.uninstall-ring-percent {
-  position: absolute;
-  font-size: var(--font-3xl);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: var(--tracking-tight);
-}
-
-.uninstall-ring-check {
-  position: absolute;
-  color: rgba(255, 255, 255, 0.7);
-  animation: uninstallCheckPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-
-@keyframes uninstallCheckPop {
-  0% { transform: scale(0); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.uninstall-ring-freed {
-  font-size: 24px;
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: var(--tracking-tight);
-}
-
-.uninstall-ring-current {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-  max-width: 300px;
+.uninstall-frees {
+  min-width: 0;
+  font-size: 12.5px;
+  color: rgba(13,21,38,0.74);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: center;
-  margin-top: 4px;
 }
 
-.uninstall-ring-counter {
-  font-size: var(--font-sm);
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-  margin-top: 2px;
-}
-
-.uninstall-done .uninstall-ring-freed {
-  color: var(--text-primary);
-}
-
-.uninstall-done .uninstall-ring-current {
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
-}
-
-/* ── Confetti canvas ── */
-.uninstall-confetti {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* ── Equivalence card ── */
-.uninstall-equiv-card {
+.uninstall-remove {
+  margin-left: auto;
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  margin-top: 8px;
-  max-width: 380px;
-  width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  opacity: 0;
-  transform: translateY(12px);
-  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
-  z-index: 1;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(180deg, #ff6a63, #e5332b);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    0 6px 16px -4px rgba(229, 51, 43, 0.5);
+  cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
 }
 
-.uninstall-equiv-card.visible {
-  opacity: 1;
-  transform: translateY(0);
+.uninstall-remove:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
-.uninstall-equiv-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 0.5px solid rgba(255, 255, 255, 0.06);
+.uninstall-remove:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* ── Placeholder / done ── */
+
+.uninstall-placeholder {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  color: var(--text-secondary);
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(13,21,38,0.67);
 }
 
-.uninstall-equiv-emoji {
-  font-size: 22px;
-  line-height: 1;
+.uninstall-done {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px;
+  text-align: center;
+  animation: uninstall-done-in 0.45s cubic-bezier(0.2, 1.3, 0.4, 1);
 }
 
-.uninstall-equiv-text {
+@keyframes uninstall-done-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+
+.uninstall-done-cat {
+  width: 110px;
+  height: 110px;
+  image-rendering: pixelated;
+}
+
+.uninstall-done-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.uninstall-done-sub {
+  font-size: 13px;
+  color: rgba(13,21,38,0.74);
+}
+
+.uninstall-done-btn {
+  margin-top: 8px;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0d1526;
+  background: rgba(255,255,255,0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    inset 0 0 0 0.5px rgba(13, 21, 38, 0.1);
+  cursor: pointer;
+}
+
+/* ── Dark mode ── */
+
+@media (prefers-color-scheme: dark) {
+  :root .uninstall-container { color: rgba(240, 242, 245, 0.95); }
+  :root .uninstall-error {
+    background: rgba(253, 72, 65, 0.1);
+    box-shadow: inset 0 0 0 0.5px rgba(253, 72, 65, 0.2);
+    color: #ff7a73;
+  }
+  :root .uninstall-sidebar {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.06),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+      0 8px 24px -8px rgba(0, 0, 0, 0.35);
+  }
+  :root .uninstall-search {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 0 0 0.5px rgba(240, 242, 245, 0.06);
+  }
+  :root .uninstall-search-icon,
+  :root .uninstall-search-input::placeholder { color: rgba(240, 242, 245, 0.45); }
+  :root .uninstall-search-input { color: rgba(240, 242, 245, 0.95); }
+  :root .uninstall-sort { background: rgba(240, 242, 245, 0.06); }
+  :root .uninstall-sort-opt { color: rgba(240, 242, 245, 0.6); }
+  :root .uninstall-sort-opt.on {
+    color: rgba(240, 242, 245, 0.95);
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  }
+  :root .uninstall-list-note,
+  :root .uninstall-row-sub,
+  :root .uninstall-stat-k,
+  :root .uninstall-files-note { color: rgba(240, 242, 245, 0.6); }
+  :root .uninstall-row:hover { background: rgba(255, 255, 255, 0.07); }
+  :root .uninstall-row.system:hover { background: transparent; }
+  :root .uninstall-row.active {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px -2px rgba(0, 0, 0, 0.25);
+  }
+  :root .uninstall-row-size,
+  :root .uninstall-hero-meta,
+  :root .uninstall-file-size,
+  :root .uninstall-frees,
+  :root .uninstall-done-sub { color: rgba(240, 242, 245, 0.62); }
+  :root .uninstall-icon-ph {
+    color: rgba(240, 242, 245, 0.45);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 0 0 0.5px rgba(240, 242, 245, 0.08);
+  }
+  :root .uninstall-detail {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.06),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+      inset 14px 14px 30px -20px rgba(255, 255, 255, 0.04),
+      0 8px 24px -8px rgba(0, 0, 0, 0.35);
+  }
+  :root .uninstall-hero-icon { filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.4)); }
+  :root .uninstall-badge {
+    color: #ffc940;
+    background: rgba(253, 210, 37, 0.15);
+  }
+  :root .uninstall-stat {
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  :root .uninstall-section,
+  :root .uninstall-placeholder { color: rgba(240, 242, 245, 0.5); }
+  :root .uninstall-section-toggle { color: #6f9bff; }
+  :root .uninstall-file:hover { background: rgba(255, 255, 255, 0.06); }
+  :root .uninstall-file.bundle:hover { background: rgba(255, 255, 255, 0.06); }
+  :root .uninstall-file-icon { color: rgba(240, 242, 245, 0.5); }
+  :root .uninstall-file-path { color: rgba(240, 242, 245, 0.78); }
+  :root .uninstall-file-tag {
+    color: #6f9bff;
+    background: rgba(31, 95, 255, 0.2);
+  }
+  :root .uninstall-remove {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 6px 16px -4px rgba(229, 51, 43, 0.4);
+  }
+  :root .uninstall-done-btn {
+    color: rgba(240, 242, 245, 0.95);
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 0.5px rgba(240, 242, 245, 0.1);
+  }
+}
+
+.uninstall-kept {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(253,176,34,0.1);
+  box-shadow: inset 0 0 0 0.5px rgba(160,110,0,0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.uninstall-kept-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a6400;
+}
+
+.uninstall-kept-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.uninstall-kept-info {
   flex: 1;
   min-width: 0;
 }
 
-.uninstall-equiv-title {
-  font-size: var(--font-md);
-  font-weight: var(--weight-semibold);
+.uninstall-kept-label {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text-primary);
-  line-height: var(--leading-snug);
 }
 
-.uninstall-equiv-desc {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-  line-height: var(--leading-relaxed);
-  margin-top: 2px;
+.uninstall-kept-size {
+  font-weight: 500;
+  color: rgba(13,21,38,0.67);
 }
 
-/* ── Breakdown chips ── */
-.uninstall-breakdown-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  justify-content: center;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.4s ease-out, transform 0.4s ease-out;
-  z-index: 1;
+.uninstall-kept-msg {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: rgba(13,21,38,0.74);
 }
 
-.uninstall-breakdown-chips.visible {
-  opacity: 1;
-  transform: translateY(0);
+.uninstall-kept-reveal {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #0d1526;
+  background: rgba(255,255,255,0.5);
+  cursor: pointer;
 }
 
-.uninstall-breakdown-chip {
-  font-size: var(--font-xs);
-  color: var(--text-tertiary);
-  padding: 3px 10px;
-  border-radius: 6px;
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* ── Done button ── */
-.uninstall-done-btn {
-  margin-top: 16px;
-  min-width: 80px;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.4s ease-out, transform 0.4s ease-out, background 0.12s, border-color 0.12s;
-  z-index: 1;
-}
-
-.uninstall-done-btn.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* ── Done State ── */
-.uninstall-done-check {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-primary);
-  margin-bottom: 12px;
-}
-
-.uninstall-summary-stat {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-}
-
-.uninstall-summary-label {
-  font-size: var(--font-md);
-  color: var(--text-tertiary);
-  margin-top: 2px;
-}
-
-.uninstall-summary-detail {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
-  margin-top: 4px;
-}
-
-.uninstall-done-errors {
-  margin-top: 10px;
-}
-
-.uninstall-error-chip {
-  font-size: var(--font-xs);
-  color: var(--red);
-  padding: 3px 10px;
-  border-radius: 6px;
-  border: 0.5px solid rgba(253, 72, 65, 0.2);
-  background: rgba(253, 72, 65, 0.06);
-  cursor: default;
+@media (prefers-color-scheme: dark) {
+  :root .uninstall-kept {
+    background: rgba(253,176,34,0.12);
+    box-shadow: inset 0 0 0 0.5px rgba(253,210,37,0.25);
+  }
+  :root .uninstall-kept-title { color: #f5c451; }
+  :root .uninstall-kept-size { color: rgba(240,242,245,0.55); }
+  :root .uninstall-kept-msg { color: rgba(240,242,245,0.7); }
+  :root .uninstall-kept-reveal { color: #f0f2f5; background: rgba(255,255,255,0.12); }
 }

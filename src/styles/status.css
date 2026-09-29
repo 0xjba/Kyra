@@ -1,67 +1,62 @@
-/* ── Status Module ────────────────────────────────────── */
+/* ── Status Module ── Liquid Glass ────────────────────── */
 
 .status-container {
-  padding: 14px;
-  padding-right: 4px;
-  overflow: hidden;
   height: 100%;
+  overflow: auto;
+  padding: 0 14px 14px;
   display: flex;
   flex-direction: column;
-}
-
-.status-scroll {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-right: 4px;
+  gap: 10px;
+  color: #0d1526;
 }
 
 /* ── Header ── */
 .status-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding-bottom: 10px;
-  padding-right: 10px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
   flex-shrink: 0;
 }
 
-.status-header-left {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.status-title {
-  font-size: var(--font-3xl);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-}
-
 .status-machine {
-  font-size: var(--font-base);
-  color: var(--text-tertiary);
+  font-size: 13px;
+  color: rgba(13,21,38,0.77);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-uptime {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.33);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+  flex-shrink: 0;
 }
 
 .status-uptime-dot {
   width: 6px;
   height: 6px;
-  border-radius: 2px;
-  background: var(--green);
+  border-radius: 3px;
+  background: #2AC852;
+  box-shadow: 0 0 0 3px rgba(42, 200, 82, 0);
+  animation: status-uptime-pulse 2s ease-in-out infinite;
   flex-shrink: 0;
-  margin-top: 1px;
+}
+
+@keyframes status-uptime-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(42, 200, 82, 0); }
+  50% { box-shadow: 0 0 0 3px rgba(42, 200, 82, 0.25); }
 }
 
 /* ── Loading State ── */
@@ -74,293 +69,425 @@
   flex: 1;
 }
 
-
 .status-loading-text {
   font-size: var(--font-md);
   color: var(--text-tertiary);
 }
 
-/* ── Gauge Strip ── */
+/* ── Gauges ── */
 .status-gauges {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .status-gauge-card {
+  border-radius: 22px;
+  padding: 16px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 16px 12px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  gap: 4px;
+  gap: 14px;
+  border: none;
+  box-shadow:
+    inset 0 1px 0.5px rgba(255,255,255,0.52),
+    inset 0 0 0 0.5px rgba(255,255,255,0.33),
+    inset 10px 10px 24px -14px rgba(255,255,255,0.39),
+    0 8px 24px -8px rgba(20, 40, 120, 0.18);
+}
+
+.status-gauge-card.status-gauge-cpu {
+  background: linear-gradient(155deg, rgba(90, 200, 250, 0.2), rgba(34, 184, 240, 0.05) 70%);
+}
+
+.status-gauge-card.status-gauge-memory {
+  background: linear-gradient(155deg, rgba(90, 220, 130, 0.2), rgba(42, 200, 82, 0.05) 70%);
+}
+
+.status-gauge-card.status-gauge-disk {
+  background: linear-gradient(155deg, rgba(255, 226, 90, 0.24), rgba(253, 210, 37, 0.06) 70%);
 }
 
 .status-gauge-ring {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 78px;
+  height: 78px;
+  flex-shrink: 0;
 }
 
 .status-gauge-svg {
+  position: absolute;
+  inset: 0;
   transform: rotate(-90deg);
-  overflow: visible;
+}
+
+.status-gauge-track {
+  stroke: rgba(255, 255, 255, 0.6);
 }
 
 .status-gauge-fill {
-  transition: stroke-dashoffset 0.5s ease;
-}
-
-.status-gauge-center {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.2, 0.9, 0.25, 1);
 }
 
 .status-gauge-percent {
-  font-size: var(--font-3xl);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  letter-spacing: var(--tracking-tight);
-  line-height: 1;
+  white-space: nowrap;
+  color: #0d1526;
+}
+
+.status-gauge-text {
+  min-width: 0;
 }
 
 .status-gauge-label {
-  font-size: var(--font-md);
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
-  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0d1526;
 }
 
 .status-gauge-detail {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
+  font-size: 12px;
+  color: rgba(13,21,38,0.77);
+  margin-top: 2px;
 }
 
-/* ── Network Card ── */
+/* ── Network ── */
 .status-network-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 22px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: none;
+  flex-shrink: 0;
+  background: linear-gradient(155deg, rgba(255,255,255,0.35), rgba(255,255,255,0.14));
+  box-shadow:
+    inset 0 1px 0.5px rgba(255,255,255,0.3),
+    inset 0 0 0 0.5px rgba(255,255,255,0.33),
+    0 8px 24px -8px rgba(20, 40, 120, 0.18);
 }
 
 .status-network-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 14px;
 }
 
 .status-network-label {
-  font-size: var(--font-md);
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
+  font-size: 14px;
+  font-weight: 700;
+  color: #0d1526;
 }
 
-.status-network-rates {
+.status-network-down,
+.status-network-up {
   display: flex;
-  gap: 14px;
-  font-size: var(--font-sm);
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .status-network-down {
-  color: var(--text-secondary);
+  margin-left: auto;
+  color: #0d1526;
 }
 
 .status-network-up {
-  color: var(--text-tertiary);
+  color: rgba(13,21,38,0.77);
+}
+
+.status-network-swatch-down {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: #1f5fff;
+}
+
+.status-network-swatch-up {
+  width: 14px;
+  height: 0;
+  border-top: 2px dashed #8E5CF6;
 }
 
 .status-network-graph {
   width: 100%;
+  height: 88px;
   display: block;
 }
 
-/* ── Info Strip (Thermals / GPU / Battery) ── */
+/* ── Info Strip ── */
 .status-info-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .status-info-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 20px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  border: none;
+  min-width: 0;
+  background: linear-gradient(155deg, rgba(255,255,255,0.33), rgba(255,255,255,0.13));
+  box-shadow:
+    inset 0 1px 0.5px rgba(255,255,255,0.3),
+    inset 0 0 0 0.5px rgba(255,255,255,0.3),
+    0 6px 18px -6px rgba(20, 40, 120, 0.16);
+}
+
+.status-info-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+
+.status-info-icon {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(13,21,38,0.81);
+  flex-shrink: 0;
 }
 
 .status-info-label {
-  font-size: var(--font-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0d1526;
 }
 
 .status-info-row {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
 }
 
 .status-info-key {
-  font-size: var(--font-md);
-  color: var(--text-tertiary);
-}
-
-.status-info-value {
-  font-size: var(--font-md);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-info-value-lg {
-  font-size: var(--font-lg);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-}
-
-.status-info-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  margin-right: 6px;
-}
-
-.status-info-dot-row {
-  display: flex;
-  align-items: center;
-}
-
-.status-plugged-in {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex: 1;
-  color: var(--text-tertiary);
-  font-size: var(--font-md);
-}
-
-/* ── Top Processes ── */
-.status-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.status-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 2px;
-}
-
-.status-section-title {
-  font-size: var(--font-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.status-section-meta {
-  font-size: var(--font-sm);
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-process-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.status-process-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-}
-
-.status-process-row + .status-process-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.status-process-name {
-  flex: 1;
-  font-size: var(--font-md);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: rgba(13,21,38,0.74);
   white-space: nowrap;
 }
 
-.status-process-cpu {
-  font-size: var(--font-md);
-  font-weight: var(--weight-medium);
-  color: var(--text-secondary);
+.status-info-value {
+  font-weight: 600;
+  color: #0d1526;
   font-variant-numeric: tabular-nums;
-  min-width: 48px;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Top Processes ── */
+.status-process-card {
+  border-radius: 20px;
+  padding: 6px 8px;
+  border: none;
+  flex-shrink: 0;
+  background: linear-gradient(155deg, rgba(255,255,255,0.33), rgba(255,255,255,0.13));
+  box-shadow:
+    inset 0 1px 0.5px rgba(255,255,255,0.3),
+    inset 0 0 0 0.5px rgba(255,255,255,0.3),
+    0 6px 18px -6px rgba(20, 40, 120, 0.16);
+}
+
+.status-process-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 70px 80px;
+  gap: 10px;
+  padding: 8px 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(13,21,38,0.67);
+}
+
+.status-process-num {
   text-align: right;
+}
+
+.status-process-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 70px 80px;
+  gap: 10px;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.status-process-row:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+.status-process-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.status-process-title {
+  font-weight: 500;
+  color: #0d1526;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-process-bar {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(13, 21, 38, 0.08);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.status-process-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: #1f5fff;
+  transition: width 0.6s;
+}
+
+.status-process-cpu {
+  text-align: right;
+  font-weight: 600;
+  color: #0d1526;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .status-process-mem {
-  font-size: var(--font-md);
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-  min-width: 64px;
   text-align: right;
+  color: rgba(13,21,38,0.77);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-/* ── Skeleton Loading ── */
+/* ── Skeleton ── */
 .status-skeleton {
   display: inline-block;
+  vertical-align: middle;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(13, 21, 38, 0.06);
   animation: status-skeleton-pulse 1.2s ease-in-out infinite;
 }
 
 .status-skeleton-name {
-  width: 100px;
-  height: 12px;
+  width: 120px;
+  height: 10px;
 }
 
 .status-skeleton-cpu {
   width: 36px;
-  height: 12px;
-  min-width: 48px;
+  height: 10px;
 }
 
 .status-skeleton-mem {
   width: 48px;
-  height: 12px;
-  min-width: 64px;
-}
-
-.status-skeleton-row {
-  opacity: 0.5;
+  height: 10px;
 }
 
 @keyframes status-skeleton-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
+/* ── Dark mode ── */
+@media (prefers-color-scheme: dark) {
+  :root .status-container,
+  :root .status-gauge-percent,
+  :root .status-gauge-label,
+  :root .status-network-label,
+  :root .status-network-down,
+  :root .status-info-label,
+  :root .status-info-value,
+  :root .status-process-title,
+  :root .status-process-cpu {
+    color: rgba(240, 242, 245, 0.96);
+  }
+  :root .status-machine,
+  :root .status-gauge-detail,
+  :root .status-network-up,
+  :root .status-process-mem {
+    color: rgba(240, 242, 245, 0.62);
+  }
+  :root .status-info-key {
+    color: rgba(240, 242, 245, 0.58);
+  }
+  :root .status-info-icon {
+    color: rgba(240, 242, 245, 0.72);
+  }
+  :root .status-process-header {
+    color: rgba(240, 242, 245, 0.46);
+  }
+  :root .status-uptime {
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  :root .status-gauge-track {
+    stroke: rgba(255, 255, 255, 0.1);
+  }
+  :root .status-gauge-card {
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.06),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+      inset 10px 10px 24px -14px rgba(255, 255, 255, 0.03),
+      0 8px 24px -8px rgba(0, 0, 0, 0.35);
+  }
+  :root .status-gauge-card.status-gauge-cpu {
+    background: linear-gradient(155deg, rgba(90, 200, 250, 0.12), rgba(34, 184, 240, 0.03) 70%);
+  }
+  :root .status-gauge-card.status-gauge-memory {
+    background: linear-gradient(155deg, rgba(90, 220, 130, 0.12), rgba(42, 200, 82, 0.03) 70%);
+  }
+  :root .status-gauge-card.status-gauge-disk {
+    background: linear-gradient(155deg, rgba(255, 226, 90, 0.14), rgba(253, 210, 37, 0.04) 70%);
+  }
+  :root .status-network-card {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.06),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+      0 8px 24px -8px rgba(0, 0, 0, 0.35);
+  }
+  :root .status-info-card,
+  :root .status-process-card {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+    box-shadow:
+      inset 0 1px 0.5px rgba(255, 255, 255, 0.06),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+      0 6px 18px -6px rgba(0, 0, 0, 0.3);
+  }
+  :root .status-process-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  :root .status-process-bar {
+    background: rgba(240, 242, 245, 0.08);
+  }
+  :root .status-skeleton {
+    background: rgba(240, 242, 245, 0.08);
+  }
+}
