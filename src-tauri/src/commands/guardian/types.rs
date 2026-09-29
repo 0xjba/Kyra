@@ -10,6 +10,10 @@ pub struct ProbeReport {
     pub last_used_secs: Option<u64>,
     pub confidence: f32,
     pub details: String,
+    #[serde(default)]
+    pub user_data: bool,
+    #[serde(default)]
+    pub data_loss: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,6 +44,8 @@ pub struct ScoredProbe {
     pub score: f32,
     pub confidence: f32,
     pub details: String,
+    pub user_data: bool,
+    pub data_loss: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -61,4 +67,88 @@ pub struct GuardianCleanResult {
 pub struct LicenseStatus {
     pub active: bool,
     pub expires: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckoutSession {
+    pub short_url: String,
+    /// Set when the app already opened the page itself (local dev checkout only).
+    #[serde(default)]
+    pub opened_by_app: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Account {
+    pub email: String,
+    pub status: String,
+    #[serde(default)]
+    pub current_end: Option<u64>,
+    #[serde(default)]
+    pub cancel_at_period_end: bool,
+    #[serde(default)]
+    pub devices_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PatrolTrigger {
+    Schedule,
+    LowDisk,
+    Manual,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CleanedItem {
+    pub name: String,
+    pub size: u64,
+}
+
+/// Timestamps across the patrol types are Unix epoch milliseconds.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PatrolRun {
+    pub started_at: u64,
+    pub finished_at: u64,
+    pub trigger: PatrolTrigger,
+    #[serde(default)]
+    pub cleaned: Vec<CleanedItem>,
+    #[serde(default)]
+    pub freed: u64,
+    #[serde(default)]
+    pub review_count: usize,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ReviewItem {
+    pub id: String,
+    pub name: String,
+    pub details: String,
+    pub size: u64,
+    pub score: f32,
+    pub user_data: bool,
+    #[serde(default)]
+    pub data_loss: Option<String>,
+    pub found_at: u64,
+    /// Safe to clean without confirmation; only pending because auto-clean is off.
+    #[serde(default)]
+    pub safe: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PatrolStatus {
+    pub enabled: bool,
+    pub auto_clean: bool,
+    pub running: bool,
+    pub last_patrol_at: Option<u64>,
+    pub next_patrol_at: Option<u64>,
+    pub freed_total: u64,
+    pub freed_last: u64,
+    pub pending_review: Vec<ReviewItem>,
+    pub history: Vec<PatrolRun>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PatrolStarted {
+    pub trigger: PatrolTrigger,
 }

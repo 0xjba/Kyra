@@ -29,6 +29,12 @@ pub struct AppSettings {
     pub low_disk_threshold_gb: u64,
     #[serde(default)]
     pub onboarding_completed: bool,
+    #[serde(default = "default_true")]
+    pub pawtrol_enabled: bool,
+    #[serde(default = "default_true")]
+    pub pawtrol_auto_clean: bool,
+    #[serde(default)]
+    pub pawtrol_login_prompted: bool,
 }
 
 impl Default for AppSettings {
@@ -44,6 +50,9 @@ impl Default for AppSettings {
             notifications_enabled: default_true(),
             low_disk_threshold_gb: default_low_disk_threshold(),
             onboarding_completed: false,
+            pawtrol_enabled: default_true(),
+            pawtrol_auto_clean: default_true(),
+            pawtrol_login_prompted: false,
         }
     }
 }
@@ -180,4 +189,33 @@ pub fn get_storage_path() -> String {
     let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push("com.kyra.app");
     path.to_string_lossy().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_saved_before_pawtrol_load_with_pawtrol_defaults() {
+        let s: AppSettings = serde_json::from_str(r#"{"dry_run":false,"launch_at_login":true}"#).unwrap();
+        assert!(s.pawtrol_enabled);
+        assert!(s.pawtrol_auto_clean);
+        assert!(!s.pawtrol_login_prompted);
+        assert!(s.launch_at_login);
+    }
+
+    #[test]
+    fn pawtrol_fields_round_trip() {
+        let s = AppSettings { pawtrol_enabled: false, pawtrol_auto_clean: false, pawtrol_login_prompted: true, ..Default::default() };
+        let back: AppSettings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert!(!back.pawtrol_enabled);
+        assert!(!back.pawtrol_auto_clean);
+        assert!(back.pawtrol_login_prompted);
+    }
+
+    #[test]
+    fn default_settings_enable_pawtrol() {
+        let s = AppSettings::default();
+        assert!(s.pawtrol_enabled && s.pawtrol_auto_clean && !s.pawtrol_login_prompted);
+    }
 }

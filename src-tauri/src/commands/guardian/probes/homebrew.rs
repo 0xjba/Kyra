@@ -1,72 +1,24 @@
-use crate::commands::guardian::types::ProbeReport;
-use crate::commands::utils::dir_size;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-pub async fn probe() -> Option<ProbeReport> {
-    let home = dirs::home_dir()?;
-    let cache_dir = home.join("Library/Caches/Homebrew");
-    if !cache_dir.exists() {
-        return None;
-    }
-
-    let cache_dir_c = cache_dir.clone();
-    let cache_size = tokio::task::spawn_blocking(move || dir_size(&cache_dir_c))
-        .await
-        .unwrap_or(0);
-
-    if cache_size == 0 {
-        return None;
-    }
-
-    let mut details_parts: Vec<String> = Vec::new();
-    let mut items: u32 = 0;
-
-    details_parts.push(format!("cache {}", format_mb(cache_size)));
-    items += 1;
-
-    // Count outdated formulae
-    let brew_path = if Path::new("/opt/homebrew/bin/brew").exists() {
-        Some("/opt/homebrew/bin/brew")
-    } else if Path::new("/usr/local/bin/brew").exists() {
-        Some("/usr/local/bin/brew")
-    } else {
-        None
-    };
-
-    if let Some(brew) = brew_path {
-        if let Ok(output) = std::process::Command::new(brew)
-            .args(["outdated", "--quiet"])
-            .output()
-        {
-            if output.status.success() {
-                let count = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|l| !l.is_empty())
-                    .count() as u32;
-                if count > 0 {
-                    items += count;
-                    details_parts.push(format!("{} outdated packages", count));
-                }
-            }
-        }
-    }
-
-    Some(ProbeReport {
-        category: "homebrew".into(),
-        display_name: "Homebrew".into(),
-        total_bytes: cache_size,
-        cleanable_bytes: cache_size,
-        item_count: items,
-        last_used_secs: None,
-        confidence: 0.9,
-        details: details_parts.join(", "),
-    })
+pub(crate) fn paths(home: &Path) -> Vec<(PathBuf, &'static str)> {
+    vec![(home.join("Library/Caches/Homebrew"), "cache")]
 }
 
-fn format_mb(bytes: u64) -> String {
-    if bytes >= 1_073_741_824 {
-        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
-    } else {
-        format!("{:.0} MB", bytes as f64 / 1_048_576.0)
+pub(crate) fn outdated_count() -> u32 {
+    let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
+        .into_iter()
+        .find(|p| Path::new(p).exists());
+    let Some(brew) = brew else {
+        return 0;
+    };
+    match std::process::Command::new(brew)
+        .args(["outdated", "--quiet"])
+        .output()
+    {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count() as u32,
+        _ => 0,
     }
 }
