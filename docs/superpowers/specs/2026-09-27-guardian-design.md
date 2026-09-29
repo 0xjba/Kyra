@@ -483,3 +483,71 @@ CF Worker free tier supports ~50,000 users. Beyond that, Workers Paid ($5/mo) su
 4. **Phase 4**: Frontend Guardian tab
 5. **Phase 5**: Notification integration + background monitoring loop
 6. **Phase 6**: Testing, polish, release
+
+---
+
+## Revision 2026-09-29: Autonomous patrol
+
+Pawtrol (user-facing name of Guardian) is an autonomous agent, not a manual scan screen.
+
+**Behavior**
+- **Patrol triggers:** once a day when the Mac is idle and on AC power, plus immediately when free space drops below the low-disk threshold (with a cooldown). "Patrol now" is a secondary manual action.
+- **Safe items** (score > 70 and not user data): auto-cleaned when the "Auto-clean safe items" setting is on (default on), respecting Move to Trash. When it's off, a notification offers one-tap approval.
+- **Risky items** (score 40–70, or any user-data category): never touched automatically. They're added to a "Needs your review" list and announced with a notification.
+- **User-data categories** (Docker VM, AI models, Xcode Archives, Spotify offline, Zoom data): score capped at 55, labeled with what would be lost, explicit confirmation required.
+- **After each patrol:** one summary notification, e.g. "Pawtrol freed 2.3 GB · 2 items need review".
+
+This supersedes the original non-goal "Silent auto-deletion without user consent". Consent is now given once, through the default-on setting, and only for regenerable caches.
+
+**Presence**
+- For Pro users, closing the window hides it and Kyra keeps running with a menu-bar icon: status, last patrol, Patrol now, Open Kyra, Quit.
+- Launch at login is enabled when Pro activates.
+
+**UI**
+- The Pawtrol page is a dashboard: on-duty status, last and next patrol, space freed, the needs-review list, and an activity log.
+- The titlebar popover shows the same status at a glance.
+
+**Contract (Rust ⇄ frontend)**
+- **Commands:**
+  - `guardian_patrol_status() -> PatrolStatus`
+  - `guardian_patrol_now() -> PatrolRun`
+  - `guardian_review_clean(ids) -> CleanResult`
+  - `guardian_review_dismiss(ids)` (snooze 30 days)
+  - `guardian_set_patrol(enabled, auto_clean)`
+- **Events:** `patrol-started` {trigger}, `patrol-finished` PatrolRun, `patrol-status` PatrolStatus.
+- **Types:**
+  - `PatrolStatus` { enabled, auto_clean, running, last_patrol_at, next_patrol_at, freed_total, freed_last, pending_review: ReviewItem[], history: PatrolRun[] (last 20) }
+  - `ReviewItem` { id, name, details, size, score, user_data, data_loss?, found_at }
+  - `PatrolRun` { started_at, finished_at, trigger: "schedule"|"low_disk"|"manual", cleaned: {name,size}[], freed, review_count, error? }
+
+---
+
+## Revision 2026-09-29: Subscription, restore and account (Razorpay)
+
+**Identity:** no passwords and no signup form. Accounts are keyed by the buyer's email, and a device holds a license bound to its `device_id`.
+
+**Subscribe:**
+1. The app asks for an email.
+2. The Worker creates a Razorpay Subscription (plan from env `RAZORPAY_PLAN_ID`) with `notes: {device_id, email}` and returns its hosted `short_url`.
+3. The app opens `short_url` in the browser.
+4. The Razorpay webhook (`subscription.activated` / `charged` / `cancelled` / `halted` / `completed`) updates the license for the device, plus `account:{email}` = {subscription_id, status, current_end, devices[]}.
+
+**Restore on a new Mac:**
+1. `POST /restore/start {email}` emails a 6-digit code: valid 10 minutes, 5 attempts, 3 sends per hour per email. It always returns 200 so account existence can't be probed.
+2. `POST /restore/verify {email, code, device_id}` binds the device (max 3; the oldest is evicted) and writes its license.
+
+**Manage from the app:**
+- `GET /account?device_id=` returns {email, status, current_end, cancel_at_period_end, devices_count}.
+- `POST /subscription/cancel {device_id}` cancels at the end of the billing cycle via the Razorpay API.
+- Card updates use Razorpay's own customer flow, linked from the account screen when Razorpay provides a URL.
+
+**Email:** Resend HTTP API (`RESEND_API_KEY`, `MAIL_FROM`).
+
+**Secrets (wrangler secret):** `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PLAN_ID`, `RESEND_API_KEY`, `MAIL_FROM`, `JEV_API_KEY`.
+
+**App commands (Rust → Worker):**
+- `guardian_checkout_create(email) -> {short_url}`
+- `guardian_restore_start(email)`
+- `guardian_restore_verify(email, code) -> LicenseStatus`
+- `guardian_account() -> Account | null`
+- `guardian_cancel_subscription() -> Account`
