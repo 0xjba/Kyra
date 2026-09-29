@@ -2,11 +2,19 @@
   "name": "kyra-guardian-worker",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "mock-jev": "node scripts/mock-jev.mjs",
+    "seed-license": "node scripts/seed-license.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9",
     "wrangler": "^3"
   }
 }
