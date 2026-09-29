@@ -145,6 +145,86 @@ pub fn canonicalize_for_safety(path: &str) -> Option<PathBuf> {
     }
 }
 
+/// True if `path` equals `root` or lies inside it. Case-insensitive because
+/// default APFS volumes are, so `/system/Library` is `/System/Library`.
+pub fn is_same_or_under(path: &str, root: &str) -> bool {
+    let (p, r) = (path.as_bytes(), root.as_bytes());
+    p.len() >= r.len()
+        && p[..r.len()].eq_ignore_ascii_case(r)
+        && (p.len() == r.len() || p[r.len()] == b'/')
+}
+
+/// Locations that are never a valid delete target in any module. Matched
+/// exactly: what may be removed *inside* them is each module's own policy.
+const CRITICAL_ROOTS: &[&str] = &[
+    "/",
+    "/Applications",
+    "/Library",
+    "/System",
+    "/Users",
+    "/Users/Shared",
+    "/Volumes",
+    "/bin",
+    "/cores",
+    "/dev",
+    "/etc",
+    "/opt",
+    "/opt/homebrew",
+    "/private",
+    "/private/etc",
+    "/private/tmp",
+    "/private/var",
+    "/sbin",
+    "/tmp",
+    "/usr",
+    "/usr/local",
+    "/var",
+];
+
+const CRITICAL_HOME_CHILDREN: &[&str] = &[
+    "Applications",
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Library",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+];
+
+fn normalized(path: &Path) -> String {
+    path.components().collect::<PathBuf>().to_string_lossy().into_owned()
+}
+
+/// True if `path` is a filesystem root, the home directory, or one of the
+/// standard top-level home folders, relative to the given `home`.
+pub fn is_critical_path_for_home(path: &Path, home: Option<&Path>) -> bool {
+    let p = normalized(path);
+    if CRITICAL_ROOTS.iter().any(|r| p.eq_ignore_ascii_case(r)) {
+        return true;
+    }
+    if let Some(home) = home {
+        let h = normalized(home);
+        if p.eq_ignore_ascii_case(&h) {
+            return true;
+        }
+        return CRITICAL_HOME_CHILDREN
+            .iter()
+            .any(|c| p.eq_ignore_ascii_case(&format!("{}/{}", h, c)));
+    }
+    false
+}
+
+/// `is_critical_path_for_home` against the real home directory, in both its
+/// literal and symlink-resolved forms.
+pub fn is_critical_path(path: &Path) -> bool {
+    let home = dirs::home_dir();
+    let canonical_home = home.as_ref().and_then(|h| fs::canonicalize(h).ok());
+    is_critical_path_for_home(path, home.as_deref())
+        || is_critical_path_for_home(path, canonical_home.as_deref())
+}
+
 /// Get the size of a path — file size for files, recursive size for directories.
 pub fn path_size(path: &Path) -> u64 {
     if path.is_dir() {
@@ -173,4 +253,192 @@ pub fn dedup_paths_by_inode(paths: &[String]) -> Vec<String> {
     }
 
     unique
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{mkdir, write_file};
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn dir_size_sums_nested_files_and_skips_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(&dir.path().join("a.bin"), 10_000);
+        write_file(&dir.path().join("sub/deeper/b.bin"), 20_000);
+        let outside = tempfile::tempdir().unwrap();
+        write_file(&outside.path().join("huge.bin"), 1_000_000);
+        symlink(outside.path(), dir.path().join("link_dir")).unwrap();
+        symlink(outside.path().join("huge.bin"), dir.path().join("link_file")).unwrap();
+
+        let size = dir_size(dir.path());
+        assert!(size >= 30_000, "{size}");
+        assert!(size < 1_000_000, "symlink target was counted: {size}");
+    }
+
+    #[test]
+    fn dir_size_of_missing_or_empty_dir_is_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(dir_size(dir.path()), 0);
+        assert_eq!(dir_size(&dir.path().join("missing")), 0);
+    }
+
+    #[test]
+    fn path_size_handles_files_dirs_and_missing_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("f.bin");
+        write_file(&f, 50_000);
+        assert!(path_size(&f) >= 50_000);
+        assert_eq!(path_size(dir.path()), dir_size(dir.path()));
+        assert_eq!(path_size(&dir.path().join("nope")), 0);
+    }
+
+    #[test]
+    fn deletable_dir_size_skips_protected_user_data_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(&dir.path().join("Cache/data.bin"), 10_000);
+        for name in PROTECTED_USER_DATA_COMPONENTS {
+            write_file(&dir.path().join(name).join("keep.bin"), 500_000);
+        }
+        let size = deletable_dir_size(dir.path());
+        assert!(size >= 10_000);
+        assert!(size < 500_000, "protected dir counted: {size}");
+    }
+
+    #[test]
+    fn deletable_dir_size_skips_read_only_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        write_file(&locked.join("x.bin"), 500_000);
+        write_file(&dir.path().join("y.bin"), 1_000);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+        let size = deletable_dir_size(dir.path());
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(size >= 1_000);
+        assert!(size < 500_000, "unwritable dir counted: {size}");
+    }
+
+    #[test]
+    fn protected_component_names_are_exact() {
+        assert!(is_protected_user_data_component("IndexedDB"));
+        assert!(is_protected_user_data_component("Local Storage"));
+        assert!(is_protected_user_data_component("Service Worker"));
+        assert!(!is_protected_user_data_component("indexeddb"));
+        assert!(!is_protected_user_data_component("Cache"));
+        assert!(!is_protected_user_data_component(""));
+    }
+
+    #[test]
+    fn canonicalize_rejects_malformed_input() {
+        assert!(canonicalize_for_safety("").is_none());
+        assert!(canonicalize_for_safety("/tmp/a\0b").is_none());
+        assert!(canonicalize_for_safety("/tmp/a\nb").is_none());
+        assert!(canonicalize_for_safety("/Users/x/../../System").is_none());
+        assert!(canonicalize_for_safety("../etc").is_none());
+        assert!(canonicalize_for_safety("/a/b/..").is_none());
+    }
+
+    #[test]
+    fn canonicalize_resolves_symlinks_and_passes_missing_paths_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        mkdir(&real);
+        let link = dir.path().join("link");
+        symlink(&real, &link).unwrap();
+
+        let resolved = canonicalize_for_safety(&link.to_string_lossy()).unwrap();
+        assert_eq!(resolved, fs::canonicalize(&real).unwrap());
+
+        let missing = dir.path().join("missing/file");
+        assert_eq!(
+            canonicalize_for_safety(&missing.to_string_lossy()).unwrap(),
+            missing
+        );
+    }
+
+    #[test]
+    fn same_or_under_is_component_aware_and_case_insensitive() {
+        assert!(is_same_or_under("/System", "/System"));
+        assert!(is_same_or_under("/System/Library", "/System"));
+        assert!(is_same_or_under("/system/library", "/System"));
+        assert!(is_same_or_under("/SYSTEM", "/System"));
+        assert!(is_same_or_under("/System/", "/System"));
+        assert!(!is_same_or_under("/SystemX", "/System"));
+        assert!(!is_same_or_under("/Sys", "/System"));
+        assert!(!is_same_or_under("/Users/x/System", "/System"));
+    }
+
+    #[test]
+    fn critical_paths_cover_roots_home_and_home_folders() {
+        let home = Path::new("/Users/tester");
+        for p in [
+            "/", "/Users", "/Library", "/System", "/Applications", "/Volumes", "/private/var",
+            "/usr/local", "/opt/homebrew", "/tmp", "/etc",
+        ] {
+            assert!(is_critical_path_for_home(Path::new(p), Some(home)), "{p}");
+        }
+        for p in [
+            "/Users/tester",
+            "/Users/tester/",
+            "/users/TESTER",
+            "/Users/tester/Documents",
+            "/Users/tester/Documents/",
+            "/Users/tester/./Library",
+            "/Users/tester/downloads",
+            "/Users/tester/Desktop",
+            "/Users/tester/Pictures",
+        ] {
+            assert!(is_critical_path_for_home(Path::new(p), Some(home)), "{p}");
+        }
+    }
+
+    #[test]
+    fn critical_paths_do_not_cover_descendants() {
+        let home = Path::new("/Users/tester");
+        for p in [
+            "/Users/tester/Documents/report.pdf",
+            "/Users/tester/Library/Caches",
+            "/Users/tester/Library/Caches/com.foo",
+            "/Applications/Foo.app",
+            "/Library/Caches",
+            "/Users/other",
+            "/Users/tester/project",
+            "/usr/local/bin",
+        ] {
+            assert!(!is_critical_path_for_home(Path::new(p), Some(home)), "{p}");
+        }
+        assert!(!is_critical_path_for_home(Path::new("/Users/tester/Documents"), None));
+    }
+
+    #[test]
+    fn critical_path_uses_the_real_home() {
+        if let Some(home) = dirs::home_dir() {
+            assert!(is_critical_path(&home));
+            assert!(is_critical_path(&home.join("Documents")));
+            assert!(!is_critical_path(&home.join("Documents/some-file.txt")));
+        }
+        assert!(is_critical_path(Path::new("/")));
+    }
+
+    #[test]
+    fn dedup_by_inode_collapses_hardlinks_and_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        write_file(&a, 10);
+        let hard = dir.path().join("hard");
+        fs::hard_link(&a, &hard).unwrap();
+        let soft = dir.path().join("soft");
+        symlink(&a, &soft).unwrap();
+        let b = dir.path().join("b");
+        write_file(&b, 10);
+        let missing = dir.path().join("missing").to_string_lossy().to_string();
+
+        let input: Vec<String> = [&a, &hard, &soft, &b]
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .chain([missing.clone(), missing.clone()])
+            .collect();
+        let out = dedup_paths_by_inode(&input);
+        assert_eq!(out, vec![input[0].clone(), input[3].clone(), missing.clone(), missing]);
+    }
 }

@@ -11,20 +11,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["/Library/Caches".into()],
         },
         CleanRule {
-            id: "system_tmp".into(),
-            max_age_days: Some(7),
-            category: "System".into(),
-            label: "Temporary Files".into(),
-            paths: vec!["/private/tmp".into(), "/private/var/tmp".into()],
-        },
-        CleanRule {
-            id: "system_logs".into(),
-            max_age_days: Some(7),
-            category: "System".into(),
-            label: "System Logs".into(),
-            paths: vec!["/private/var/log".into()],
-        },
-        CleanRule {
             id: "crash_reports".into(),
             max_age_days: Some(7),
             category: "System".into(),
@@ -543,13 +529,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "Developer Tools".into(),
             label: "Xcode DerivedData".into(),
             paths: vec!["~/Library/Developer/Xcode/DerivedData".into()],
-        },
-        CleanRule {
-            id: "dev_xcode_archives".into(),
-            max_age_days: Some(90),
-            category: "Developer Tools".into(),
-            label: "Xcode Archives".into(),
-            paths: vec!["~/Library/Developer/Xcode/Archives".into()],
         },
         // Xcode Device Support is handled by a special scan
         // (`scan_xcode_device_support`) that preserves the N most recent
@@ -1556,7 +1535,9 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: Some(30),
             category: "Developer Tools".into(),
             label: "SBT Cache".into(),
-            paths: vec!["~/.sbt".into()],
+            // Not ~/.sbt itself: it holds global settings, plugins and
+            // publish credentials.
+            paths: vec!["~/.sbt/boot".into()],
         },
         CleanRule {
             id: "dev_ivy_cache".into(),
@@ -2006,10 +1987,7 @@ pub fn all_rules() -> Vec<CleanRule> {
             max_age_days: None,
             category: "Developer Tools".into(),
             label: "Homebrew Lock Files".into(),
-            paths: vec![
-                "/opt/homebrew/var/homebrew/locks".into(),
-                "/usr/local/var/homebrew/locks".into(),
-            ],
+            paths: vec!["/opt/homebrew/var/homebrew/locks".into()],
         },
         // ── Productivity Apps ──────────────────────────────────
         CleanRule {
@@ -2608,13 +2586,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["~/.grafana/cache".into()],
         },
         CleanRule {
-            id: "dev_prometheus_wal".into(),
-            max_age_days: None,
-            category: "Developer Tools".into(),
-            label: "Prometheus WAL Cache".into(),
-            paths: vec!["~/.prometheus/data/wal".into()],
-        },
-        CleanRule {
             id: "dev_gitlab_runner".into(),
             max_age_days: None,
             category: "Developer Tools".into(),
@@ -2720,13 +2691,6 @@ pub fn all_rules() -> Vec<CleanRule> {
             category: "System".into(),
             label: "Icon Services Cache".into(),
             paths: vec!["~/Library/Caches/com.apple.iconservices.store".into()],
-        },
-        CleanRule {
-            id: "sys_autosave".into(),
-            max_age_days: None,
-            category: "System".into(),
-            label: "Autosave Information".into(),
-            paths: vec!["~/Library/Autosave Information".into()],
         },
         CleanRule {
             id: "sys_identity_caches".into(),
@@ -2858,4 +2822,107 @@ pub fn all_rules() -> Vec<CleanRule> {
             paths: vec!["~/Library/Logs/warp.log".into()],
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::utils::{is_critical_path_for_home, is_protected_user_data_component};
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    const FAKE_HOME: &str = "/Users/tester";
+
+    fn expand(raw: &str) -> String {
+        match raw.strip_prefix("~/") {
+            Some(rest) => format!("{}/{}", FAKE_HOME, rest),
+            None if raw == "~" => FAKE_HOME.to_string(),
+            None => raw.to_string(),
+        }
+    }
+
+    #[test]
+    fn rule_ids_are_unique_and_rules_are_complete() {
+        let rules = all_rules();
+        assert!(!rules.is_empty());
+        let mut seen = HashSet::new();
+        for r in &rules {
+            assert!(seen.insert(r.id.clone()), "duplicate rule id {}", r.id);
+            assert!(!r.label.is_empty(), "{}", r.id);
+            assert!(!r.category.is_empty(), "{}", r.id);
+            assert!(!r.paths.is_empty(), "{}", r.id);
+        }
+    }
+
+    #[test]
+    fn rule_paths_are_absolute_and_free_of_traversal() {
+        for r in all_rules() {
+            for p in &r.paths {
+                assert!(p.starts_with("~/") || p.starts_with('/'), "{}: {}", r.id, p);
+                assert!(!p.split('/').any(|seg| seg == ".." || seg == "."), "{}: {}", r.id, p);
+                assert!(p.matches('*').count() <= 1, "{}: only one wildcard is supported: {}", r.id, p);
+                assert!(!p.ends_with('/'), "{}: {}", r.id, p);
+            }
+        }
+    }
+
+    #[test]
+    fn no_rule_targets_a_root_home_or_home_folder() {
+        let home = Path::new(FAKE_HOME);
+        for r in all_rules() {
+            for p in &r.paths {
+                let expanded = expand(p);
+                assert!(
+                    !is_critical_path_for_home(Path::new(&expanded), Some(home)),
+                    "{}: {}",
+                    r.id,
+                    p
+                );
+                assert_ne!(expanded.trim_end_matches("/*"), FAKE_HOME, "{}: {}", r.id, p);
+            }
+        }
+    }
+
+    #[test]
+    fn no_rule_targets_system_or_user_data_locations() {
+        const NEVER: &[&str] = &["/System", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/etc", "/Applications", "/private/var/db"];
+        for r in all_rules() {
+            for p in &r.paths {
+                for n in NEVER {
+                    assert!(!crate::commands::utils::is_same_or_under(p, n), "{}: {}", r.id, p);
+                }
+                let last = p.rsplit('/').next().unwrap_or_default();
+                assert!(!is_protected_user_data_component(last), "{}: {}", r.id, p);
+                for seg in p.split('/') {
+                    let seg = seg.to_lowercase();
+                    assert!(![".ssh", ".gnupg", "keychains"].contains(&seg.as_str()), "{}: {}", r.id, p);
+                }
+                for config_root in ["~/.aws", "~/.kube", "~/.docker", "~/.config", "~/.local"] {
+                    assert_ne!(p, config_root, "{}", r.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn documents_and_desktop_are_only_touched_by_explicit_patterns() {
+        for r in all_rules() {
+            for p in &r.paths {
+                for dir in ["~/Documents", "~/Desktop", "~/Pictures", "~/Movies", "~/Music"] {
+                    assert!(!crate::commands::utils::is_same_or_under(p, dir), "{}: {}", r.id, p);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_rule_path_passes_the_executor_guard() {
+        let refused: Vec<String> = all_rules()
+            .iter()
+            .flat_map(|r| r.paths.iter().map(move |p| (r.id.clone(), p.clone())))
+            .filter(|(_, p)| !p.contains('*') && !super::super::is_safe_path(&expand(p)))
+            .map(|(id, p)| format!("{id}: {p}"))
+            .collect();
+        assert!(refused.is_empty(), "{refused:#?}");
+    }
 }

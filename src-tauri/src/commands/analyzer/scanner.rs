@@ -772,3 +772,163 @@ where
         })
         .sum()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{s, write_file};
+    use std::os::unix::fs::symlink;
+
+    fn scan(root: &Path, depth: usize) -> DirNode {
+        scan_directory(&s(root), depth, |_| {})
+    }
+
+    fn child<'a>(node: &'a DirNode, name: &str) -> &'a DirNode {
+        node.children
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("{name} not in {:?}", node.children.iter().map(|c| &c.name).collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn sizes_aggregate_up_the_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        write_file(&r.join("a.txt"), 1_000);
+        write_file(&r.join("docs/b.txt"), 2_000);
+        write_file(&r.join("docs/deep/c.txt"), 3_000);
+        write_file(&r.join("media/d.bin"), 4_000);
+
+        let tree = scan(r, 3);
+        assert!(tree.is_dir);
+        assert_eq!(tree.path, s(r));
+        assert_eq!(tree.size, 10_000);
+        assert_eq!(child(&tree, "docs").size, 5_000);
+        assert_eq!(child(child(&tree, "docs"), "deep").size, 3_000);
+        assert_eq!(child(&tree, "a.txt").size, 1_000);
+        assert!(!child(&tree, "a.txt").is_dir);
+        let sizes: Vec<u64> = tree.children.iter().map(|c| c.size).collect();
+        let mut sorted = sizes.clone();
+        sorted.sort_by(|a, b| b.cmp(a));
+        assert_eq!(sizes, sorted, "children are sorted by size descending");
+    }
+
+    #[test]
+    fn depth_limits_children_but_not_sizes() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        write_file(&r.join("x/y/z/file.txt"), 1_500);
+        write_file(&r.join("x/other/file.txt"), 500);
+
+        let shallow = scan(r, 1);
+        let x = child(&shallow, "x");
+        assert!(x.children.is_empty());
+        assert_eq!(x.size, 2_000);
+        assert_eq!(shallow.size, 2_000);
+
+        let root_only = scan(r, 0);
+        assert!(root_only.children.is_empty());
+        assert_eq!(root_only.size, 2_000);
+    }
+
+    #[test]
+    fn folded_dirs_are_leaves_and_marked_cleanable() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        write_file(&r.join("app/node_modules/pkg/index.js"), 50_000);
+        write_file(&r.join("app/.git/objects/x"), 50_000);
+
+        let tree = scan(r, 5);
+        let app = child(&tree, "app");
+        let nm = child(app, "node_modules");
+        assert!(nm.children.is_empty());
+        assert!(nm.size >= 50_000);
+        assert!(nm.is_cleanable);
+        let git = child(app, ".git");
+        assert!(git.children.is_empty());
+        assert!(!git.is_cleanable);
+    }
+
+    #[test]
+    fn symlinks_are_listed_but_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        let outside = tempfile::tempdir().unwrap();
+        write_file(&outside.path().join("huge.bin"), 1_000_000);
+        write_file(&r.join("small.txt"), 100);
+        symlink(outside.path(), r.join("elsewhere")).unwrap();
+
+        let tree = scan(r, 2);
+        let link = child(&tree, "elsewhere \u{2192}");
+        assert!(link.is_dir);
+        assert!(link.children.is_empty());
+        assert!(link.size < 1_000_000);
+        assert!(tree.size < 1_000_000);
+        assert_eq!(link.path, s(&r.join("elsewhere")));
+    }
+
+    #[test]
+    fn scanning_a_file_or_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("one.bin");
+        write_file(&f, 700);
+        let node = scan(&f, 2);
+        assert!(!node.is_dir);
+        assert_eq!(node.size, 700);
+
+        let missing = scan(&dir.path().join("missing"), 2);
+        assert_eq!(missing.size, 0);
+        assert!(missing.children.is_empty());
+    }
+
+    #[test]
+    fn folded_dir_detection_for_search_results() {
+        assert!(is_in_folded_dir("/Users/x/proj/node_modules/pkg/big.bin"));
+        assert!(is_in_folded_dir("/Users/x/.git/objects/pack/p.pack"));
+        assert!(is_in_folded_dir("/Users/x/Library/Caches/foo.bin"));
+        assert!(!is_in_folded_dir("/Users/x/Movies/film.mov"));
+        assert!(!is_in_folded_dir("/Users/x/node_modules_backup/a.bin"));
+    }
+
+    #[test]
+    fn npm_cache_internals_fold() {
+        assert!(should_fold_with_path("a", Path::new("/Users/x/.npm/_cacache/a")));
+        assert!(should_fold_with_path("_cacache", Path::new("/Users/x/.npm/_cacache")));
+        assert!(!should_fold_with_path("src", Path::new("/Users/x/proj/src")));
+    }
+
+    #[test]
+    fn cleanable_names_exclude_managed_caches() {
+        assert!(is_cleanable("node_modules", Path::new("/Users/x/p/node_modules")));
+        assert!(!is_cleanable("src", Path::new("/Users/x/p/src")));
+        let home = dirs::home_dir().unwrap();
+        assert!(!is_cleanable("Cache", &home.join("Library/Caches/com.foo/Cache")));
+    }
+
+    #[test]
+    fn physical_size_prefers_the_smaller_on_disk_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("small");
+        write_file(&f, 10);
+        assert_eq!(file_physical_size(&fs::metadata(&f).unwrap()), 10);
+        let sparse = dir.path().join("sparse");
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&sparse).unwrap();
+            f.write_all(b"x").unwrap();
+            f.set_len(50 * 1024 * 1024).unwrap();
+        }
+        let meta = fs::metadata(&sparse).unwrap();
+        if meta.blocks() * 512 < meta.len() {
+            assert!(file_physical_size(&meta) < 50 * 1024 * 1024);
+        }
+    }
+
+    #[test]
+    fn root_scan_skips_system_children() {
+        assert!(should_skip_root_child("System"));
+        assert!(should_skip_root_child("private"));
+        assert!(!should_skip_root_child("Users"));
+        assert!(should_skip_default("OrbStack"));
+    }
+}

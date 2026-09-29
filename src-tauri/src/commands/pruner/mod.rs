@@ -12,6 +12,8 @@ pub struct ArtifactEntry {
     pub artifact_path: String,
     pub size: u64,
     pub is_recent: bool,
+    /// Unix seconds of the project's last activity (see scanner::project_last_activity).
+    pub last_modified_secs: u64,
 }
 
 #[derive(Clone, Serialize)]

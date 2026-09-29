@@ -37,8 +37,12 @@ const MAX_DISK_ENTRIES: usize = 50;
 
 /// Return the cache directory, creating it if necessary.
 fn cache_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-    let dir = home.join("Library/Caches/com.kyra.app/analyzer");
+    #[cfg(test)]
+    let dir = std::env::temp_dir().join("kyra-test-analyzer-cache");
+    #[cfg(not(test))]
+    let dir = dirs::home_dir()
+        .ok_or("Cannot determine home directory")?
+        .join("Library/Caches/com.kyra.app/analyzer");
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create cache dir: {}", e))?;
     Ok(dir)
 }
@@ -256,5 +260,91 @@ fn evict_if_needed() {
     let to_remove = files.len() - MAX_DISK_ENTRIES;
     for (path, _) in files.into_iter().take(to_remove) {
         let _ = fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{s, write_file};
+
+    fn node(path: &str, children: Vec<DirNode>, is_dir: bool) -> DirNode {
+        DirNode {
+            name: path.rsplit('/').next().unwrap_or_default().to_string(),
+            path: path.to_string(),
+            size: 1,
+            is_dir,
+            is_cleanable: false,
+            children,
+            last_access: None,
+        }
+    }
+
+    #[test]
+    fn test_cache_lives_in_temp() {
+        let dir = cache_dir().unwrap();
+        assert!(dir.starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn filenames_are_deterministic_per_path_and_depth() {
+        assert_eq!(cache_filename("/a", 3), cache_filename("/a", 3));
+        assert_ne!(cache_filename("/a", 3), cache_filename("/a", 4));
+        assert_ne!(cache_filename("/a", 3), cache_filename("/b", 3));
+        assert!(cache_filename("/a", 3).ends_with(".json"));
+    }
+
+    #[test]
+    fn saved_scans_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = s(dir.path());
+        write_file(&dir.path().join("f"), 1);
+        let tree = node(
+            &root,
+            vec![node(&format!("{root}/f"), vec![], false), node(&format!("{root}/d"), vec![], true)],
+            true,
+        );
+        save_to_disk(&root, 2, &tree);
+
+        let fresh = load_from_disk(&root, 2).unwrap();
+        assert_eq!(fresh.path, root);
+        assert_eq!(fresh.children.len(), 2);
+        assert!(load_stale(&root, 2).is_some());
+        assert_eq!(peek_total_files(&root, 2), Some(1));
+        assert!(load_from_disk(&root, 3).is_none());
+    }
+
+    #[test]
+    fn stale_cache_for_a_deleted_dir_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = s(&dir.path().join("gone"));
+        std::fs::create_dir(&root).unwrap();
+        save_to_disk(&root, 1, &node(&root, vec![], true));
+        std::fs::remove_dir(&root).unwrap();
+        assert!(load_stale(&root, 1).is_none());
+        assert!(load_from_disk(&root, 1).is_none());
+    }
+
+    #[test]
+    fn invalidation_hits_the_path_its_ancestors_and_descendants_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = s(dir.path());
+        let paths = [
+            format!("{base}/proj"),
+            format!("{base}/proj/sub"),
+            base.clone(),
+            format!("{base}/project2"),
+        ];
+        for p in &paths {
+            std::fs::create_dir_all(p).unwrap();
+            save_to_disk(p, 1, &node(p, vec![], true));
+        }
+
+        invalidate_path(&format!("{base}/proj"));
+
+        assert!(load_from_disk(&paths[0], 1).is_none());
+        assert!(load_from_disk(&paths[1], 1).is_none());
+        assert!(load_from_disk(&paths[2], 1).is_none());
+        assert!(load_from_disk(&paths[3], 1).is_some(), "sibling with shared prefix was invalidated");
     }
 }

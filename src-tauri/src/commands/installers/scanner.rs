@@ -1,7 +1,7 @@
 use super::InstallerFile;
 use crate::commands::utils::dir_size;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -180,6 +180,112 @@ fn is_installer_zip(path: &Path) -> bool {
     false
 }
 
+/// True if `path` carries the quarantine mark browsers, Mail and
+/// AirDrop put on downloaded files. Disk images and archives the user made
+/// themselves never have it.
+pub(crate) fn is_quarantined(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let len = unsafe {
+        libc::getxattr(
+            c_path.as_ptr(),
+            c"com.apple.quarantine".as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            libc::XATTR_NOFOLLOW,
+        )
+    };
+    len >= 0
+}
+
+/// Encrypted disk images are private vaults, never installers.
+fn is_encrypted_dmg(path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = fs::File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 8];
+    if f.read_exact(&mut head).is_ok() && &head == b"encrcdsa" {
+        return true;
+    }
+    let mut tail = [0u8; 8];
+    f.seek(SeekFrom::End(-8)).is_ok() && f.read_exact(&mut tail).is_ok() && &tail == b"cdsaencr"
+}
+
+fn bundle_id_of(app: &Path) -> Option<String> {
+    let plist = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
+    plist
+        .as_dictionary()?
+        .get("CFBundleIdentifier")?
+        .as_string()
+        .map(|s| s.to_lowercase())
+}
+
+/// Folders where installed apps live.
+pub(crate) fn app_dirs(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = vec![PathBuf::from("/Applications")];
+    if let Some(h) = home {
+        dirs.push(h.join("Applications"));
+    }
+    dirs
+}
+
+/// True if an app with the same bundle id as `app` is installed at another
+/// path, so the downloaded copy is redundant.
+fn installed_elsewhere(app: &Path, app_dirs: &[PathBuf]) -> bool {
+    let Some(id) = bundle_id_of(app) else {
+        return false;
+    };
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for dir in app_dirs {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "app") {
+                candidates.push(p);
+            } else if p.is_dir() {
+                if let Ok(inner) = fs::read_dir(&p) {
+                    candidates.extend(inner.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "app")));
+                }
+            }
+        }
+    }
+    let same = |a: &Path, b: &Path| fs::canonicalize(a).ok() == fs::canonicalize(b).ok();
+    candidates.iter().any(|c| !same(c, app) && bundle_id_of(c).as_deref() == Some(id.as_str()))
+}
+
+/// Caches of downloads, whose files are installers by nature.
+fn in_download_cache(path: &Path, home: &Path) -> bool {
+    [
+        "Library/Caches/Homebrew/downloads",
+        "Library/Mail Downloads",
+        "Library/Containers/com.apple.mail/Data/Library/Mail Downloads",
+    ]
+    .iter()
+    .any(|rel| path.starts_with(home.join(rel)))
+}
+
+/// Whether a found installer may be offered (and deleted): it was
+/// downloaded rather than made by the user, is not an encrypted vault, is
+/// not the only copy of an app, and holds no protected data.
+pub(crate) fn is_offerable(path: &Path, home: Option<&Path>, app_dirs: &[PathBuf]) -> bool {
+    if crate::commands::data_guard::check_general(path).is_err() {
+        return false;
+    }
+    let is_app = path.extension().is_some_and(|e| e == "app") && path.is_dir();
+    if is_app {
+        return is_macos_installer(path) || (is_quarantined(path) && installed_elsewhere(path, app_dirs));
+    }
+    let is_dmg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dmg"));
+    if is_dmg && is_encrypted_dmg(path) {
+        return false;
+    }
+    home.is_some_and(|h| in_download_cache(path, h)) || is_quarantined(path)
+}
+
 fn is_installer_extension(ext: &str) -> bool {
     INSTALLER_EXTENSIONS.contains(&ext)
 }
@@ -300,9 +406,16 @@ fn scan_directory_recursive(
 }
 
 pub fn scan_for_installers() -> Vec<InstallerFile> {
+    let home = dirs::home_dir();
+    scan_for_installers_in(home.as_deref(), true)
+}
+
+/// `scan_for_installers` against an explicit home; `include_system` adds
+/// /Users/Shared and /tmp.
+pub(crate) fn scan_for_installers_in(home: Option<&Path>, include_system: bool) -> Vec<InstallerFile> {
     let mut all = Vec::new();
 
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         // Original locations
         let downloads = home.join("Downloads");
         if downloads.exists() {
@@ -346,22 +459,10 @@ pub fn scan_for_installers() -> Vec<InstallerFile> {
             all.extend(scan_directory(&mail_downloads_legacy, false, 1));
         }
 
-        // iCloud Drive Downloads
-        let icloud_downloads = home.join("Library/Mobile Documents/com~apple~CloudDocs/Downloads");
-        if icloud_downloads.exists() {
-            all.extend(scan_directory(&icloud_downloads, false, 1));
-        }
-
         // Library Downloads (software updates, etc.)
         let library_downloads = home.join("Library/Downloads");
         if library_downloads.exists() {
             all.extend(scan_directory(&library_downloads, false, 0));
-        }
-
-        // Telegram Desktop cached installers
-        let telegram_appdata = home.join("Library/Application Support/Telegram Desktop");
-        if telegram_appdata.exists() {
-            all.extend(scan_directory(&telegram_appdata, false, 1));
         }
 
         let telegram_downloads = home.join("Downloads/Telegram Desktop");
@@ -372,17 +473,155 @@ pub fn scan_for_installers() -> Vec<InstallerFile> {
 
     // Shared location for multi-user installs
     let users_shared = Path::new("/Users/Shared");
-    if users_shared.exists() {
+    if include_system && users_shared.exists() {
         all.extend(scan_directory(users_shared, false, 2));
     }
 
     let tmp = Path::new("/tmp");
-    if tmp.exists() {
+    if include_system && tmp.exists() {
         all.extend(scan_directory(tmp, false, 0));
     }
 
     let mut seen = std::collections::HashSet::new();
     all.retain(|item| seen.insert(item.path.clone()));
+    let app_dirs = app_dirs(home);
+    all.retain(|item| is_offerable(Path::new(&item.path), home, &app_dirs));
     all.sort_by(|a, b| b.size.cmp(&a.size));
     all
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{mkdir, write_file};
+    use std::io::Write;
+    use std::os::unix::fs::symlink;
+
+    fn make_zip(path: &Path, entries: &[&str]) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for e in entries {
+            if e.ends_with('/') {
+                zip.add_directory(e.trim_end_matches('/'), opts).unwrap();
+            } else {
+                zip.start_file(*e, opts).unwrap();
+                zip.write_all(b"data").unwrap();
+            }
+        }
+        zip.finish().unwrap();
+    }
+
+    fn names(results: &[InstallerFile]) -> Vec<String> {
+        let mut v: Vec<String> = results.iter().map(|f| f.name.clone()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn installer_extensions_are_detected_case_insensitively() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        for n in ["a.dmg", "b.pkg", "c.iso", "d.xip", "e.mpkg", "F.DMG"] {
+            write_file(&r.join(n), 100);
+        }
+        for n in ["notes.txt", "photo.jpg", "dmg", "archive.tar.gz"] {
+            write_file(&r.join(n), 100);
+        }
+        let results = scan_directory(r, false, 0);
+        assert_eq!(names(&results), vec!["F.DMG", "a.dmg", "b.pkg", "c.iso", "d.xip", "e.mpkg"]);
+        let upper = results.iter().find(|f| f.name == "F.DMG").unwrap();
+        assert_eq!(upper.extension, "dmg");
+        assert_eq!(upper.size, 100);
+        assert!(upper.modified_secs > 0);
+    }
+
+    #[test]
+    fn zips_count_only_when_they_contain_installers() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        make_zip(&r.join("app.zip"), &["Foo.app/", "Foo.app/Contents/Info.plist"]);
+        make_zip(&r.join("nested.zip"), &["Foo.app/Contents/MacOS/foo"]);
+        make_zip(&r.join("pkg.zip"), &["setup/Installer.PKG"]);
+        make_zip(&r.join("photos.zip"), &["img/1.jpg", "img/2.jpg"]);
+        write_file(&r.join("corrupt.zip"), 64);
+
+        let results = scan_directory(r, false, 0);
+        assert_eq!(names(&results), vec!["app.zip", "nested.zip", "pkg.zip"]);
+        assert!(results.iter().all(|f| f.extension == "zip"));
+        assert!(!is_installer_zip(&r.join("photos.zip")));
+        assert!(!is_installer_zip(&r.join("corrupt.zip")));
+        assert!(!is_installer_zip(&r.join("missing.zip")));
+    }
+
+    #[test]
+    fn app_bundles_only_count_where_requested() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        write_file(&r.join("Tool.app/Contents/Info.plist"), 50);
+        write_file(&r.join("Tool.app/Contents/Resources/inner.dmg"), 50);
+
+        let with_apps = scan_directory(r, true, 2);
+        assert_eq!(names(&with_apps), vec!["Tool.app"]);
+        assert_eq!(with_apps[0].extension, "app");
+
+        let without_apps = scan_directory(r, false, 5);
+        assert_eq!(names(&without_apps), vec!["inner.dmg"]);
+    }
+
+    #[test]
+    fn depth_hidden_entries_and_symlinks_are_respected() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        write_file(&r.join("top.pkg"), 1);
+        write_file(&r.join("l1/one.pkg"), 1);
+        write_file(&r.join("l1/l2/two.pkg"), 1);
+        write_file(&r.join(".hidden.pkg"), 1);
+        write_file(&r.join(".cache/in-hidden.pkg"), 1);
+        let elsewhere = tempfile::tempdir().unwrap();
+        write_file(&elsewhere.path().join("linked.pkg"), 1);
+        symlink(elsewhere.path().join("linked.pkg"), r.join("link.pkg")).unwrap();
+        symlink(elsewhere.path(), r.join("linkdir")).unwrap();
+
+        assert_eq!(names(&scan_directory(r, false, 0)), vec!["top.pkg"]);
+        assert_eq!(names(&scan_directory(r, false, 1)), vec!["one.pkg", "top.pkg"]);
+        assert_eq!(
+            names(&scan_directory(r, false, 2)),
+            vec!["one.pkg", "top.pkg", "two.pkg"]
+        );
+    }
+
+    #[test]
+    fn brew_hash_prefix_is_stripped_only_when_valid() {
+        let hash = "a".repeat(64);
+        assert_eq!(strip_brew_hash_prefix(&format!("{hash}--Firefox.dmg")), "Firefox.dmg");
+        let not_hex = format!("{}--x.dmg", "z".repeat(64));
+        assert_eq!(strip_brew_hash_prefix(&not_hex), not_hex);
+        assert_eq!(strip_brew_hash_prefix("short--x.dmg"), "short--x.dmg");
+        assert_eq!(strip_brew_hash_prefix(&format!("{hash}__x.dmg")), format!("{hash}__x.dmg"));
+    }
+
+    #[test]
+    fn macos_installer_detection_and_version() {
+        assert!(is_macos_installer(Path::new("/Applications/Install macOS Sonoma.app")));
+        assert!(!is_macos_installer(Path::new("/Applications/Sonoma.app")));
+        assert!(!is_macos_installer(Path::new("/x/Install macOS Sonoma.dmg")));
+        assert!(!is_protected_macos_installer(Path::new("/x/Firefox.app"), 0));
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Install macOS Test.app");
+        mkdir(&app.join("Contents"));
+        let mut dict = plist::Dictionary::new();
+        dict.insert("DTPlatformVersion".into(), plist::Value::String("14.2".into()));
+        plist::Value::Dictionary(dict).to_file_xml(app.join("Contents/Info.plist")).unwrap();
+        assert_eq!(read_installer_major_version(&app), Some(14));
+
+        let mut dict = plist::Dictionary::new();
+        dict.insert("CFBundleShortVersionString".into(), plist::Value::String("15.0.1".into()));
+        plist::Value::Dictionary(dict).to_file_xml(app.join("Contents/Info.plist")).unwrap();
+        assert_eq!(read_installer_major_version(&app), Some(15));
+
+        assert_eq!(read_installer_major_version(&dir.path().join("missing.app")), None);
+    }
 }

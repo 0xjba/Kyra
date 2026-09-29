@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::AssociatedFile;
+use super::{is_shared_home_dot_path, AssociatedFile, KeptItem};
+use crate::commands::data_guard;
 use crate::commands::utils::path_size;
 
 /// Directories under ~/Library to search, with human-readable category names.
@@ -322,6 +323,7 @@ fn find_receipt_files(bundle_id: &str) -> Vec<AssociatedFile> {
 fn find_toolchain_specific(
     bundle_id: &str,
     app_name: &str,
+    app_path: &str,
     home: &Path,
 ) -> Vec<AssociatedFile> {
     let mut out: Vec<AssociatedFile> = Vec::new();
@@ -330,7 +332,7 @@ fn find_toolchain_specific(
 
     // Helper to push a path if it exists and is non-empty.
     let push_path = |path: PathBuf, category: &str, results: &mut Vec<AssociatedFile>| {
-        if !path.exists() {
+        if !path.exists() || is_shared_home_dot_path(&path, home) {
             return;
         }
         let size = path_size(&path);
@@ -349,10 +351,10 @@ fn find_toolchain_specific(
         });
     };
 
-    // Huawei DevEco-Studio (HarmonyOS)
+    // Huawei DevEco-Studio (HarmonyOS). The projects folder is the user's
+    // source code and is never offered.
     if name_lower.contains("deveco") || bundle_lower.contains("huawei.deveco") {
         for rel in &[
-            "DevEcoStudioProjects",
             "DevEco-Studio",
             "Library/Application Support/Huawei",
             "Library/Caches/Huawei",
@@ -367,12 +369,14 @@ fn find_toolchain_specific(
         }
     }
 
-    // Android Studio — projects dir, SDK, ~/.android cache.
+    // Android Studio — SDK and ~/.android (the guard keeps its virtual
+    // devices and keys). ~/AndroidStudioProjects is the user's source code
+    // and is never offered.
     let is_android_studio = (name_lower.contains("android") && name_lower.contains("studio"))
         || bundle_lower.contains("google.android.studio")
         || bundle_lower.contains("jetbrains.android");
     if is_android_studio {
-        for rel in &["AndroidStudioProjects", "Library/Android", ".android"] {
+        for rel in &["Library/Android", ".android"] {
             push_path(home.join(rel), "App Data", &mut out);
         }
         let google_support = home.join("Library/Application Support/Google");
@@ -388,8 +392,13 @@ fn find_toolchain_specific(
         }
     }
 
-    // Xcode — Developer dir is the big one, plus legacy ~/.Xcode.
-    if name_lower.contains("xcode") || bundle_lower.contains("apple.dt.xcode") {
+    // Xcode — Developer dir is the big one, plus legacy ~/.Xcode. Only for
+    // Xcode itself ("Xcodes" and other tools merely contain the word), and
+    // not while another Xcode (beta, older release) still uses it. The
+    // guard keeps Archives and UserData.
+    let is_xcode = bundle_lower == "com.apple.dt.xcode"
+        || (bundle_lower.is_empty() && (name_lower == "xcode" || name_lower.starts_with("xcode-")));
+    if is_xcode && !other_xcode_installed(app_path) {
         push_path(home.join("Library/Developer"), "App Data", &mut out);
         push_path(home.join(".Xcode"), "App Data", &mut out);
     }
@@ -432,17 +441,17 @@ fn find_toolchain_specific(
     }
 
     // Unity / Unreal / Godot game engines.
-    if name_lower.contains("unity") {
+    if has_word(&name_lower, "unity") {
         push_path(home.join("Library/Unity"), "App Data", &mut out);
     }
-    if name_lower.contains("unreal") {
+    if has_word(&name_lower, "unreal") {
         push_path(
             home.join("Library/Application Support/Epic"),
             "App Data",
             &mut out,
         );
     }
-    if name_lower.contains("godot") {
+    if has_word(&name_lower, "godot") {
         push_path(
             home.join("Library/Application Support/Godot"),
             "App Data",
@@ -452,7 +461,8 @@ fn find_toolchain_specific(
 
     // VS Code and its ShipIt updater cache.
     if bundle_lower.contains("microsoft.vscode") {
-        push_path(home.join(".vscode"), "App Data", &mut out);
+        push_path(home.join(".vscode/extensions"), "App Data", &mut out);
+        push_path(home.join(".vscode/argv.json"), "App Data", &mut out);
         push_path(
             home.join("Library/Caches/com.microsoft.VSCode.ShipIt"),
             "Caches",
@@ -463,11 +473,6 @@ fn find_toolchain_specific(
             "Caches",
             &mut out,
         );
-    }
-
-    // Docker Desktop leaves a ~/.docker config dir around.
-    if name_lower.contains("docker") {
-        push_path(home.join(".docker"), "App Data", &mut out);
     }
 
     // Maestro Studio — mobile test runner.
@@ -563,6 +568,22 @@ fn find_toolchain_specific(
     out
 }
 
+/// True if `name` has `word` as a whole word ("Unity Hub", not "Community").
+fn has_word(name: &str, word: &str) -> bool {
+    name.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| w == word)
+}
+
+/// True if an Xcode other than `app_path` is installed in /Applications.
+fn other_xcode_installed(app_path: &str) -> bool {
+    let Ok(entries) = fs::read_dir("/Applications") else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        name.starts_with("xcode") && name.ends_with(".app") && e.path() != Path::new(app_path)
+    })
+}
+
 /// Read CFBundleExecutable from an app's Info.plist via `defaults read`.
 fn read_bundle_executable(app_path: &str) -> Option<String> {
     let plist = format!("{}/Contents/Info.plist", app_path);
@@ -607,9 +628,10 @@ fn find_diagnostic_reports(
     _bundle_id: &str,
     app_name: &str,
     app_path: &str,
+    home: &Path,
+    include_system: bool,
 ) -> Vec<AssociatedFile> {
     let mut files = Vec::new();
-    let home = dirs::home_dir().unwrap_or_default();
 
     // Determine the prefix: prefer CFBundleExecutable, fall back to app name
     // without spaces (matching the reference behavior).
@@ -622,10 +644,10 @@ fn find_diagnostic_reports(
         return files;
     }
 
-    let report_dirs = [
-        home.join("Library/Logs/DiagnosticReports"),
-        PathBuf::from("/Library/Logs/DiagnosticReports"),
-    ];
+    let mut report_dirs = vec![home.join("Library/Logs/DiagnosticReports")];
+    if include_system {
+        report_dirs.push(PathBuf::from("/Library/Logs/DiagnosticReports"));
+    }
 
     let crash_exts = ["ips", "crash", "spin"];
 
@@ -669,12 +691,91 @@ fn find_diagnostic_reports(
 }
 
 /// Searches ~/Library subdirectories for files associated with the given app.
-pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<AssociatedFile> {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return vec![],
-    };
+pub fn find_associated(bundle_id: &str, app_name: &str, app_path: &str) -> Vec<AssociatedFile> {
+    match dirs::home_dir() {
+        Some(home) => find_associated_in(bundle_id, app_name, app_path, &home, true),
+        None => vec![],
+    }
+}
 
+/// `find_associated` against an explicit home directory. `include_system`
+/// adds the machine-wide /Library locations and package receipts.
+pub(super) fn find_associated_in(
+    bundle_id: &str,
+    app_name: &str,
+    app_path: &str,
+    home: &Path,
+    include_system: bool,
+) -> Vec<AssociatedFile> {
+    discover_in(bundle_id, app_name, app_path, home, include_system).files
+}
+
+pub(super) struct Discovery {
+    /// Files the uninstall may delete.
+    pub files: Vec<AssociatedFile>,
+    /// The app's data that outlives it and is left in place.
+    pub kept: Vec<KeptItem>,
+}
+
+/// Levels a folder holding protected data is split into deletable children.
+const SPLIT_DEPTH: usize = 3;
+
+/// Replaces every match with the parts the data guard lets this uninstall
+/// delete, and collects the protected parts. Browser data of other apps
+/// is dropped silently: it was never this app's.
+fn partition_protected(found: Vec<AssociatedFile>, bundle_id: &str) -> Discovery {
+    let ctx = data_guard::DeleteContext::Uninstall { bundle_id };
+    let mut files: Vec<AssociatedFile> = Vec::new();
+    let mut kept: Vec<KeptItem> = Vec::new();
+    let keep = |r: &data_guard::Refusal, kept: &mut Vec<KeptItem>| {
+        if r.category != data_guard::Category::Browser && !kept.iter().any(|k| k.path == r.path) {
+            kept.push(KeptItem::from_refusal(r));
+        }
+    };
+    for f in found {
+        let (ok, refused) = data_guard::split(Path::new(&f.path), ctx, SPLIT_DEPTH);
+        for r in &refused {
+            keep(r, &mut kept);
+        }
+        for p in ok {
+            // Protected data deeper than the guard's own marker check.
+            if let data_guard::TreeScan::Found(category) = data_guard::scan_tree(&p, 3, 2_000) {
+                let r = data_guard::Refusal {
+                    path: p.to_string_lossy().into_owned(),
+                    category,
+                    detail: "contains protected data",
+                    contains: true,
+                };
+                keep(&r, &mut kept);
+                continue;
+            }
+            let path = p.to_string_lossy().into_owned();
+            if files.iter().any(|x| x.path == path) {
+                continue;
+            }
+            if path == f.path {
+                files.push(f.clone());
+            } else {
+                files.push(AssociatedFile {
+                    size: path_size(&p),
+                    is_dir: p.is_dir(),
+                    category: f.category.clone(),
+                    path,
+                });
+            }
+        }
+    }
+    files.retain(|f| f.size > 0);
+    Discovery { files, kept }
+}
+
+pub(super) fn discover_in(
+    bundle_id: &str,
+    app_name: &str,
+    _app_path: &str,
+    home: &Path,
+    include_system: bool,
+) -> Discovery {
     let library = home.join("Library");
     let mut results = Vec::new();
 
@@ -737,7 +838,7 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
 
     // Require bundle_id > 3 chars for system /Library search to avoid
     // false positives on short identifiers.
-    for dir_str in system_lib_dirs {
+    for dir_str in system_lib_dirs.iter().filter(|_| include_system) {
         if bundle_id.len() <= 3 && name_variants.iter().all(|v| v.len() <= 3) {
             break;
         }
@@ -781,12 +882,15 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
 
     // Scan LaunchAgents, LaunchDaemons, and PrivilegedHelperTools
     if !bundle_id.is_empty() {
-        let launch_dirs: Vec<(std::path::PathBuf, &str)> = vec![
-            (home.join("Library/LaunchAgents"), "Launch Agents"),
-            (std::path::PathBuf::from("/Library/LaunchAgents"), "Launch Agents"),
-            (std::path::PathBuf::from("/Library/LaunchDaemons"), "Launch Daemons"),
-            (std::path::PathBuf::from("/Library/PrivilegedHelperTools"), "Launch Daemons"),
-        ];
+        let mut launch_dirs: Vec<(std::path::PathBuf, &str)> =
+            vec![(home.join("Library/LaunchAgents"), "Launch Agents")];
+        if include_system {
+            launch_dirs.extend([
+                (std::path::PathBuf::from("/Library/LaunchAgents"), "Launch Agents"),
+                (std::path::PathBuf::from("/Library/LaunchDaemons"), "Launch Daemons"),
+                (std::path::PathBuf::from("/Library/PrivilegedHelperTools"), "Launch Daemons"),
+            ]);
+        }
 
         let bundle_lower = bundle_id.to_lowercase();
 
@@ -857,7 +961,8 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
 
     // Package receipt discovery — finds files installed by .pkg installers
     // that wouldn't otherwise be caught by bundle-id search under ~/Library.
-    for receipt_file in find_receipt_files(bundle_id) {
+    let receipts = if include_system { find_receipt_files(bundle_id) } else { Vec::new() };
+    for receipt_file in receipts {
         if !results.iter().any(|r| r.path == receipt_file.path) {
             results.push(receipt_file);
         }
@@ -1031,14 +1136,14 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
     // Specialized toolchain cleanup: IDE projects, SDKs, and engine
     // state folders that don't live under ~/Library/Application Support
     // and don't match the bundle id at all.
-    for item in find_toolchain_specific(bundle_id, app_name, &home) {
+    for item in find_toolchain_specific(bundle_id, app_name, _app_path, home) {
         if !results.iter().any(|r| r.path == item.path) {
             results.push(item);
         }
     }
 
     // Diagnostic reports (crash logs, spin dumps) for the app.
-    for item in find_diagnostic_reports(bundle_id, app_name, _app_path) {
+    for item in find_diagnostic_reports(bundle_id, app_name, _app_path, home, include_system) {
         if !results.iter().any(|r| r.path == item.path) {
             results.push(item);
         }
@@ -1051,7 +1156,7 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
         let dot_roots: [(PathBuf, bool); 3] = [
             (home.join(".config"), false),
             (home.join(".local/share"), false),
-            (home.clone(), true), // dotfile prefix match
+            (home.to_path_buf(), true), // dotfile prefix match
         ];
         for (root, dot_prefix) in &dot_roots {
             if !root.is_dir() {
@@ -1086,6 +1191,9 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
                     continue;
                 }
                 let path = entry.path();
+                if is_shared_home_dot_path(&path, home) {
+                    continue;
+                }
                 let size = path_size(&path);
                 if size == 0 {
                     continue;
@@ -1104,5 +1212,288 @@ pub fn find_associated(bundle_id: &str, app_name: &str, _app_path: &str) -> Vec<
         }
     }
 
-    results
+    results.retain(|f| !is_shared_home_dot_path(Path::new(&f.path), home));
+    // Name variants can hit another channel's data ("Firefox Nightly" ->
+    // "Firefox", "Signal Beta" -> "Signal"): browser data is only offered
+    // for its exact owner, and data that outlives apps never is.
+    partition_protected(results, bundle_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{mkdir, write_file};
+
+    const BID: &str = "com.example.FooBar";
+    const NAME: &str = "Foo Bar";
+
+    fn find(home: &Path) -> Vec<AssociatedFile> {
+        find_associated_in(BID, NAME, "/nonexistent/Foo Bar.app", home, false)
+    }
+
+    fn rel_paths(home: &Path, files: &[AssociatedFile]) -> Vec<String> {
+        let mut v: Vec<String> = files
+            .iter()
+            .map(|f| {
+                Path::new(&f.path)
+                    .strip_prefix(home)
+                    .unwrap_or_else(|_| panic!("result escaped the home dir: {}", f.path))
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn finds_library_leftovers_by_bundle_id_and_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        let lib = h.join("Library");
+        for rel in [
+            "Application Support/com.example.FooBar/db.sqlite",
+            "Application Support/Foo Bar/settings.json",
+            "Caches/com.example.foobar/blob",
+            "Containers/com.example.FooBar/Data/x",
+            "HTTPStorages/com.example.FooBar.helper/cookies",
+            "Saved Application State/com.example.FooBar.savedState/data.data",
+            "Logs/foo-bar/log.txt",
+            "Preferences/com.example.FooBar.plist",
+            "Preferences/ByHost/com.example.FooBar.0000-1111.plist",
+            "Group Containers/ABCDE12345.com.example.FooBar/x",
+            "Application Support/com.apple.sharedfilelist/a/com.example.FooBar.sfl4",
+            "LaunchAgents/com.example.FooBar.agent.plist",
+            "LaunchAgents/foobar-updater.plist",
+        ] {
+            write_file(&lib.join(rel), 10);
+        }
+        write_file(&h.join(".foobar/config"), 10);
+        write_file(&h.join(".config/foo-bar/config.toml"), 10);
+        write_file(&h.join(".foobarrc"), 10);
+
+        let got = rel_paths(h, &find(h));
+        let mut want: Vec<String> = [
+            ".config/foo-bar",
+            ".foobar",
+            ".foobarrc",
+            "Library/Application Support/Foo Bar",
+            "Library/Application Support/com.apple.sharedfilelist/a/com.example.FooBar.sfl4",
+            "Library/Application Support/com.example.FooBar",
+            "Library/Caches/com.example.foobar",
+            "Library/Containers/com.example.FooBar",
+            "Library/Group Containers/ABCDE12345.com.example.FooBar",
+            "Library/HTTPStorages/com.example.FooBar.helper",
+            "Library/LaunchAgents/com.example.FooBar.agent.plist",
+            "Library/LaunchAgents/foobar-updater.plist",
+            "Library/Logs/foo-bar",
+            "Library/Preferences/ByHost/com.example.FooBar.0000-1111.plist",
+            "Library/Preferences/com.example.FooBar.plist",
+            "Library/Saved Application State/com.example.FooBar.savedState",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        want.sort();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn ignores_look_alikes_empty_entries_and_other_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        let lib = h.join("Library");
+        write_file(&lib.join("Application Support/com.example.FooBarPro/x"), 10);
+        write_file(&lib.join("Application Support/com.example/x"), 10);
+        write_file(&lib.join("Application Support/Foo/x"), 10);
+        write_file(&lib.join("Caches/com.other.app/x"), 10);
+        write_file(&lib.join("Preferences/com.example.FooBarPro.plist"), 10);
+        mkdir(&lib.join("Caches/com.example.FooBar"));
+        write_file(&h.join(".foo/x"), 10);
+        write_file(&h.join("foobar/x"), 10);
+        write_file(&h.join(".ssh/id_ed25519"), 10);
+
+        assert!(find(h).is_empty(), "{:?}", rel_paths(h, &find(h)));
+    }
+
+    #[test]
+    fn shared_home_dot_entries_are_never_offered() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        let shared = [
+            ".ssh", ".gnupg", ".config", ".local", ".cache", ".aws", ".kube", ".docker",
+            ".npm", ".cargo", ".rustup", ".gitconfig", ".zshrc", ".bashrc", ".bash_profile",
+            ".profile", ".zprofile", ".Trash", ".vscode", ".git", ".go",
+        ];
+        for name in shared {
+            write_file(&h.join(name).join("payload"), 10);
+        }
+        write_file(&h.join(".local/share/x"), 10);
+
+        let apps = [
+            "SSH", "GnuPG", "Config", "Local", "Cache", "AWS", "Kube", "Docker", "npm",
+            "Cargo", "Rustup", "Git", "Zsh", "Bash", "Profile", "Trash", "VSCode", "Go",
+            "Bash Profile", "Git Config",
+        ];
+        for app in apps {
+            let got = find_associated_in("", app, "/nonexistent", h, false);
+            assert!(got.is_empty(), "{app}: {:?}", rel_paths(h, &got));
+            let got = find_associated_in(&format!("com.example.{}", app.replace(' ', "")), app, "/nonexistent", h, false);
+            assert!(got.is_empty(), "{app}: {:?}", rel_paths(h, &got));
+        }
+
+        let docker = find_toolchain_specific("com.docker.docker", "Docker", "", h);
+        assert!(docker.is_empty(), "{:?}", rel_paths(h, &docker));
+        let vscode = find_toolchain_specific("com.microsoft.VSCode", "Visual Studio Code", "", h);
+        assert!(vscode.iter().all(|f| !f.path.ends_with("/.vscode")), "{:?}", rel_paths(h, &vscode));
+    }
+
+    #[test]
+    fn app_specific_dot_entries_are_still_offered() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        write_file(&h.join(".zed/state"), 10);
+        write_file(&h.join(".config/zed/settings.json"), 10);
+        write_file(&h.join(".local/share/zed/db"), 10);
+        write_file(&h.join(".ssh/zed"), 10);
+        let got = rel_paths(h, &find_associated_in("", "Zed", "/nonexistent", h, false));
+        assert_eq!(got, vec![".config/zed", ".local/share/zed", ".zed"]);
+    }
+
+    #[test]
+    fn results_are_unique_and_categorised() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        write_file(&h.join("Library/Preferences/com.example.FooBar.plist"), 10);
+        write_file(&h.join("Library/Caches/com.example.FooBar/x"), 10);
+        let results = find(h);
+        assert_eq!(results.len(), 2);
+        let cat = |suffix: &str| {
+            results.iter().find(|f| f.path.ends_with(suffix)).unwrap().category.clone()
+        };
+        assert_eq!(cat("com.example.FooBar.plist"), "Preferences");
+        assert_eq!(cat("Caches/com.example.FooBar"), "Caches");
+        assert!(results.iter().all(|f| f.size > 0));
+    }
+
+    #[test]
+    fn common_word_app_names_do_not_sweep_launch_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        write_file(&h.join("Library/LaunchAgents/com.vendor.helper.plist"), 10);
+        let results = find_associated_in("", "Helper", "/nonexistent", h, false);
+        assert!(results.is_empty(), "{:?}", rel_paths(h, &results));
+    }
+
+    #[test]
+    fn diagnostic_reports_need_a_separator_after_the_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        let reports = h.join("Library/Logs/DiagnosticReports");
+        write_file(&reports.join("FooBar-2024-01-01-000000.ips"), 10);
+        write_file(&reports.join("FooBar.crash"), 10);
+        write_file(&reports.join("FooBarBaz-2024.ips"), 10);
+        write_file(&reports.join("FooBar-2024.txt"), 10);
+
+        let files = find_diagnostic_reports(BID, NAME, "/nonexistent", h, false);
+        let mut names: Vec<String> = files
+            .iter()
+            .map(|f| Path::new(&f.path).file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["FooBar-2024-01-01-000000.ips", "FooBar.crash"]);
+        assert!(files.iter().all(|f| f.category == "Diagnostic Reports"));
+
+        assert!(find_diagnostic_reports("", "Go", "/nonexistent", h, false).is_empty());
+    }
+
+    #[test]
+    fn toolchain_leftovers_are_gated_on_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = dir.path();
+        write_file(&h.join("Library/Developer/Xcode/x"), 10);
+        write_file(&h.join("Library/Application Support/JetBrains/PyCharm2024.1/x"), 10);
+        write_file(&h.join("Library/Application Support/JetBrains/WebStorm2024.1/x"), 10);
+        write_file(&h.join(".vscode/extensions/x"), 10);
+
+        if !other_xcode_installed("/nonexistent/Xcode.app") {
+            let xcode = find_toolchain_specific("com.apple.dt.Xcode", "Xcode", "/nonexistent/Xcode.app", h);
+            assert_eq!(rel_paths(h, &xcode), vec!["Library/Developer"]);
+        }
+        assert!(find_toolchain_specific("com.xcodesorg.xcodesapp", "Xcodes", "", h).is_empty());
+        assert!(find_toolchain_specific("com.example.community", "Community", "", h).is_empty());
+
+        let pycharm = find_toolchain_specific("com.jetbrains.pycharm", "PyCharm", "", h);
+        assert_eq!(
+            rel_paths(h, &pycharm),
+            vec!["Library/Application Support/JetBrains/PyCharm2024.1"]
+        );
+
+        let vscode = find_toolchain_specific("com.microsoft.VSCode", "Visual Studio Code", "", h);
+        assert_eq!(rel_paths(h, &vscode), vec![".vscode/extensions"]);
+
+        assert!(find_toolchain_specific("com.example.FooBar", "Foo Bar", "", h).is_empty());
+    }
+
+    #[test]
+    fn name_variants_cover_separators_and_channel_suffixes() {
+        let v = app_name_variants("Zed Nightly");
+        for want in ["zed nightly", "zednightly", "zed-nightly", "zed_nightly", "zed"] {
+            assert!(v.contains(&want.to_string()), "{want} missing from {v:?}");
+        }
+        assert!(!app_name_variants("Go Beta").contains(&"go".to_string()));
+        assert!(app_name_variants("").is_empty());
+    }
+
+    #[test]
+    fn app_matching_rules() {
+        let v = app_name_variants(NAME);
+        assert!(matches_app("com.example.FooBar", BID, &v));
+        assert!(matches_app("COM.EXAMPLE.FOOBAR", BID, &v));
+        assert!(matches_app("com.example.FooBar.helper", BID, &v));
+        assert!(matches_app("foobar.app", BID, &v));
+        assert!(matches_app("Foo_Bar", BID, &v));
+        assert!(!matches_app("com.example.FooBarPro", BID, &v));
+        assert!(!matches_app("com.example", BID, &v));
+        assert!(!matches_app("foobar.app.backup", BID, &v));
+        assert!(!matches_app("anything", "", &[]));
+    }
+
+    #[test]
+    fn bundle_ids_are_validated_before_use_in_paths() {
+        assert!(is_valid_bundle_id("com.example.Foo-Bar_2"));
+        assert!(!is_valid_bundle_id(""));
+        assert!(!is_valid_bundle_id("com.example/../../etc"));
+        assert!(!is_valid_bundle_id("com.example.*"));
+        assert!(!is_valid_bundle_id("com.example foo"));
+    }
+
+    #[test]
+    fn receipt_paths_are_limited_to_known_roots() {
+        assert!(is_receipt_path_safe("/Applications/Foo.app"));
+        assert!(is_receipt_path_safe("/Library/Application Support/Foo"));
+        assert!(is_receipt_path_safe("/Library/LaunchDaemons/com.foo.plist"));
+        assert!(!is_receipt_path_safe("/Applications"));
+        assert!(!is_receipt_path_safe("/Library"));
+        assert!(!is_receipt_path_safe("/usr/local/bin/foo"));
+        assert!(!is_receipt_path_safe("/System/Library/Foo"));
+        assert!(!is_receipt_path_safe("/private/etc/foo"));
+        assert!(!is_receipt_path_safe("/Library/Extensions/Foo.kext"));
+        assert!(!is_receipt_path_safe("/Users/x/Documents/a"));
+
+        assert_eq!(categorize_receipt_path("/Applications/Foo.app"), "Application");
+        assert_eq!(categorize_receipt_path("/Library/Caches/foo"), "Caches");
+        assert_eq!(categorize_receipt_path("/Library/LaunchAgents/a.plist"), "Launch Agents");
+        assert_eq!(categorize_receipt_path("/Library/PrivilegedHelperTools/a"), "Launch Daemons");
+    }
+
+    #[test]
+    fn diag_prefix_requires_separator() {
+        assert!(matches_diag_prefix("Foo.crash", "Foo"));
+        assert!(matches_diag_prefix("Foo_2024.ips", "Foo"));
+        assert!(matches_diag_prefix("Foo-2024.ips", "Foo"));
+        assert!(matches_diag_prefix("Foo", "Foo"));
+        assert!(!matches_diag_prefix("Foobar.crash", "Foo"));
+        assert!(!matches_diag_prefix("Fo.crash", "Foo"));
+    }
 }

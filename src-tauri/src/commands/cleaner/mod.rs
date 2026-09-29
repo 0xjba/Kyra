@@ -3,6 +3,9 @@ pub mod rules;
 pub mod scanner;
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+use crate::commands::utils;
 
 /// A cleaning rule definition — pure data describing what to scan.
 #[derive(Clone, Serialize)]
@@ -75,22 +78,26 @@ const PROTECTED_PATHS: &[&str] = &[
 /// characters, and additionally resolves symlinks so that a user-writable path
 /// pointing into a protected system location is rejected.
 pub fn is_safe_path(path: &str) -> bool {
-    let canonical = match crate::commands::utils::canonicalize_for_safety(path) {
+    let canonical = match utils::canonicalize_for_safety(path) {
         Some(p) => p,
         None => return false,
     };
     let canonical_str = canonical.to_string_lossy();
 
     for protected in PROTECTED_PATHS {
-        let prefix = format!("{}/", protected);
-        if path == *protected || path.starts_with(&prefix) {
-            return false;
-        }
-        if canonical_str == *protected || canonical_str.starts_with(&prefix) {
+        if utils::is_same_or_under(path, protected)
+            || utils::is_same_or_under(&canonical_str, protected)
+        {
             return false;
         }
     }
-    true
+    !utils::is_critical_path(Path::new(path)) && !utils::is_critical_path(&canonical)
+}
+
+/// Rules whose paths are tool-handled pseudo-URIs rather than filesystem
+/// paths, so `is_safe_path` does not apply to them.
+pub(crate) fn uses_pseudo_paths(rule_id: &str) -> bool {
+    matches!(rule_id, "special_tm_local_snapshots" | "dev_xcode_unavailable_sims")
 }
 
 #[derive(Clone, Serialize)]
@@ -497,4 +504,84 @@ pub fn check_running_processes(rule_ids: Vec<String>) -> Vec<RunningApp> {
     }
 
     running
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{canon, mkdir, s, workspace_tempdir, write_file};
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn system_locations_are_not_safe() {
+        for p in [
+            "/System",
+            "/System/Library/Caches",
+            "/usr/lib/libfoo.dylib",
+            "/bin/ls",
+            "/etc/hosts",
+            "/private/var/db/receipts",
+            "/Applications",
+            "/Applications/Safari.app",
+            "/Library/Frameworks/Foo.framework",
+            "/Library/Extensions/Foo.kext",
+        ] {
+            assert!(!is_safe_path(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn case_variants_of_protected_paths_are_not_safe() {
+        assert!(!is_safe_path("/system/Library/Caches"));
+        assert!(!is_safe_path("/USR/lib"));
+        assert!(!is_safe_path("/applications/Safari.app"));
+    }
+
+    #[test]
+    fn roots_home_and_home_folders_are_not_safe() {
+        assert!(!is_safe_path("/"));
+        assert!(!is_safe_path("/Users"));
+        assert!(!is_safe_path("/Library"));
+        assert!(!is_safe_path("/Volumes"));
+        if let Some(home) = dirs::home_dir() {
+            let h = s(&home);
+            assert!(!is_safe_path(&h));
+            assert!(!is_safe_path(&format!("{h}/")));
+            for d in ["Documents", "Desktop", "Downloads", "Library", "Pictures"] {
+                assert!(!is_safe_path(&format!("{h}/{d}")), "{d}");
+            }
+            assert!(is_safe_path(&format!("{h}/Library/Caches/com.example.app")));
+        }
+    }
+
+    #[test]
+    fn malformed_and_traversal_paths_are_not_safe() {
+        assert!(!is_safe_path(""));
+        assert!(!is_safe_path("/Users/x/../../System"));
+        assert!(!is_safe_path("/Library/Caches/../../System"));
+        assert!(!is_safe_path("/Library/Caches/foo\nbar"));
+    }
+
+    #[test]
+    fn symlink_into_protected_location_is_not_safe() {
+        let dir = workspace_tempdir();
+        let link = dir.path().join("sneaky");
+        symlink("/System/Library", &link).unwrap();
+        assert!(!is_safe_path(&s(&link)));
+
+        let link2 = dir.path().join("to_root");
+        symlink("/", &link2).unwrap();
+        assert!(!is_safe_path(&s(&link2)));
+    }
+
+    #[test]
+    fn ordinary_user_paths_are_safe() {
+        let dir = workspace_tempdir();
+        let f = canon(&dir).join("cache.bin");
+        write_file(&f, 10);
+        mkdir(&canon(&dir).join("sub"));
+        assert!(is_safe_path(&s(&f)));
+        assert!(is_safe_path(&s(&canon(&dir).join("sub"))));
+        assert!(is_safe_path(&s(&canon(&dir).join("not-yet-created"))));
+    }
 }

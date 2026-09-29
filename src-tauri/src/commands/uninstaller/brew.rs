@@ -222,10 +222,10 @@ pub fn brew_binary() -> Option<&'static str> {
     }
 }
 
-/// Uninstalls a Homebrew cask with `brew uninstall --cask --zap <cask>`.
-/// The `--zap` flag removes the payload plus any `zap` stanzas defined by
-/// the cask (caches, preferences, launch agents, etc.), which gets us
-/// closer to a complete uninstall than deleting the .app bundle alone.
+/// Uninstalls a Homebrew cask with `brew uninstall --cask <cask>`.
+/// `--zap` is never passed: zap stanzas delete app data (wallets, VMs,
+/// message history, Steam libraries) without any of Kyra's guards. The
+/// uninstaller's own guarded sweep removes the leftovers instead.
 ///
 /// A size-dependent timeout prevents a broken cask script from hanging
 /// the uninstaller indefinitely: 300s default, 600s for apps >5 GB,
@@ -244,7 +244,7 @@ pub fn uninstall_cask_with_size(
         return Err(format!("invalid cask token: {}", cask));
     }
     if dry_run {
-        return Ok(format!("[dry-run] would brew uninstall --cask --zap {}", cask));
+        return Ok(format!("[dry-run] would brew uninstall --cask {}", cask));
     }
     let brew = brew_binary().ok_or_else(|| "Homebrew not installed".to_string())?;
 
@@ -261,7 +261,7 @@ pub fn uninstall_cask_with_size(
         .env("HOMEBREW_NO_ENV_HINTS", "1")
         .env("HOMEBREW_NO_AUTO_UPDATE", "1")
         .env("NONINTERACTIVE", "1")
-        .args(["uninstall", "--cask", "--zap", cask])
+        .args(["uninstall", "--cask", cask])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -277,7 +277,7 @@ pub fn uninstall_cask_with_size(
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
-                        "brew uninstall --cask --zap {} timed out after {}s",
+                        "brew uninstall --cask {} timed out after {}s",
                         cask, timeout_secs
                     ));
                 }
@@ -295,7 +295,7 @@ pub fn uninstall_cask_with_size(
         Ok(format!("{}{}", stdout, stderr))
     } else {
         Err(format!(
-            "brew uninstall --cask --zap {} failed: {}",
+            "brew uninstall --cask {} failed: {}",
             cask,
             stderr.trim()
         ))
@@ -327,4 +327,47 @@ pub fn is_cask_installed(cask: &str) -> bool {
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout.lines().any(|line| line.trim() == cask)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn cask_tokens_are_strictly_validated() {
+        for ok in ["firefox", "visual-studio-code", "temurin@17", "1password"] {
+            assert!(is_valid_cask_token(ok), "{ok}");
+        }
+        for bad in ["", "Firefox", "-rf", "foo bar", "foo;rm", "../x", "foo/bar", "@foo"] {
+            assert!(!is_valid_cask_token(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn cask_token_is_extracted_only_from_caskrooms() {
+        assert_eq!(
+            extract_cask_token(Path::new("/opt/homebrew/Caskroom/firefox/120.0/Firefox.app")).as_deref(),
+            Some("firefox")
+        );
+        assert_eq!(
+            extract_cask_token(Path::new("/usr/local/Caskroom/iterm2/3.5/iTerm.app")).as_deref(),
+            Some("iterm2")
+        );
+        assert_eq!(extract_cask_token(Path::new("/opt/homebrew/Caskroom/Bad;Token/1/X.app")), None);
+        assert_eq!(extract_cask_token(Path::new("/Applications/Firefox.app")), None);
+        assert_eq!(extract_cask_token(Path::new("/opt/homebrew/CaskroomX/firefox/1/X.app")), None);
+    }
+
+    #[test]
+    fn dangling_symlink_into_caskroom_is_recognised() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("Firefox.app");
+        symlink("/opt/homebrew/Caskroom/firefox/999.kyra-test/Firefox.app", &link).unwrap();
+        assert_eq!(detect_via_symlink_target(&link).as_deref(), Some("firefox"));
+
+        let plain = dir.path().join("Plain.app");
+        std::fs::create_dir(&plain).unwrap();
+        assert_eq!(detect_via_symlink_target(&plain), None);
+    }
 }

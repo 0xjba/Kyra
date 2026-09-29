@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use super::{CleanRule, PathInfo, ScanItem};
+use super::{is_safe_path, uses_pseudo_paths, CleanRule, PathInfo, ScanItem};
 use crate::commands::utils::{deletable_dir_size, dir_size};
 
 // ── Special Scan Functions ───────────────────────────────────────────
@@ -664,100 +664,6 @@ fn scan_orphaned_launch_agents() -> Option<ScanItem> {
     })
 }
 
-/// Chromium-based browsers that keep versioned framework snapshots
-/// under `~/Library/Application Support/<root>/Snapshots/<version>/`.
-/// Only the most recent snapshot is actively used by the running
-/// browser; older ones are retained for rollback and crashpad
-/// symbolication.
-const BROWSER_SNAPSHOT_ROOTS: &[&str] = &[
-    "Google/Chrome",
-    "Google/Chrome Canary",
-    "Google/Chrome Beta",
-    "Google/Chrome Dev",
-    "Microsoft Edge",
-    "Microsoft Edge Beta",
-    "Microsoft Edge Dev",
-    "Microsoft Edge Canary",
-    "BraveSoftware/Brave-Browser",
-    "BraveSoftware/Brave-Browser-Beta",
-    "BraveSoftware/Brave-Browser-Nightly",
-    "Chromium",
-    "Vivaldi",
-    "com.operasoftware.Opera",
-    "Arc",
-];
-
-/// Number of browser framework snapshots to preserve per browser.
-const BROWSER_SNAPSHOT_KEEP: usize = 1;
-
-/// Special scan: enumerate `Snapshots/<version>/` directories under
-/// each known Chromium-based browser's profile root and flag all but
-/// the most recent for deletion.
-fn scan_browser_old_snapshots() -> Option<ScanItem> {
-    let home = dirs::home_dir()?;
-    let app_support = home.join("Library/Application Support");
-
-    let mut paths: Vec<PathInfo> = Vec::new();
-    let mut total_size: u64 = 0;
-
-    for rel in BROWSER_SNAPSHOT_ROOTS {
-        let snapshots_dir = app_support.join(rel).join("Snapshots");
-        if !snapshots_dir.is_dir() {
-            continue;
-        }
-
-        let mut versions: Vec<(PathBuf, SystemTime)> = Vec::new();
-        let entries = match std::fs::read_dir(&snapshots_dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if !p.is_dir() || p.is_symlink() {
-                continue;
-            }
-            let modified = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            versions.push((p, modified));
-        }
-
-        versions.sort_by(|a, b| b.1.cmp(&a.1));
-
-        for (path, _) in versions.into_iter().skip(BROWSER_SNAPSHOT_KEEP) {
-            let size = deletable_dir_size(&path);
-            if size == 0 {
-                continue;
-            }
-            paths.push(PathInfo {
-                path: path.to_string_lossy().to_string(),
-                size,
-                is_dir: true,
-            });
-            total_size += size;
-        }
-    }
-
-    if paths.is_empty() {
-        return None;
-    }
-
-    crate::commands::shared::log_operation(
-        "SCAN",
-        "Browser framework snapshots (old)",
-        &format!("{} bytes ({} paths)", total_size, paths.len()),
-    );
-
-    Some(ScanItem {
-        rule_id: "browser_old_snapshots".into(),
-        category: "Browsers".into(),
-        label: "Browser framework snapshots (old)".into(),
-        paths,
-        total_size,
-    })
-}
-
 /// Number of JetBrains Toolbox IDE builds to preserve per product.
 /// Toolbox keeps older builds around for rollback, but only the most
 /// recent is actively used; each old build is typically 1–2 GB.
@@ -1217,54 +1123,6 @@ fn scan_incomplete_downloads() -> Option<ScanItem> {
     })
 }
 
-/// Scan for browser code signature caches in temp directories.
-fn scan_code_sign_caches() -> Vec<ScanItem> {
-    let mut items = Vec::new();
-    let var_folders = std::path::Path::new("/private/var/folders");
-    if !var_folders.exists() {
-        return items;
-    }
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-
-    // /private/var/folders has a two-level hash structure: /XX/XXXXXXXX/
-    if let Ok(level1) = std::fs::read_dir(var_folders) {
-        'outer: for l1 in level1.flatten() {
-            if std::time::Instant::now() > deadline { break; }
-            if !l1.path().is_dir() { continue; }
-            if let Ok(level2) = std::fs::read_dir(l1.path()) {
-                for l2 in level2.flatten() {
-                    if std::time::Instant::now() > deadline { break 'outer; }
-                    if !l2.path().is_dir() { continue; }
-                    if let Ok(contents) = std::fs::read_dir(l2.path()) {
-                        for entry in contents.flatten() {
-                            let name = entry.file_name().to_string_lossy().to_string();
-                            if name.ends_with(".code_sign_clone") && entry.path().is_dir() {
-                                let size = deletable_dir_size(&entry.path());
-                                if size > 0 {
-                                    items.push(ScanItem {
-                                        rule_id: "code_sign_caches".into(),
-                                        category: "System".into(),
-                                        label: "Browser Code Signature Cache".into(),
-                                        paths: vec![PathInfo {
-                                            path: entry.path().to_string_lossy().to_string(),
-                                            size,
-                                            is_dir: true,
-                                        }],
-                                        total_size: size,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    items
-}
-
 /// Expands `~` at the start of a path to the user's home directory.
 fn expand_home(path: &str) -> Option<PathBuf> {
     if let Some(rest) = path.strip_prefix("~/") {
@@ -1276,21 +1134,27 @@ fn expand_home(path: &str) -> Option<PathBuf> {
     }
 }
 
+#[cfg(test)]
+fn expand_home_glob(path: &str) -> Vec<PathBuf> {
+    expand_home_glob_in(path, dirs::home_dir().as_deref())
+}
+
 /// Like `expand_home`, but supports a single `*` wildcard segment in the path.
 /// For example, `~/Library/.../Profiles/*/cache2` will enumerate all entries
 /// under the `Profiles` directory and return each matching `cache2` child.
 /// Patterns like `~/Downloads/*.part` match files whose names end with `.part`.
 /// If the path contains no `*`, behaves identically to `expand_home` (returns 0 or 1 path).
-fn expand_home_glob(path: &str) -> Vec<PathBuf> {
+/// `~` expands against `home`.
+fn expand_home_glob_in(path: &str, home: Option<&Path>) -> Vec<PathBuf> {
     // First, expand the home directory prefix.
     let expanded_str = if let Some(rest) = path.strip_prefix("~/") {
-        match dirs::home_dir() {
+        match home {
             Some(home) => format!("{}/{}", home.display(), rest),
             None => return Vec::new(),
         }
     } else if path == "~" {
-        match dirs::home_dir() {
-            Some(home) => return vec![home],
+        match home {
+            Some(home) => return vec![home.to_path_buf()],
             None => return Vec::new(),
         }
     } else {
@@ -2038,6 +1902,124 @@ fn scan_xcode_simulator_runtime_volumes() -> Option<ScanItem> {
 
 /// Scans the filesystem for items matching the given rules.
 /// Returns only rules that have at least one existing path with non-zero size.
+/// Collects the existing, non-whitelisted, non-empty paths a standard rule
+/// matches. Returns `None` when nothing matched.
+fn collect_rule_paths(rule: &CleanRule, whitelist: &[String]) -> Option<ScanItem> {
+    collect_rule_paths_in(rule, whitelist, dirs::home_dir().as_deref())
+}
+
+pub(super) fn collect_rule_paths_in(rule: &CleanRule, whitelist: &[String], home: Option<&Path>) -> Option<ScanItem> {
+    let mut found_paths = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for raw_path in &rule.paths {
+        let expanded_paths = expand_home_glob_in(raw_path, home);
+
+        for expanded in expanded_paths {
+            if !expanded.exists() {
+                continue;
+            }
+
+            // Skip whitelisted paths
+            let expanded_str = expanded.to_string_lossy().to_string();
+            if is_whitelisted(&expanded_str, whitelist) {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &expanded_str,
+                    &format!("skipped: on user whitelist (rule: {})", rule.label),
+                );
+                continue;
+            }
+
+            if let Some(max_age_days) = rule.max_age_days {
+                // Age-filtered scanning: only include files older than the threshold
+                if expanded.is_dir() {
+                    let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days);
+                    let before_count = found_paths.len();
+                    for p in old_paths {
+                        if !is_whitelisted(&p.path, whitelist) {
+                            total_size += p.size;
+                            found_paths.push(p);
+                        }
+                    }
+                    let added = found_paths.len() - before_count;
+                    if added > 0 {
+                        crate::commands::shared::log_operation(
+                            "SCAN",
+                            &rule.label,
+                            &format!("age-filter>{} days: {} paths from {}", max_age_days, added, expanded.display()),
+                        );
+                    }
+                }
+            } else {
+                // Standard scanning: include the entire path
+                let size = if expanded.is_dir() {
+                    deletable_dir_size(&expanded)
+                } else {
+                    expanded.metadata().map(|m| m.len()).unwrap_or(0)
+                };
+
+                if size == 0 {
+                    continue;
+                }
+
+                found_paths.push(PathInfo {
+                    path: expanded.to_string_lossy().to_string(),
+                    size,
+                    is_dir: expanded.is_dir(),
+                });
+                total_size += size;
+            }
+        }
+    }
+
+    if found_paths.is_empty() {
+        return None;
+    }
+    crate::commands::shared::log_operation(
+        "SCAN",
+        &rule.label,
+        &format!("{} bytes ({} paths)", total_size, found_paths.len()),
+    );
+    Some(ScanItem {
+        rule_id: rule.id.clone(),
+        category: rule.category.clone(),
+        label: rule.label.clone(),
+        paths: found_paths,
+        total_size,
+    })
+}
+
+/// Drops every path the executor's guard would refuse, so the UI never
+/// offers space that can't be freed. Items left empty are dropped too.
+pub(super) fn drop_guard_refused_paths(items: Vec<ScanItem>) -> Vec<ScanItem> {
+    items
+        .into_iter()
+        .filter_map(|mut item| {
+            if uses_pseudo_paths(&item.rule_id) {
+                return Some(item);
+            }
+            let before = item.paths.len();
+            item.paths.retain(|p| {
+                if !is_safe_path(&p.path) {
+                    return false;
+                }
+                match crate::commands::data_guard::check_general(Path::new(&p.path)) {
+                    Ok(()) => true,
+                    Err(refusal) => {
+                        crate::commands::shared::log_operation("SCAN", &p.path, &format!("skipped: {}", refusal));
+                        false
+                    }
+                }
+            });
+            if item.paths.len() != before {
+                item.total_size = item.paths.iter().map(|p| p.size).sum();
+            }
+            (!item.paths.is_empty()).then_some(item)
+        })
+        .collect()
+}
+
 pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
     let mut results = Vec::new();
@@ -2078,83 +2060,8 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
             }
         }
 
-        let mut found_paths = Vec::new();
-        let mut total_size: u64 = 0;
-
-        for raw_path in &rule.paths {
-            let expanded_paths = expand_home_glob(raw_path);
-
-            for expanded in expanded_paths {
-                if !expanded.exists() {
-                    continue;
-                }
-
-                // Skip whitelisted paths
-                let expanded_str = expanded.to_string_lossy().to_string();
-                if is_whitelisted(&expanded_str, &settings.whitelist) {
-                    crate::commands::shared::log_operation(
-                        "SCAN",
-                        &expanded_str,
-                        &format!("skipped: on user whitelist (rule: {})", rule.label),
-                    );
-                    continue;
-                }
-
-                if let Some(max_age_days) = rule.max_age_days {
-                    // Age-filtered scanning: only include files older than the threshold
-                    if expanded.is_dir() {
-                        let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days);
-                        let before_count = found_paths.len();
-                        for p in old_paths {
-                            if !is_whitelisted(&p.path, &settings.whitelist) {
-                                total_size += p.size;
-                                found_paths.push(p);
-                            }
-                        }
-                        let added = found_paths.len() - before_count;
-                        if added > 0 {
-                            crate::commands::shared::log_operation(
-                                "SCAN",
-                                &rule.label,
-                                &format!("age-filter>{} days: {} paths from {}", max_age_days, added, expanded.display()),
-                            );
-                        }
-                    }
-                } else {
-                    // Standard scanning: include the entire path
-                    let size = if expanded.is_dir() {
-                        deletable_dir_size(&expanded)
-                    } else {
-                        expanded.metadata().map(|m| m.len()).unwrap_or(0)
-                    };
-
-                    if size == 0 {
-                        continue;
-                    }
-
-                    found_paths.push(PathInfo {
-                        path: expanded.to_string_lossy().to_string(),
-                        size,
-                        is_dir: expanded.is_dir(),
-                    });
-                    total_size += size;
-                }
-            }
-        }
-
-        if !found_paths.is_empty() {
-            crate::commands::shared::log_operation(
-                "SCAN",
-                &rule.label,
-                &format!("{} bytes ({} paths)", total_size, found_paths.len()),
-            );
-            results.push(ScanItem {
-                rule_id: rule.id.clone(),
-                category: rule.category.clone(),
-                label: rule.label.clone(),
-                paths: found_paths,
-                total_size,
-            });
+        if let Some(item) = collect_rule_paths(rule, &settings.whitelist) {
+            results.push(item);
         }
     }
 
@@ -2183,9 +2090,6 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
     if let Some(jb_old) = scan_jetbrains_toolbox_old_builds() {
         results.push(jb_old);
     }
-    if let Some(browser_snaps) = scan_browser_old_snapshots() {
-        results.push(browser_snaps);
-    }
     if let Some(orphan_agents) = scan_orphaned_launch_agents() {
         results.push(orphan_agents);
     }
@@ -2202,7 +2106,6 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
         results.push(sim_vols);
     }
     results.extend(scan_browser_old_framework_versions());
-    results.extend(scan_code_sign_caches());
     results.extend(scan_external_volumes_metadata());
     results.extend(scan_service_worker_caches());
     results.extend(scan_dynamic_container_caches());
@@ -2216,7 +2119,7 @@ pub fn scan_rules(rules: &[CleanRule]) -> Vec<ScanItem> {
         results.push(ndk);
     }
 
-    results
+    drop_guard_refused_paths(results)
 }
 
 // ── Service Worker Cache Cleaning ──────────────────────────────────
@@ -2244,12 +2147,11 @@ const PROTECTED_SW_DOMAINS: &[&str] = &[
     "excalidraw.com",
 ];
 
-/// Browser Service Worker cache roots (relative to ~/Library/Application Support).
+/// Editor Service Worker cache roots (relative to ~/Library/Application Support).
+/// Browsers are deliberately absent: their CacheStorage holds PWA offline data.
 const SW_CACHE_ROOTS: &[(&str, &str)] = &[
-    ("Google/Chrome/Default/Service Worker/CacheStorage", "Chrome"),
     ("Code/Service Worker/CacheStorage", "VS Code"),
     ("Cursor/Service Worker/CacheStorage", "Cursor"),
-    ("BraveSoftware/Brave-Browser/Default/Service Worker/CacheStorage", "Brave"),
 ];
 
 /// Scan Service Worker CacheStorage directories across browsers, skipping
@@ -2692,23 +2594,14 @@ const ORPHAN_MIN_AGE_DAYS: u64 = 30;
 /// Minimum size in bytes — skip entries smaller than this.
 const ORPHAN_MIN_SIZE: u64 = 1024; // 1 KB
 
-/// Library subdirectories to scan for orphaned entries.
+/// Library subdirectories to scan for orphaned entries. Only regenerable
+/// caches, logs and window state: app data folders may hold wallets,
+/// message history or saves that outlive the app, so they are never
+/// offered as leftovers.
 const ORPHAN_SCAN_DIRS: &[&str] = &[
-    "Library/Application Support",
     "Library/Caches",
-    "Library/Preferences",
-    "Library/Preferences/ByHost",
-    "Library/Saved Application State",
-    "Library/WebKit",
-    "Library/HTTPStorages",
-    "Library/Containers",
-    "Library/Group Containers",
-    "Library/LaunchAgents",
     "Library/Logs",
-    "Library/Cookies",
-    "Library/Internet Plug-Ins",
-    "Library/Autosave Information",
-    "Library/Application Scripts",
+    "Library/Saved Application State",
 ];
 
 /// Returns true if a `~/Library/Containers/<bundle>/` directory is a
@@ -2746,41 +2639,96 @@ fn mdfind_has_bundle_id(bundle_id: &str) -> bool {
     }
 }
 
-/// Scan .app bundles in a directory and extract their CFBundleIdentifier values.
-fn scan_apps_in_dir(dir: &Path, ids: &mut HashSet<String>) {
+/// Collect CFBundleIdentifier values of .app bundles in `dir`, descending
+/// `depth` levels into plain folders (`/Applications/Setapp`, `Utilities`,
+/// vendor folders).
+fn scan_apps_in_dir(dir: &Path, depth: usize, ids: &mut HashSet<String>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("app") {
-            continue;
-        }
-        let plist_path = path.join("Contents/Info.plist");
-        if let Ok(plist_val) = plist::Value::from_file(&plist_path) {
-            if let Some(dict) = plist_val.as_dictionary() {
-                if let Some(id) = dict.get("CFBundleIdentifier").and_then(|v| v.as_string()) {
-                    ids.insert(id.to_lowercase());
+        if path.extension().and_then(|e| e.to_str()) == Some("app") {
+            let plist_path = path.join("Contents/Info.plist");
+            if let Ok(plist_val) = plist::Value::from_file(&plist_path) {
+                if let Some(dict) = plist_val.as_dictionary() {
+                    if let Some(id) = dict.get("CFBundleIdentifier").and_then(|v| v.as_string()) {
+                        ids.insert(id.to_lowercase());
+                    }
                 }
             }
+            continue;
+        }
+        if depth > 0 && entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            scan_apps_in_dir(&path, depth - 1, ids);
         }
     }
 }
 
-/// Collect bundle IDs from all installed applications.
+/// Bundle ids of every app bundle Spotlight has indexed, wherever it lives.
+/// One query per scan, bounded so a busy index cannot stall scanning.
+fn spotlight_app_bundle_ids() -> HashSet<String> {
+    use std::io::Read;
+    let mut ids = HashSet::new();
+    let mut child = match std::process::Command::new("/usr/bin/mdfind")
+        .args([
+            "-attr",
+            "kMDItemCFBundleIdentifier",
+            "kMDItemContentType == 'com.apple.application-bundle'",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return ids,
+    };
+    let stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(mut out) = stdout {
+            let _ = out.read_to_string(&mut buf);
+        }
+        buf
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+        }
+    }
+    for line in reader.join().unwrap_or_default().lines() {
+        if let Some((_, id)) = line.rsplit_once("kMDItemCFBundleIdentifier = ") {
+            let id = id.trim();
+            if !id.is_empty() && id != "(null)" {
+                ids.insert(id.to_lowercase());
+            }
+        }
+    }
+    ids
+}
+
+/// Collect bundle IDs from all installed applications: the standard
+/// Applications folders (two levels deep, so Setapp and vendor folders are
+/// covered) plus everything Spotlight/LaunchServices has indexed.
 fn collect_installed_bundle_ids() -> HashSet<String> {
     let mut ids = HashSet::new();
-    let system_dirs = ["/Applications", "/System/Applications"];
-
-    for dir in &system_dirs {
-        scan_apps_in_dir(Path::new(dir), &mut ids);
+    for dir in ["/Applications", "/System/Applications"] {
+        scan_apps_in_dir(Path::new(dir), 2, &mut ids);
     }
-
     if let Some(home) = dirs::home_dir() {
-        scan_apps_in_dir(&home.join("Applications"), &mut ids);
+        scan_apps_in_dir(&home.join("Applications"), 2, &mut ids);
     }
-
+    ids.extend(spotlight_app_bundle_ids());
     ids
 }
 
@@ -2875,16 +2823,25 @@ fn looks_like_bundle_id(name_lower: &str) -> bool {
 /// Returns a list of ScanItems, one per orphaned entry found.
 pub fn scan_orphaned_data() -> Vec<ScanItem> {
     let settings = crate::commands::settings::load_settings_internal().unwrap_or_default();
-    let installed_ids = collect_installed_bundle_ids();
-
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return Vec::new(),
     };
+    let installed_ids = collect_installed_bundle_ids();
+    scan_orphaned_data_in(&home, &installed_ids, &settings.whitelist, &mdfind_has_bundle_id)
+}
 
+/// `scan_orphaned_data` against an explicit home, installed-app set and
+/// Spotlight lookup.
+pub(super) fn scan_orphaned_data_in(
+    home: &Path,
+    installed_ids: &HashSet<String>,
+    whitelist: &[String],
+    spotlight_has_bundle: &dyn Fn(&str) -> bool,
+) -> Vec<ScanItem> {
     let mut items = Vec::new();
 
-    for subdir in ORPHAN_SCAN_DIRS {
+    'dirs: for subdir in ORPHAN_SCAN_DIRS {
         let scan_dir = home.join(subdir);
         let entries = match std::fs::read_dir(&scan_dir) {
             Ok(e) => e,
@@ -2893,7 +2850,7 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
 
         for entry in entries.flatten() {
             if items.len() >= MAX_ORPHANED_ITEMS {
-                return items;
+                break 'dirs;
             }
 
             let path = entry.path();
@@ -2920,8 +2877,21 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
                 continue;
             }
 
+            // Browser and other irreplaceable data is never orphaned,
+            // installed or not.
+            if crate::commands::browser_guard::is_browser_bundle_id(&name)
+                || crate::commands::data_guard::bundle_category(&name).is_some()
+            {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &path.to_string_lossy(),
+                    "skipped: protected app data (orphan candidate)",
+                );
+                continue;
+            }
+
             // Skip if it matches an installed app
-            if matches_installed_app(&name_lower, &installed_ids) {
+            if matches_installed_app(&name_lower, installed_ids) {
                 continue;
             }
 
@@ -2942,13 +2912,13 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
             // exists anywhere on disk. `stripped` already has the
             // `.plist` / `.savedstate` / `.binarycookies` suffixes
             // removed so it's the pure bundle ID.
-            if mdfind_has_bundle_id(stripped) {
+            if spotlight_has_bundle(stripped) {
                 continue;
             }
 
             // Skip whitelisted paths
             let path_str = path.to_string_lossy().to_string();
-            if is_whitelisted(&path_str, &settings.whitelist) {
+            if is_whitelisted(&path_str, whitelist) {
                 crate::commands::shared::log_operation(
                     "SCAN",
                     &path_str,
@@ -2959,6 +2929,20 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
 
             // Must be old enough
             if !is_old_enough(&path) {
+                continue;
+            }
+
+            // Anything holding protected data stays, whoever owns it; a
+            // tree too big to inspect stays too.
+            let scan = crate::commands::data_guard::scan_tree(&path, 5, 4_000);
+            if scan != crate::commands::data_guard::TreeScan::Clean
+                || crate::commands::browser_guard::contains_profile_markers(&path, 5)
+            {
+                crate::commands::shared::log_operation(
+                    "SCAN",
+                    &path_str,
+                    &format!("skipped: {:?} (orphan candidate)", scan),
+                );
                 continue;
             }
 
@@ -2995,5 +2979,258 @@ pub fn scan_orphaned_data() -> Vec<ScanItem> {
         }
     }
 
-    items
+    drop_guard_refused_paths(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{canon, mkdir, s, set_age_days, workspace_tempdir, write_file};
+    use std::os::unix::fs::symlink;
+
+    fn rule(paths: &[String], max_age_days: Option<u32>) -> CleanRule {
+        CleanRule {
+            id: "test_rule".into(),
+            category: "Test".into(),
+            label: "Test".into(),
+            paths: paths.to_vec(),
+            max_age_days,
+        }
+    }
+
+    #[test]
+    fn rule_collects_existing_non_empty_paths_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("cache/a.bin"), 2_000);
+        write_file(&root.join("single.log"), 300);
+        mkdir(&root.join("empty"));
+
+        let r = rule(
+            &[
+                s(&root.join("cache")),
+                s(&root.join("single.log")),
+                s(&root.join("empty")),
+                s(&root.join("missing")),
+            ],
+            None,
+        );
+        let item = collect_rule_paths(&r, &[]).unwrap();
+        let got: Vec<&str> = item.paths.iter().map(|p| p.path.as_str()).collect();
+        assert_eq!(got, vec![s(&root.join("cache")), s(&root.join("single.log"))]);
+        assert!(item.paths[0].is_dir);
+        assert!(!item.paths[1].is_dir);
+        assert_eq!(item.paths[1].size, 300);
+        assert_eq!(item.total_size, item.paths.iter().map(|p| p.size).sum::<u64>());
+        assert_eq!(item.rule_id, "test_rule");
+    }
+
+    fn item_with(rule_id: &str, paths: &[(String, u64)]) -> ScanItem {
+        ScanItem {
+            rule_id: rule_id.into(),
+            category: "Test".into(),
+            label: "Test".into(),
+            paths: paths
+                .iter()
+                .map(|(p, size)| PathInfo { path: p.clone(), size: *size, is_dir: true })
+                .collect(),
+            total_size: paths.iter().map(|(_, size)| size).sum(),
+        }
+    }
+
+    #[test]
+    fn scanner_never_reports_paths_the_executor_refuses() {
+        let ok = workspace_tempdir();
+        let ok_path = s(&canon(&ok).join("cache"));
+        write_file(&canon(&ok).join("cache/a.bin"), 10);
+        let refused_tmp = tempfile::tempdir().unwrap();
+        let refused = [
+            s(refused_tmp.path()),
+            "/private/tmp/kyra-test".to_string(),
+            "/private/var/log".to_string(),
+            "/usr/local/var/homebrew/locks".to_string(),
+            "/System/Library/Caches".to_string(),
+            "/Users/x/../../System".to_string(),
+        ];
+
+        let mut mixed: Vec<(String, u64)> = refused.iter().map(|p| (p.clone(), 1_000)).collect();
+        mixed.push((ok_path.clone(), 10));
+        let items = vec![
+            item_with("mixed", &mixed),
+            item_with("all_refused", &refused.iter().map(|p| (p.clone(), 5)).collect::<Vec<_>>()),
+            item_with("special_tm_local_snapshots", &[("tmutil://com.apple.TimeMachine.2024-01-01-000000.local".into(), 7)]),
+        ];
+
+        let kept = drop_guard_refused_paths(items);
+        let ids: Vec<&str> = kept.iter().map(|i| i.rule_id.as_str()).collect();
+        assert_eq!(ids, vec!["mixed", "special_tm_local_snapshots"]);
+        assert_eq!(kept[0].paths.len(), 1);
+        assert_eq!(kept[0].paths[0].path, ok_path);
+        assert_eq!(kept[0].total_size, 10);
+        for item in &kept {
+            if uses_pseudo_paths(&item.rule_id) {
+                continue;
+            }
+            assert!(item.paths.iter().all(|p| is_safe_path(&p.path)));
+        }
+    }
+
+    #[test]
+    fn rule_with_nothing_on_disk_yields_no_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = rule(&[s(&dir.path().join("nothing"))], None);
+        assert!(collect_rule_paths(&r, &[]).is_none());
+    }
+
+    #[test]
+    fn whitelisted_rule_paths_are_excluded() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("a/x.bin"), 100);
+        write_file(&root.join("b/x.bin"), 100);
+        let r = rule(&[s(&root.join("a")), s(&root.join("b"))], None);
+        let item = collect_rule_paths(&r, &[s(&root.join("a"))]).unwrap();
+        assert_eq!(item.paths.len(), 1);
+        assert_eq!(item.paths[0].path, s(&root.join("b")));
+    }
+
+    #[test]
+    fn age_filter_only_picks_old_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("logs");
+        write_file(&root.join("old.log"), 100);
+        write_file(&root.join("new.log"), 100);
+        write_file(&root.join("olddir/x.log"), 100);
+        set_age_days(&root.join("old.log"), 30);
+        set_age_days(&root.join("olddir"), 30);
+        let outside = tempfile::tempdir().unwrap();
+        write_file(&outside.path().join("t.bin"), 100);
+        set_age_days(&outside.path().join("t.bin"), 30);
+        symlink(outside.path().join("t.bin"), root.join("old_link")).unwrap();
+
+        let r = rule(&[s(&root)], Some(7));
+        let item = collect_rule_paths(&r, &[s(&root.join("olddir"))]).unwrap();
+        let got: Vec<&str> = item.paths.iter().map(|p| p.path.as_str()).collect();
+        assert_eq!(got, vec![s(&root.join("old.log"))]);
+
+        let (all_old, _) = scan_with_age_filter(&root, 7);
+        let mut names: Vec<String> = all_old.iter().map(|p| p.path.clone()).collect();
+        names.sort();
+        assert_eq!(names, vec![s(&root.join("old.log")), s(&root.join("olddir"))]);
+    }
+
+    #[test]
+    fn glob_expands_directory_and_file_wildcards() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        mkdir(&root.join("Profiles/p1/cache2"));
+        mkdir(&root.join("Profiles/p2"));
+        write_file(&root.join("Downloads/a.part"), 1);
+        write_file(&root.join("Downloads/b.zip"), 1);
+        write_file(&root.join("Downloads/c.part"), 1);
+
+        let mut dirs_found = expand_home_glob(&format!("{}/Profiles/*/cache2", s(root)));
+        dirs_found.sort();
+        assert_eq!(
+            dirs_found,
+            vec![root.join("Profiles/p1/cache2"), root.join("Profiles/p2/cache2")]
+        );
+
+        let mut parts = expand_home_glob(&format!("{}/Downloads/*.part", s(root)));
+        parts.sort();
+        assert_eq!(parts, vec![root.join("Downloads/a.part"), root.join("Downloads/c.part")]);
+
+        assert!(expand_home_glob(&format!("{}/missing/*/x", s(root))).is_empty());
+        assert_eq!(expand_home_glob("/plain/path"), vec![PathBuf::from("/plain/path")]);
+    }
+
+    #[test]
+    fn home_expansion_only_touches_leading_tilde() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(expand_home("~/Library/Caches"), Some(home.join("Library/Caches")));
+        assert_eq!(expand_home("~"), Some(home.clone()));
+        assert_eq!(expand_home("/tmp/~/x"), Some(PathBuf::from("/tmp/~/x")));
+        assert_eq!(expand_home_glob("~"), vec![home]);
+    }
+
+    #[test]
+    fn scanner_whitelist_is_component_aware() {
+        let wl = vec!["/a/b".to_string()];
+        assert!(is_whitelisted("/a/b", &wl));
+        assert!(is_whitelisted("/a/b/c", &wl));
+        assert!(!is_whitelisted("/a/bc", &wl));
+    }
+
+    #[test]
+    fn version_compare_is_numeric_per_segment() {
+        use std::cmp::Ordering::*;
+        assert_eq!(version_compare("1.10.0", "1.9.9"), Greater);
+        assert_eq!(version_compare("120.0.6099.1", "120.0.6099.1"), Equal);
+        assert_eq!(version_compare("1.2", "1.2.0"), Equal);
+        assert_eq!(version_compare("1.2", "1.2.1"), Less);
+        assert_eq!(version_compare("1.0-beta", "1.0-alpha"), Greater);
+    }
+
+    #[test]
+    fn mounted_volume_detection_covers_subpaths() {
+        let mounts = vec!["/Library/Developer/CoreSimulator/Volumes/iOS_21A/mnt".to_string()];
+        assert!(is_path_mounted(Path::new("/Library/Developer/CoreSimulator/Volumes/iOS_21A"), &mounts));
+        assert!(!is_path_mounted(Path::new("/Library/Developer/CoreSimulator/Volumes/iOS_2"), &mounts));
+        assert!(!is_path_mounted(Path::new("/Library/Developer/CoreSimulator/Volumes/iOS_22B"), &mounts));
+    }
+
+    #[test]
+    fn bundle_id_shape_is_required_for_orphan_candidates() {
+        assert!(looks_like_bundle_id("com.example.app"));
+        assert!(looks_like_bundle_id("io.github.tool"));
+        assert!(!looks_like_bundle_id("google"));
+        assert!(!looks_like_bundle_id("firefox"));
+        assert!(!looks_like_bundle_id("my.folder"));
+        assert!(!looks_like_bundle_id("com"));
+    }
+
+    #[test]
+    fn installed_app_matching_is_permissive() {
+        let ids: HashSet<String> = ["com.google.chrome", "com.bravesoftware.brave-browser"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(matches_installed_app("com.google.chrome", &ids));
+        assert!(matches_installed_app("com.google.chrome.helper", &ids));
+        assert!(matches_installed_app("com.google", &ids));
+        assert!(matches_installed_app("google", &ids));
+        assert!(matches_installed_app("bravesoftware", &ids));
+        assert!(!matches_installed_app("com.unrelated.tool", &ids));
+    }
+
+    #[test]
+    fn sensitive_names_are_never_orphans() {
+        for n in ["com.1password.1password", "com.agilebits.keychain", "org.mozilla.firefox", "io.metamask", "com.apple.dt", "com.docker.docker"] {
+            assert!(is_orphan_protected(n), "{n}");
+        }
+        assert!(!is_orphan_protected("com.example.pdfviewer"));
+    }
+
+    #[test]
+    fn orphan_age_gate_uses_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("fresh");
+        let old = dir.path().join("old");
+        mkdir(&fresh);
+        mkdir(&old);
+        set_age_days(&old, ORPHAN_MIN_AGE_DAYS + 1);
+        assert!(!is_old_enough(&fresh));
+        assert!(is_old_enough(&old));
+        assert!(!is_old_enough(&dir.path().join("missing")));
+    }
+
+    #[test]
+    fn container_stub_needs_marker_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = dir.path().join("com.foo");
+        mkdir(&c);
+        assert!(!is_protected_container_stub(&c));
+        write_file(&c.join(".com.apple.containermanagerd.metadata.plist"), 1);
+        assert!(is_protected_container_stub(&c));
+    }
 }

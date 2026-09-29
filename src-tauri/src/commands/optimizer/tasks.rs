@@ -47,11 +47,11 @@ pub fn all_tasks() -> Vec<OptTask> {
         OptTask {
             id: "sqlite_vacuum".into(),
             name: "Vacuum SQLite Databases".into(),
-            description: "Compact Mail, Messages, and Safari databases to free space".into(),
+            description: "Compact Mail and Messages databases to free space".into(),
             // Command is unused — custom runner handles this task
             command: String::new(),
             needs_admin: false,
-            warning: Some("Mail, Messages, and Safari must be closed".into()),
+            warning: Some("Mail and Messages must be closed".into()),
         },
         OptTask {
             id: "plist_repair".into(),
@@ -200,4 +200,51 @@ pub fn all_tasks() -> Vec<OptTask> {
             warning: None,
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    const CUSTOM_RUNNER_IDS: &[&str] = &[
+        "cache_refresh", "bluetooth_reset", "sqlite_vacuum", "launch_services", "plist_repair",
+        "saved_state", "quarantine_cleanup", "launch_agents_cleanup", "shared_file_list_repair",
+        "notification_cleanup", "coreduet_cleanup", "login_items_audit", "disk_verify",
+    ];
+
+    #[test]
+    fn task_ids_are_unique() {
+        let mut seen = HashSet::new();
+        for t in all_tasks() {
+            assert!(seen.insert(t.id.clone()), "duplicate task {}", t.id);
+            assert!(!t.name.is_empty(), "{}", t.id);
+        }
+    }
+
+    #[test]
+    fn every_task_has_something_to_run() {
+        let tasks = all_tasks();
+        for t in &tasks {
+            assert!(
+                !t.command.trim().is_empty() || CUSTOM_RUNNER_IDS.contains(&t.id.as_str()),
+                "{} has neither a command nor a custom runner",
+                t.id
+            );
+        }
+        let ids: HashSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+        for id in CUSTOM_RUNNER_IDS {
+            assert!(ids.contains(id), "custom runner {id} has no task");
+        }
+    }
+
+    #[test]
+    fn shell_commands_never_delete_broad_roots() {
+        for t in all_tasks() {
+            let c = t.command.replace("  ", " ");
+            for bad in ["rm -rf / ", "rm -rf ~", "rm -rf $HOME", "rm -rf /*", "rm -rf /Users", "rm -rf /Library "] {
+                assert!(!c.contains(bad), "{}: {}", t.id, t.command);
+            }
+        }
+    }
 }

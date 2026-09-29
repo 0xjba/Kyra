@@ -2,9 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use super::{brew, UninstallProgress, UninstallResult};
-use crate::commands::shared;
-use crate::commands::utils::{canonicalize_for_safety, dir_size};
+use super::{brew, is_shared_home_dot_path, KeptItem, UninstallProgress, UninstallResult};
+use crate::commands::{data_guard, shared};
+use crate::commands::utils::{canonicalize_for_safety, dir_size, is_critical_path, is_same_or_under};
 
 /// Paths that must never be deleted.
 const PROTECTED_PATHS: &[&str] = &[
@@ -507,12 +507,17 @@ fn is_safe_path(path: &str) -> bool {
 
     // Block exact protected system paths and their children (literal form).
     for protected in PROTECTED_PATHS {
-        if path == *protected {
+        if path.eq_ignore_ascii_case(protected) {
             return false;
         }
         // Special case: allow /Applications/*.app but block /Applications itself
-        if *protected == "/Applications" && path.starts_with("/Applications/") {
-            let remainder = &path["/Applications/".len()..];
+        let apps_prefix = "/Applications/";
+        if *protected == "/Applications"
+            && path
+                .get(..apps_prefix.len())
+                .is_some_and(|p| p.eq_ignore_ascii_case(apps_prefix))
+        {
+            let remainder = &path[apps_prefix.len()..];
             if remainder.contains('/') {
                 // It's a path inside an app bundle — allow
                 continue;
@@ -522,7 +527,7 @@ fn is_safe_path(path: &str) -> bool {
             }
             continue;
         }
-        if path.starts_with(&format!("{}/", protected)) {
+        if is_same_or_under(path, protected) {
             return false;
         }
     }
@@ -535,10 +540,13 @@ fn is_safe_path(path: &str) -> bool {
         if *protected == "/Applications" {
             continue;
         }
-        let prefix = format!("{}/", protected);
-        if canonical_str == *protected || canonical_str.starts_with(&prefix) {
+        if is_same_or_under(&canonical_str, protected) {
             return false;
         }
+    }
+
+    if is_critical_path(Path::new(path)) || is_critical_path(&canonical) {
+        return false;
     }
 
     // Block home directory itself and key user directories
@@ -550,6 +558,12 @@ fn is_safe_path(path: &str) -> bool {
         for dir in PROTECTED_HOME_DIRS {
             let protected = format!("{}/{}", home_str, dir);
             if path == protected {
+                return false;
+            }
+        }
+        let canonical_home = fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
+        for h in [&home, &canonical_home] {
+            if is_shared_home_dot_path(Path::new(path), h) || is_shared_home_dot_path(&canonical, h) {
                 return false;
             }
         }
@@ -608,12 +622,170 @@ fn try_remove_from_dock(bundle_id: &str) {
     let _ = Command::new("killall").arg("Dock").output();
 }
 
+/// Running totals of an uninstall's file-deletion pass.
+struct Tally {
+    bytes_freed: u64,
+    items_removed: usize,
+    errors: Vec<String>,
+    deleted_paths: Vec<String>,
+    kept: Vec<KeptItem>,
+}
+
+/// Deletes `all_paths` one by one after the safety and browser-data checks.
+fn delete_listed_paths<F>(
+    all_paths: &[&str],
+    bundle_id: &str,
+    dry_run: bool,
+    permanent: bool,
+    t: &mut Tally,
+    on_progress: &mut F,
+) where
+    F: FnMut(&UninstallProgress),
+{
+    let items_total = all_paths.len();
+
+    for (i, path_str) in all_paths.iter().enumerate() {
+        let path = Path::new(path_str);
+
+        // Safety check
+        if !is_safe_path(path_str) {
+            t.errors.push(format!("Skipped protected path: {}", path_str));
+            on_progress(&UninstallProgress {
+                current_item: path_str.to_string(),
+                items_done: i + 1,
+                items_total,
+                bytes_freed: t.bytes_freed,
+            });
+            continue;
+        }
+
+        // Browser profiles survive unless this is that exact browser's
+        // uninstall; wallets, messages, VMs and other data that outlives
+        // the app are kept and reported.
+        if let Err(refusal) = data_guard::check(path, data_guard::DeleteContext::Uninstall { bundle_id }) {
+            shared::log_operation("UNINSTALL", path_str, &format!("SKIPPED: {}", refusal));
+            if refusal.category == data_guard::Category::Browser {
+                t.errors.push(format!("Skipped {}", refusal));
+            } else if !t.kept.iter().any(|k| k.path == refusal.path) {
+                t.kept.push(KeptItem::from_refusal(&refusal));
+            }
+            on_progress(&UninstallProgress {
+                current_item: path_str.to_string(),
+                items_done: i + 1,
+                items_total,
+                bytes_freed: t.bytes_freed,
+            });
+            continue;
+        }
+
+        if !path.exists() {
+            on_progress(&UninstallProgress {
+                current_item: path_str.to_string(),
+                items_done: i + 1,
+                items_total,
+                bytes_freed: t.bytes_freed,
+            });
+            continue;
+        }
+
+        // macOS-managed container stubs can't be removed via rm -rf because
+        // containermanagerd protects them with the com.apple.provenance
+        // xattr. Any user data inside will have been deleted via per-file
+        // entries before we reach this point, so we skip the stub itself
+        // silently — attempting would just trigger a pointless admin prompt
+        // that still ends in failure.
+        if is_protected_container_stub(path_str) {
+            shared::log_operation(
+                "UNINSTALL",
+                path_str,
+                "SKIPPED: protected container stub",
+            );
+            on_progress(&UninstallProgress {
+                current_item: path_str.to_string(),
+                items_done: i + 1,
+                items_total,
+                bytes_freed: t.bytes_freed,
+            });
+            continue;
+        }
+
+        let size = if path.is_dir() {
+            dir_size(path)
+        } else {
+            path.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+
+        if dry_run {
+            t.bytes_freed += size;
+            t.items_removed += 1;
+            t.deleted_paths.push(path_str.to_string());
+        } else {
+            // Stop any launchd service that owns this plist before we
+            // delete the file, otherwise launchd may hold a reference
+            // to a now-missing binary or immediately respawn it.
+            try_launchctl_unload(path_str);
+
+            // Drop the app bundle from the Launch Services database so
+            // it stops showing up in "Open with…" menus and Spotlight.
+            try_lsregister_unregister(path_str);
+
+            let delete_result = if permanent {
+                if path.is_dir() {
+                    fs::remove_dir_all(path)
+                } else {
+                    fs::remove_file(path)
+                }
+            } else {
+                trash::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            };
+            match delete_result {
+                Ok(()) => {
+                    t.bytes_freed += size;
+                    t.items_removed += 1;
+                    t.deleted_paths.push(path_str.to_string());
+                    let action = if permanent { "DELETED" } else { "TRASHED" };
+                    shared::log_operation("UNINSTALL", path_str, action);
+                }
+                Err(e) => {
+                    // If permission denied, retry with admin privileges (osascript prompt)
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        shared::log_operation("UNINSTALL", path_str, "ESCALATING: requesting admin privileges");
+                        match privileged_delete(path_str, permanent) {
+                            Ok(()) => {
+                                t.bytes_freed += size;
+                                t.items_removed += 1;
+                                t.deleted_paths.push(path_str.to_string());
+                                let action = if permanent { "DELETED (admin)" } else { "TRASHED (admin)" };
+                                shared::log_operation("UNINSTALL", path_str, action);
+                            }
+                            Err(priv_e) => {
+                                shared::log_operation("UNINSTALL", path_str, &format!("ERROR: {}", priv_e));
+                                t.errors.push(format!("{}: {}", path_str, priv_e));
+                            }
+                        }
+                    } else {
+                        shared::log_operation("UNINSTALL", path_str, &format!("ERROR: {}", e));
+                        t.errors.push(format!("{}: {}", path_str, e));
+                    }
+                }
+            }
+        }
+
+        on_progress(&UninstallProgress {
+            current_item: path_str.to_string(),
+            items_done: i + 1,
+            items_total,
+            bytes_freed: t.bytes_freed,
+        });
+    }
+
+}
+
 /// Removes the app bundle and selected associated files.
 /// Calls `on_progress` after each item is processed.
 ///
 /// If `brew_cask` is Some, the cask is uninstalled first with
-/// `brew uninstall --cask --zap`, which typically removes both the bundle
-/// and any caches/launch agents the cask declares in its zap stanza.
+/// `brew uninstall --cask` (never `--zap`, which bypasses the data guard).
 /// After that the normal file-deletion loop still runs to pick up any
 /// associated files the cask didn't know about.
 ///
@@ -632,7 +804,7 @@ pub fn remove_app_and_files<F>(
 where
     F: FnMut(&UninstallProgress),
 {
-    let mut bytes_freed: u64 = 0;
+    let bytes_freed: u64 = 0;
     let mut items_removed: usize = 0;
     let mut errors: Vec<String> = Vec::new();
     let mut deleted_paths: Vec<String> = Vec::new();
@@ -678,7 +850,7 @@ where
                 shared::log_operation(
                     "UNINSTALL",
                     app_path,
-                    &format!("brew --zap {}: {}", cask, log_line.lines().next().unwrap_or("ok")),
+                    &format!("brew uninstall {}: {}", cask, log_line.lines().next().unwrap_or("ok")),
                 );
                 // Clean up orphaned brew dependencies in background (30s timeout)
                 std::thread::spawn(|| {
@@ -722,7 +894,7 @@ where
                 shared::log_operation(
                     "UNINSTALL",
                     app_path,
-                    &format!("brew --zap {} failed: {}", cask, e),
+                    &format!("brew uninstall {} failed: {}", cask, e),
                 );
 
                 // 3-way cask-state fallback after brew failure:
@@ -756,7 +928,7 @@ where
                         &format!("brew cask {} still registered, skipping manual .app delete", cask),
                     );
                     errors.push(format!(
-                        "brew uninstall failed: {}. Run `brew uninstall --cask --zap {}` manually.",
+                        "brew uninstall failed: {}. Run `brew uninstall --cask {}` manually.",
                         e, cask
                     ));
                     // Return true to prevent the file-deletion loop from
@@ -775,123 +947,9 @@ where
         all_paths.push(app_path);
     }
 
-    let items_total = all_paths.len();
-
-    for (i, path_str) in all_paths.iter().enumerate() {
-        let path = Path::new(path_str);
-
-        // Safety check
-        if !is_safe_path(path_str) {
-            errors.push(format!("Skipped protected path: {}", path_str));
-            on_progress(&UninstallProgress {
-                current_item: path_str.to_string(),
-                items_done: i + 1,
-                items_total,
-                bytes_freed,
-            });
-            continue;
-        }
-
-        if !path.exists() {
-            on_progress(&UninstallProgress {
-                current_item: path_str.to_string(),
-                items_done: i + 1,
-                items_total,
-                bytes_freed,
-            });
-            continue;
-        }
-
-        // macOS-managed container stubs can't be removed via rm -rf because
-        // containermanagerd protects them with the com.apple.provenance
-        // xattr. Any user data inside will have been deleted via per-file
-        // entries before we reach this point, so we skip the stub itself
-        // silently — attempting would just trigger a pointless admin prompt
-        // that still ends in failure.
-        if is_protected_container_stub(path_str) {
-            shared::log_operation(
-                "UNINSTALL",
-                path_str,
-                "SKIPPED: protected container stub",
-            );
-            on_progress(&UninstallProgress {
-                current_item: path_str.to_string(),
-                items_done: i + 1,
-                items_total,
-                bytes_freed,
-            });
-            continue;
-        }
-
-        let size = if path.is_dir() {
-            dir_size(path)
-        } else {
-            path.metadata().map(|m| m.len()).unwrap_or(0)
-        };
-
-        if dry_run {
-            bytes_freed += size;
-            items_removed += 1;
-            deleted_paths.push(path_str.to_string());
-        } else {
-            // Stop any launchd service that owns this plist before we
-            // delete the file, otherwise launchd may hold a reference
-            // to a now-missing binary or immediately respawn it.
-            try_launchctl_unload(path_str);
-
-            // Drop the app bundle from the Launch Services database so
-            // it stops showing up in "Open with…" menus and Spotlight.
-            try_lsregister_unregister(path_str);
-
-            let delete_result = if permanent {
-                if path.is_dir() {
-                    fs::remove_dir_all(path)
-                } else {
-                    fs::remove_file(path)
-                }
-            } else {
-                trash::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-            };
-            match delete_result {
-                Ok(()) => {
-                    bytes_freed += size;
-                    items_removed += 1;
-                    deleted_paths.push(path_str.to_string());
-                    let action = if permanent { "DELETED" } else { "TRASHED" };
-                    shared::log_operation("UNINSTALL", path_str, action);
-                }
-                Err(e) => {
-                    // If permission denied, retry with admin privileges (osascript prompt)
-                    if e.kind() == std::io::ErrorKind::PermissionDenied {
-                        shared::log_operation("UNINSTALL", path_str, "ESCALATING: requesting admin privileges");
-                        match privileged_delete(path_str, permanent) {
-                            Ok(()) => {
-                                bytes_freed += size;
-                                items_removed += 1;
-                                deleted_paths.push(path_str.to_string());
-                                let action = if permanent { "DELETED (admin)" } else { "TRASHED (admin)" };
-                                shared::log_operation("UNINSTALL", path_str, action);
-                            }
-                            Err(priv_e) => {
-                                shared::log_operation("UNINSTALL", path_str, &format!("ERROR: {}", priv_e));
-                                errors.push(format!("{}: {}", path_str, priv_e));
-                            }
-                        }
-                    } else {
-                        shared::log_operation("UNINSTALL", path_str, &format!("ERROR: {}", e));
-                        errors.push(format!("{}: {}", path_str, e));
-                    }
-                }
-            }
-        }
-
-        on_progress(&UninstallProgress {
-            current_item: path_str.to_string(),
-            items_done: i + 1,
-            items_total,
-            bytes_freed,
-        });
-    }
+    let mut tally = Tally { bytes_freed, items_removed, errors, deleted_paths, kept: Vec::new() };
+    delete_listed_paths(&all_paths, bundle_id, dry_run, permanent, &mut tally, &mut on_progress);
+    let Tally { mut bytes_freed, items_removed, mut errors, mut deleted_paths, kept } = tally;
 
     // Verify deletions — adjust bytes_freed for files that survived
     if !dry_run && !deleted_paths.is_empty() {
@@ -974,6 +1032,363 @@ where
         bytes_freed,
         errors,
         deleted_paths,
+        kept,
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{mkdir, s, write_file};
+    use std::os::unix::fs::symlink;
+
+    fn uninstall_files(paths: &[String], bundle_id: &str) -> Tally {
+        let refs: Vec<&str> = paths.iter().map(|p| p.as_str()).collect();
+        let mut t = Tally { bytes_freed: 0, items_removed: 0, errors: vec![], deleted_paths: vec![], kept: vec![] };
+        delete_listed_paths(&refs, bundle_id, false, true, &mut t, &mut |_| {});
+        t
+    }
+
+    #[test]
+    fn uninstalling_look_alike_apps_never_touches_browser_profiles() {
+        use crate::commands::browser_guard::fixtures;
+        use crate::commands::test_support::{canon, workspace_tempdir};
+        use crate::commands::uninstaller::associated::find_associated_in;
+        let dir = workspace_tempdir();
+        let fx = fixtures::build(&canon(&dir).join("home"));
+        let hostile: Vec<String> = fx.protected.keys().chain(fx.protected_dirs.iter()).map(|p| s(p)).collect();
+
+        for (bundle_id, name) in [
+            ("com.google.Keystone", "Google"),
+            ("com.google.Chrome.helper", "Google Chrome Helper"),
+            ("company.thebrowser.something-else", "Arc"),
+            ("company.thebrowser.dia.helper", "Dia Helper"),
+            ("org.mozilla.nightly", "Firefox Nightly"),
+            ("com.microsoft.edgemac.Beta", "Microsoft Edge Beta"),
+            ("com.apple.SafariTechnologyPreview", "Safari Technology Preview"),
+            ("com.kagi.kagimacOS.RC", "Orion RC"),
+            ("net.imput.helium.beta", "Helium Beta"),
+        ] {
+            let found: Vec<String> = find_associated_in(bundle_id, name, "", &fx.home, false)
+                .into_iter()
+                .map(|f| f.path)
+                .collect();
+            for p in &found {
+                for file in fx.protected.keys() {
+                    assert!(!file.starts_with(p), "uninstalling {bundle_id} offers {p}");
+                }
+            }
+            let mut all = found;
+            all.extend(hostile.iter().cloned());
+            let t = uninstall_files(&all, bundle_id);
+            fx.assert_profiles_intact();
+            assert!(t.errors.iter().any(|e| e.contains(crate::commands::browser_guard::ERROR_CODE)));
+        }
+    }
+
+    #[test]
+    fn uninstalling_apps_never_deletes_data_that_outlives_them() {
+        use crate::commands::data_guard::fixtures;
+        use crate::commands::test_support::{canon, workspace_tempdir};
+        use crate::commands::uninstaller::associated::discover_in;
+        let dir = workspace_tempdir();
+        let fx = fixtures::build(&canon(&dir).join("home"));
+        let hostile: Vec<String> = fixtures::PROTECTED
+            .iter()
+            .map(|rel| s(&fx.path(rel)))
+            .chain(fx.protected_dirs.iter().map(|p| s(p)))
+            .collect();
+
+        for (bundle_id, name, must_keep) in [
+            ("org.whispersystems.signal-desktop", "Signal", &["Library/Application Support/Signal"][..]),
+            ("org.whispersystems.signal-desktop.beta", "Signal Beta", &["Library/Application Support/Signal"]),
+            ("org.electrum.electrum", "Electrum", &[".electrum"]),
+            ("com.ledger.live", "Ledger Live", &["Library/Application Support/Ledger Live"]),
+            ("com.bitwarden.desktop", "Bitwarden", &["Library/Application Support/Bitwarden"]),
+            ("ru.keepcoder.Telegram", "Telegram", &["Library/Group Containers/6N38VWS5BX.ru.keepcoder.Telegram"]),
+            ("com.tinyspeck.slackmacgap", "Slack", &["Library/Application Support/Slack"]),
+            ("com.hnc.Discord", "Discord", &["Library/Application Support/discord"]),
+            ("com.utmapp.UTM", "UTM", &["Library/Containers/com.utmapp.UTM"]),
+            ("com.valvesoftware.steam", "Steam", &["Library/Application Support/Steam"]),
+            ("com.google.android.studio", "Android Studio", &[".android/avd"]),
+            ("com.huawei.deveco.studio", "DevEco Studio", &[]),
+            ("com.xcodesorg.xcodesapp", "Xcodes", &[]),
+            ("com.getdropbox.dropbox", "Dropbox", &[]),
+            ("md.obsidian", "Obsidian", &[]),
+            ("com.example.community", "Community", &[]),
+        ] {
+            let found = discover_in(bundle_id, name, "", &fx.home, false);
+            for f in &found.files {
+                for file in fx.protected.keys() {
+                    assert!(!file.starts_with(&f.path), "uninstalling {name} offers {} which holds {}", f.path, s(file));
+                }
+            }
+            let kept: Vec<&str> = found.kept.iter().map(|k| k.path.as_str()).collect();
+            for rel in must_keep {
+                assert!(kept.contains(&s(&fx.path(rel)).as_str()), "{name}: {rel} not reported kept: {kept:#?}");
+            }
+            assert!(found.kept.iter().all(|k| k.message.starts_with("Kept your ")));
+
+            let mut all: Vec<String> = found.files.iter().map(|f| f.path.clone()).collect();
+            all.extend(hostile.iter().cloned());
+            let t = uninstall_files(&all, bundle_id);
+            fx.assert_intact();
+            assert!(!t.kept.is_empty(), "{name}: refusals must be reported as kept");
+        }
+    }
+
+    #[test]
+    fn uninstalling_an_electron_app_still_removes_its_own_data() {
+        use crate::commands::test_support::{canon, workspace_tempdir};
+        use crate::commands::uninstaller::associated::discover_in;
+        let dir = workspace_tempdir();
+        let home = canon(&dir).join("home");
+        let data = home.join("Library/Application Support/Postman");
+        write_file(&data.join("Local State"), 10);
+        write_file(&data.join("Preferences"), 10);
+        write_file(&data.join("IndexedDB/x/000003.log"), 10);
+        let found = discover_in("com.postmanlabs.mac", "Postman", "", &home, false);
+        assert_eq!(found.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), vec![s(&data)]);
+        assert!(found.kept.is_empty());
+    }
+
+    #[test]
+    fn uninstalling_a_browser_removes_only_its_own_data() {
+        use crate::commands::browser_guard::fixtures;
+        use crate::commands::test_support::{canon, workspace_tempdir};
+        let dir = workspace_tempdir();
+        let fx = fixtures::build(&canon(&dir).join("home"));
+        let own = [
+            fx.home.join("Library/Application Support/Arc"),
+            fx.home.join("Library/Saved Application State/company.thebrowser.Browser.savedState"),
+            fx.home.join("Library/Preferences/company.thebrowser.Browser.plist"),
+            fx.home.join("Library/Group Containers/S6N382Y83G.company.thebrowser.Browser"),
+        ];
+        let others = [
+            fx.home.join("Library/Application Support/Dia"),
+            fx.home.join("Library/Application Support/Google/Chrome"),
+            fx.home.join("Library/Saved Application State/com.google.Chrome.savedState"),
+        ];
+        let paths: Vec<String> = own.iter().chain(others.iter()).map(|p| s(p)).collect();
+
+        let t = uninstall_files(&paths, "company.thebrowser.Browser");
+
+        for p in &own {
+            assert!(!p.exists(), "{}", p.display());
+        }
+        for p in &others {
+            assert!(p.exists(), "{}", p.display());
+        }
+        assert_eq!(t.items_removed, 4, "{:?}", t.errors);
+    }
+
+    #[test]
+    fn system_and_root_paths_are_not_safe() {
+        for p in [
+            "/",
+            "/System",
+            "/System/Applications/Mail.app",
+            "/usr/bin/python3",
+            "/USR/BIN/python3",
+            "/Library",
+            "/Library/Frameworks/Foo.framework",
+            "/Users",
+            "/Volumes",
+            "/etc/hosts",
+        ] {
+            assert!(!is_safe_path(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn applications_folder_allows_only_app_bundles() {
+        assert!(!is_safe_path("/Applications"));
+        assert!(!is_safe_path("/Applications/"));
+        assert!(!is_safe_path("/Applications/Utilities"));
+        assert!(!is_safe_path("/applications/Utilities"));
+        assert!(!is_safe_path("/Applications/readme.txt"));
+        assert!(is_safe_path("/Applications/NotInstalledKyraTest.app"));
+        assert!(is_safe_path("/Applications/NotInstalledKyraTest.app/Contents/Info.plist"));
+    }
+
+    #[test]
+    fn home_and_home_folders_are_not_safe() {
+        let home = dirs::home_dir().unwrap();
+        let h = s(&home);
+        assert!(!is_safe_path(&h));
+        assert!(!is_safe_path(&format!("{h}/")));
+        for d in ["Desktop", "Documents", "Downloads", "Library", "Pictures", "Music", "Movies", "Public"] {
+            assert!(!is_safe_path(&format!("{h}/{d}")), "{d}");
+            assert!(!is_safe_path(&format!("{h}/{}", d.to_lowercase())), "{d}");
+        }
+        assert!(is_safe_path(&format!("{h}/Library/Caches/com.example.kyra-test")));
+        assert!(is_safe_path(&format!("{h}/Library/Preferences/com.example.kyra-test.plist")));
+    }
+
+    #[test]
+    fn shared_home_dot_entries_are_not_safe() {
+        let h = s(&dirs::home_dir().unwrap());
+        for rel in [
+            ".ssh", ".SSH", ".ssh/", "./.ssh", ".ssh/id_ed25519", ".gnupg", ".config", ".local",
+            ".local/share", ".cache", ".aws", ".aws/credentials", ".kube", ".docker", ".npm",
+            ".cargo", ".rustup", ".gitconfig", ".zshrc", ".bashrc", ".bash_profile", ".profile",
+            ".zprofile", ".Trash", ".vscode", ".git", ".go",
+        ] {
+            assert!(!is_safe_path(&format!("{h}/{rel}")), "{rel}");
+        }
+        assert!(is_safe_path(&format!("{h}/.config/kyra-test-app")));
+        assert!(is_safe_path(&format!("{h}/.kyra-test-app")));
+    }
+
+    #[test]
+    fn dry_run_uninstall_refuses_shared_home_dot_entries() {
+        let h = s(&dirs::home_dir().unwrap());
+        let paths: Vec<String> = [".ssh", ".config", ".zshrc", ".aws/credentials"]
+            .iter()
+            .map(|rel| format!("{h}/{rel}"))
+            .collect();
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Foo.app");
+        write_file(&app.join("Contents/MacOS/foo"), 10);
+        let result = remove_app_and_files(&s(&app), &paths, "", None, true, false, |_| {});
+        assert_eq!(result.deleted_paths, vec![s(&app)]);
+        for p in &paths {
+            assert!(result.errors.iter().any(|e| e.contains(p.as_str())), "{p}");
+        }
+    }
+
+    #[test]
+    fn malformed_and_traversal_paths_are_not_safe() {
+        assert!(!is_safe_path(""));
+        assert!(!is_safe_path("/Applications/Foo.app/../../System"));
+        assert!(!is_safe_path("/Users/x/Library/Caches/../../../../usr"));
+        assert!(!is_safe_path("/tmp/evil\n/System"));
+    }
+
+    #[test]
+    fn symlinks_are_judged_by_where_they_point() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_system = dir.path().join("Evil.app");
+        symlink("/System/Library", &to_system).unwrap();
+        assert!(!is_safe_path(&s(&to_system)));
+
+        let to_apps = dir.path().join("apps");
+        symlink("/Applications", &to_apps).unwrap();
+        assert!(!is_safe_path(&s(&to_apps)));
+
+        let to_home = dir.path().join("home");
+        symlink(dirs::home_dir().unwrap(), &to_home).unwrap();
+        assert!(!is_safe_path(&s(&to_home)));
+
+        let ok = dir.path().join("cache");
+        mkdir(&ok);
+        assert!(is_safe_path(&s(&ok)));
+    }
+
+    #[test]
+    fn dry_run_uninstall_skips_protected_paths_and_deletes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Foo.app");
+        write_file(&app.join("Contents/MacOS/foo"), 4_000);
+        let support = dir.path().join("support/com.example.foo");
+        write_file(&support.join("data.bin"), 2_000);
+        let home = s(&dirs::home_dir().unwrap());
+
+        let files = vec![
+            s(&support),
+            "/".to_string(),
+            "/System/Library".to_string(),
+            home.clone(),
+            format!("{home}/Documents"),
+            s(&dir.path().join("already-gone")),
+        ];
+        let mut progress = Vec::new();
+        let result = remove_app_and_files(&s(&app), &files, "", None, true, true, |p| {
+            progress.push(p.items_done)
+        });
+
+        assert_eq!(result.items_removed, 2);
+        assert_eq!(result.deleted_paths, vec![s(&support), s(&app)]);
+        assert!(result.bytes_freed >= 6_000);
+        assert_eq!(
+            result.errors.iter().filter(|e| e.starts_with("Skipped protected path")).count(),
+            4,
+            "{:?}",
+            result.errors
+        );
+        assert_eq!(progress, (1..=files.len() + 1).collect::<Vec<_>>());
+        assert!(app.join("Contents/MacOS/foo").exists());
+        assert!(support.join("data.bin").exists());
+    }
+
+    #[test]
+    fn local_network_usage_is_read_from_info_plist() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Net.app");
+        mkdir(&app.join("Contents"));
+        let plist_path = app.join("Contents/Info.plist");
+
+        let mut dict = plist::Dictionary::new();
+        dict.insert("CFBundleExecutable".into(), plist::Value::String("NetBin".into()));
+        plist::Value::Dictionary(dict.clone()).to_file_xml(&plist_path).unwrap();
+        assert!(!declares_local_network_usage(&s(&app)));
+        assert_eq!(read_bundle_executable_name(&s(&app)).as_deref(), Some("NetBin"));
+
+        dict.insert("NSBonjourServices".into(), plist::Value::Array(vec![]));
+        plist::Value::Dictionary(dict).to_file_xml(&plist_path).unwrap();
+        assert!(declares_local_network_usage(&s(&app)));
+
+        let result = remove_app_and_files(&s(&app), &[], "", None, true, true, |_| {});
+        assert!(result.errors.iter().any(|e| e.contains("Local Network")));
+        assert!(app.exists());
+
+        assert!(!declares_local_network_usage(&s(&dir.path().join("Missing.app"))));
+        assert_eq!(read_bundle_executable_name(&s(&dir.path().join("Missing.app"))), None);
+    }
+
+    #[test]
+    fn container_stub_needs_containers_path_and_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("Library/Containers/com.example.foo");
+        mkdir(&stub);
+        assert!(!is_protected_container_stub(&s(&stub)));
+        write_file(&stub.join(".com.apple.containermanagerd.metadata.plist"), 1);
+        assert!(is_protected_container_stub(&s(&stub)));
+
+        let elsewhere = dir.path().join("Other/com.example.foo");
+        write_file(&elsewhere.join(".com.apple.containermanagerd.metadata.plist"), 1);
+        assert!(!is_protected_container_stub(&s(&elsewhere)));
+    }
+
+    #[test]
+    fn launchd_plist_detection() {
+        assert!(is_launchd_plist("/Library/LaunchDaemons/com.foo.helper.plist"));
+        assert!(is_launchd_plist("/Users/x/Library/LaunchAgents/com.foo.plist"));
+        assert!(is_launchd_plist("/Library/PrivilegedHelperTools/com.foo.plist"));
+        assert!(!is_launchd_plist("/Library/LaunchDaemons/com.foo.helper"));
+        assert!(!is_launchd_plist("/Users/x/Library/Preferences/com.foo.plist"));
+    }
+
+    #[test]
+    fn shell_and_applescript_escaping_neutralise_quotes() {
+        assert_eq!(shell_escape("/tmp/a b"), "'/tmp/a b'");
+        assert_eq!(shell_escape("/tmp/it's"), "'/tmp/it'\\''s'");
+        assert_eq!(shell_escape("/tmp/$(rm -rf ~)"), "'/tmp/$(rm -rf ~)'");
+        assert_eq!(applescript_escape(r#"My "App""#), r#"My \"App\""#);
+        assert_eq!(applescript_escape(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn system_apps_are_recognised() {
+        assert!(is_system_app("/System/Applications/Mail.app"));
+        assert!(!is_system_app("/Applications/Mail.app"));
+    }
+
+    #[test]
+    fn invalid_bundle_ids_never_reach_system_extension_lookup() {
+        assert!(!has_system_extensions(""));
+        assert!(!has_system_extensions("../../etc"));
+        assert!(!has_system_extensions("com.foo;rm"));
+    }
+}

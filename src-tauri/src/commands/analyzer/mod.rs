@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 
+use crate::commands::utils;
+
 /// L1 in-memory scan cache — avoids re-scanning within 5 minutes.
 static SCAN_CACHE: std::sync::LazyLock<Mutex<HashMap<String, (Instant, DirNode)>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -277,108 +279,18 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// `allow_browser_data` is the user's explicit confirmation to delete data
+/// the guard protects (browser profiles, wallets, message history, cloud
+/// folders, ...); without it such paths fail with an error starting with
+/// `browser_guard::ERROR_CODE` or `data_guard::ERROR_CODE`. The Analyzer is
+/// the only module that can delete protected data at all.
 #[tauri::command]
-pub async fn delete_analyzed_item(path: String, permanent: bool) -> Result<u64, String> {
-    // Canonicalize to prevent symlink traversal
-    let canonical = std::fs::canonicalize(&path)
-        .map_err(|e| format!("Cannot resolve path: {}", e))?;
-    let path = canonical.to_string_lossy().to_string();
-    let p = Path::new(&path);
-    if !p.exists() {
-        return Err("Path does not exist".into());
-    }
-
-    // Safety: don't delete system paths
-    let protected = ["/System", "/bin", "/sbin", "/usr", "/etc", "/var", "/Applications", "/Library"];
-    for prot in &protected {
-        if path == *prot || path.starts_with(&format!("{}/", prot)) {
-            return Err(format!("Cannot delete protected path: {}", path));
-        }
-    }
-
-    // Don't delete home directory
-    if let Some(home) = dirs::home_dir() {
-        if path == home.to_string_lossy() {
-            return Err("Cannot delete home directory".into());
-        }
-    }
-
-    let size = if p.is_dir() {
-        let s = crate::commands::utils::dir_size(p);
-        if s == 0 {
-            // Fallback to du if metadata traversal returns 0 (30s timeout)
-            let du_result = std::process::Command::new("du")
-                .args(["-sk", &path])
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .ok()
-                .and_then(|mut child| {
-                    let start = std::time::Instant::now();
-                    let timeout = std::time::Duration::from_secs(30);
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(_)) => break child.wait_with_output().ok(),
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    let _ = child.kill();
-                                    let _ = child.wait();
-                                    break None;
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                            Err(_) => break None,
-                        }
-                    }
-                });
-            du_result
-                .and_then(|o| {
-                    String::from_utf8_lossy(&o.stdout)
-                        .split_whitespace()
-                        .next()?
-                        .parse::<u64>()
-                        .ok()
-                        .map(|kb| kb * 1024)
-                })
-                .unwrap_or(0)
-        } else {
-            s
-        }
-    } else {
-        p.metadata().map(|m| m.len()).unwrap_or(0)
-    };
-
-    if permanent {
-        if p.is_dir() {
-            std::fs::remove_dir_all(p).map_err(|e| e.to_string())?;
-        } else {
-            std::fs::remove_file(p).map_err(|e| e.to_string())?;
-        }
-    } else {
-        trash::delete(p).map_err(|e| e.to_string())?;
-    }
-
-    crate::commands::shared::log_operation(
-        "ANALYZE_DELETE",
-        &path,
-        if permanent { "DELETED" } else { "TRASHED" },
-    );
-
-    // Invalidate L1 in-memory cache entries containing this path
-    if let Ok(mut mem_cache) = SCAN_CACHE.lock() {
-        mem_cache.retain(|_, (_, node)| {
-            node.path != path && !path.starts_with(&format!("{}/", node.path))
-                && !node.path.starts_with(&format!("{}/", path))
-        });
-    }
-
-    // Invalidate L2 disk cache entries (async to avoid blocking)
-    let deleted = path.clone();
-    std::thread::spawn(move || {
-        cache::invalidate_path(&deleted);
-    });
-
-    Ok(size)
+pub async fn delete_analyzed_item(
+    path: String,
+    permanent: bool,
+    allow_browser_data: Option<bool>,
+) -> Result<u64, String> {
+    delete_single_item(&path, permanent, allow_browser_data.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -391,39 +303,48 @@ pub async fn find_large_files(min_size_mb: u64, search_path: Option<String>) -> 
 
     let mut files: Vec<LargeFile> = Vec::new();
 
-    let output = {
+    // Drain stdout on a thread: a full pipe would block mdfind until the timeout killed it.
+    let output: Option<String> = {
+        use std::io::Read;
         use std::time::{Duration, Instant};
         let start = Instant::now();
         let mut child = match std::process::Command::new("mdfind")
             .args(["-onlyin", &scope, &query])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .spawn()
         {
             Ok(c) => c,
             Err(_) => return files,
         };
+        let mut stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => return files,
+        };
+        let reader = std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = stdout.read_to_string(&mut buf);
+            buf
+        });
 
         let timeout = Duration::from_secs(5);
         loop {
             match child.try_wait() {
-                Ok(Some(_)) => break child.wait_with_output().ok(),
-                Ok(None) => {
-                    if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break None;
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
+                Ok(Some(_)) => break,
+                Ok(None) if start.elapsed() > timeout => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
                 }
-                Err(_) => break None,
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(_) => break,
             }
         }
+        reader.join().ok()
     };
 
-    if let Some(o) = output {
-        let text = String::from_utf8_lossy(&o.stdout);
-        for line in text.lines().take(200) {
+    if let Some(text) = output {
+        for line in text.lines().take(5000) {
             let path = Path::new(line);
             if !path.exists() || path.is_dir() {
                 continue;
@@ -465,7 +386,7 @@ pub async fn find_large_files(min_size_mb: u64, search_path: Option<String>) -> 
     }
 
     files.sort_by(|a, b| b.size.cmp(&a.size));
-    files.truncate(20);
+    files.truncate(50);
     files
 }
 
@@ -897,7 +818,9 @@ pub async fn delete_analyzed_items(
     app: tauri::AppHandle,
     paths: Vec<String>,
     permanent: bool,
+    allow_browser_data: Option<bool>,
 ) -> Result<u64, String> {
+    let allow_browser_data = allow_browser_data.unwrap_or(false);
     if paths.is_empty() {
         return Ok(0);
     }
@@ -933,7 +856,7 @@ pub async fn delete_analyzed_items(
             continue;
         }
 
-        match delete_single_item(path_str, permanent).await {
+        match delete_single_item(path_str, permanent, allow_browser_data).await {
             Ok(size) => total_size += size,
             Err(e) => errors.push(format!("{}: {}", path_str, e)),
         }
@@ -958,52 +881,87 @@ pub async fn delete_analyzed_items(
     Ok(total_size)
 }
 
+/// Absolute paths the analyzer never deletes, nor anything inside them.
+/// `/etc` and `/var` are listed in their resolved `/private` form too,
+/// since targets are compared after symlink resolution.
+const ANALYZER_PROTECTED: &[&str] = &[
+    "/System",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/etc",
+    "/var",
+    "/private/etc",
+    "/private/var",
+    "/Applications",
+    "/Library",
+];
+
+/// Resolves a frontend-supplied path to the entry that would actually be
+/// removed and refuses protected locations. A symlink resolves to the link
+/// itself (in its real parent directory), never to what it points at.
+fn resolve_delete_target(path: &str) -> Result<PathBuf, String> {
+    let literal = Path::new(path);
+    let meta =
+        std::fs::symlink_metadata(literal).map_err(|e| format!("Cannot resolve path: {}", e))?;
+    let target = if meta.file_type().is_symlink() {
+        let name = literal.file_name().ok_or("Cannot resolve path")?;
+        let parent = literal.parent().filter(|p| !p.as_os_str().is_empty()).ok_or("Cannot resolve path")?;
+        std::fs::canonicalize(parent)
+            .map_err(|e| format!("Cannot resolve path: {}", e))?
+            .join(name)
+    } else {
+        std::fs::canonicalize(literal).map_err(|e| format!("Cannot resolve path: {}", e))?
+    };
+
+    let target_str = target.to_string_lossy();
+    if ANALYZER_PROTECTED.iter().any(|p| utils::is_same_or_under(&target_str, p)) {
+        return Err(format!("Cannot delete protected path: {}", target_str));
+    }
+    if utils::is_critical_path(&target) || utils::is_critical_path(literal) {
+        return Err(format!("Cannot delete protected path: {}", target_str));
+    }
+    Ok(target)
+}
+
+/// Removes a resolved target. Symlinks are unlinked, not followed.
+fn remove_target(p: &Path, permanent: bool) -> Result<(), String> {
+    let is_real_dir = std::fs::symlink_metadata(p).map(|m| m.is_dir()).map_err(|e| e.to_string())?;
+    if permanent {
+        if is_real_dir {
+            std::fs::remove_dir_all(p).map_err(|e| e.to_string())
+        } else {
+            std::fs::remove_file(p).map_err(|e| e.to_string())
+        }
+    } else {
+        trash::delete(p).map_err(|e| e.to_string())
+    }
+}
+
 /// Internal helper for deleting a single item (used by both single and batch delete).
-async fn delete_single_item(path: &str, permanent: bool) -> Result<u64, String> {
-    // Canonicalize to prevent symlink traversal
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|e| format!("Cannot resolve path: {}", e))?;
-    let path = canonical.to_string_lossy().to_string();
-    let p = Path::new(&path);
-
-    if !p.exists() {
-        return Err("Path does not exist".into());
+async fn delete_single_item(path: &str, permanent: bool, allow_browser_data: bool) -> Result<u64, String> {
+    let target = resolve_delete_target(path)?;
+    if !allow_browser_data {
+        crate::commands::data_guard::check_general(Path::new(path))
+            .and_then(|_| crate::commands::data_guard::check_general(&target))
+            .map_err(|refusal| refusal.to_string())?;
     }
+    let path = target.to_string_lossy().to_string();
+    let p = target.as_path();
 
-    // Safety: don't delete system paths
-    let protected = ["/System", "/bin", "/sbin", "/usr", "/etc", "/var", "/Applications", "/Library"];
-    for prot in &protected {
-        if path == *prot || path.starts_with(&format!("{}/", prot)) {
-            return Err(format!("Cannot delete protected path: {}", path));
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        if path == home.to_string_lossy() {
-            return Err("Cannot delete home directory".into());
-        }
-    }
-
-    let size = if p.is_dir() {
-        let s = crate::commands::utils::dir_size(p);
+    let meta = std::fs::symlink_metadata(p).map_err(|_| "Path does not exist".to_string())?;
+    let size = if meta.is_dir() {
+        let s = utils::dir_size(p);
         if s == 0 {
             run_du(&path).unwrap_or(0)
         } else {
             s
         }
     } else {
-        p.metadata().map(|m| m.len()).unwrap_or(0)
+        meta.len()
     };
 
-    if permanent {
-        if p.is_dir() {
-            std::fs::remove_dir_all(p).map_err(|e| e.to_string())?;
-        } else {
-            std::fs::remove_file(p).map_err(|e| e.to_string())?;
-        }
-    } else {
-        trash::delete(p).map_err(|e| e.to_string())?;
-    }
+    remove_target(p, permanent)?;
 
     crate::commands::shared::log_operation(
         "ANALYZE_DELETE",
@@ -1024,4 +982,180 @@ async fn delete_single_item(path: &str, permanent: bool) -> Result<u64, String> 
     });
 
     Ok(size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::{canon, s, workspace_tempdir, write_file};
+    use std::os::unix::fs::symlink;
+
+    fn refused(path: &str) -> bool {
+        resolve_delete_target(path).is_err()
+    }
+
+    #[test]
+    fn browser_profiles_need_explicit_confirmation() {
+        let dir = workspace_tempdir();
+        let profile = canon(&dir).join("Library/Application Support/Google/Chrome/Default");
+        write_file(&profile.join("Login Data"), 10);
+        let cache = profile.join("Cache");
+        write_file(&cache.join("f_000001"), 10);
+
+        let err = tauri::async_runtime::block_on(delete_single_item(&s(&profile), true, false)).unwrap_err();
+        assert!(err.starts_with("browser_profile_data:"), "{err}");
+        assert!(profile.join("Login Data").exists());
+
+        tauri::async_runtime::block_on(delete_single_item(&s(&cache), true, false)).unwrap();
+        assert!(!cache.exists(), "cache leaves need no confirmation");
+
+        tauri::async_runtime::block_on(delete_single_item(&s(&profile), true, true)).unwrap();
+        assert!(!profile.exists());
+    }
+
+    #[test]
+    fn protected_user_data_needs_explicit_confirmation() {
+        use crate::commands::data_guard::fixtures;
+        let dir = workspace_tempdir();
+        let fx = fixtures::build(&canon(&dir).join("home"));
+        for rel in [
+            ".electrum",
+            "Library/Messages",
+            "Library/Application Support/MobileSync/Backup",
+            "Library/Mobile Documents/com~apple~CloudDocs/Taxes/2025.pdf",
+            "Documents/Vault",
+            "Pictures/Photos Library.photoslibrary",
+        ] {
+            let err = tauri::async_runtime::block_on(delete_single_item(&s(&fx.path(rel)), true, false)).unwrap_err();
+            assert!(err.starts_with("protected_user_data:"), "{rel}: {err}");
+        }
+        fx.assert_intact();
+
+        let cache = fx.path("Library/Application Support/Signal/Cache");
+        tauri::async_runtime::block_on(delete_single_item(&s(&cache), true, false)).unwrap();
+        assert!(!cache.exists(), "cache leaves need no confirmation");
+
+        let taxes = fx.path("Library/Mobile Documents/com~apple~CloudDocs/Taxes/2025.pdf");
+        tauri::async_runtime::block_on(delete_single_item(&s(&taxes), true, true)).unwrap();
+        assert!(!taxes.exists());
+    }
+
+    #[test]
+    fn system_locations_are_refused() {
+        for p in [
+            "/",
+            "/System/Library",
+            "/SYSTEM/Library",
+            "/usr/bin",
+            "/bin/ls",
+            "/etc/hosts",
+            "/var/log",
+            "/private/var/db",
+            "/tmp",
+            "/Applications",
+            "/Library/Caches",
+            "/Users",
+        ] {
+            assert!(refused(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn home_and_home_folders_are_refused() {
+        let home = dirs::home_dir().unwrap();
+        assert!(refused(&s(&home)));
+        assert!(refused(&format!("{}/", s(&home))));
+        for d in ["Documents", "Desktop", "Downloads", "Library", "Pictures"] {
+            if home.join(d).exists() {
+                assert!(refused(&s(&home.join(d))), "{d}");
+            }
+        }
+    }
+
+    #[test]
+    fn missing_and_empty_paths_are_refused() {
+        let dir = workspace_tempdir();
+        assert!(refused(&s(&dir.path().join("missing"))));
+        assert!(refused(""));
+    }
+
+    #[test]
+    fn traversal_to_root_is_refused() {
+        let dir = workspace_tempdir();
+        let up = "/..".repeat(canon(&dir).components().count() + 2);
+        assert!(refused(&format!("{}{}", s(&canon(&dir)), up)));
+    }
+
+    #[test]
+    fn ordinary_files_resolve_to_their_canonical_path() {
+        let dir = workspace_tempdir();
+        let f = canon(&dir).join("a/big.bin");
+        write_file(&f, 10);
+        let sneaky = format!("{}/a/../a/big.bin", s(&canon(&dir)));
+        assert_eq!(resolve_delete_target(&sneaky).unwrap(), f);
+    }
+
+    #[test]
+    fn symlinks_resolve_to_the_link_not_its_target() {
+        let dir = workspace_tempdir();
+        let root = canon(&dir);
+        let precious = root.join("precious");
+        write_file(&precious.join("thesis.docx"), 10);
+        let link = root.join("shortcut");
+        symlink(&precious, &link).unwrap();
+        let sys_link = root.join("sys");
+        symlink("/System", &sys_link).unwrap();
+
+        assert_eq!(resolve_delete_target(&s(&link)).unwrap(), link);
+        assert_eq!(resolve_delete_target(&s(&sys_link)).unwrap(), sys_link);
+
+        remove_target(&link, true).unwrap();
+        remove_target(&sys_link, true).unwrap();
+        assert!(!fs_exists_no_follow(&link));
+        assert!(!fs_exists_no_follow(&sys_link));
+        assert!(precious.join("thesis.docx").exists());
+    }
+
+    #[test]
+    fn remove_target_deletes_files_and_trees() {
+        let dir = workspace_tempdir();
+        let root = canon(&dir);
+        let f = root.join("f.bin");
+        let d = root.join("tree");
+        write_file(&f, 10);
+        write_file(&d.join("x/y/z.bin"), 10);
+        remove_target(&f, true).unwrap();
+        remove_target(&d, true).unwrap();
+        assert!(!f.exists());
+        assert!(!d.exists());
+        assert!(remove_target(&f, true).is_err());
+    }
+
+    #[test]
+    fn delete_single_item_removes_and_reports_size() {
+        let dir = workspace_tempdir();
+        let root = canon(&dir);
+        let d = root.join("old-project");
+        write_file(&d.join("a.bin"), 3_000);
+        write_file(&d.join("sub/b.bin"), 2_000);
+        let link = root.join("link-to-project");
+        let keep = root.join("keep");
+        write_file(&keep.join("k.bin"), 1_000);
+        symlink(&keep, &link).unwrap();
+
+        let size = tauri::async_runtime::block_on(delete_single_item(&s(&d), true, false)).unwrap();
+        assert!(size >= 5_000);
+        assert!(!d.exists());
+
+        let link_size = tauri::async_runtime::block_on(delete_single_item(&s(&link), true, false)).unwrap();
+        assert!(link_size < 1_000);
+        assert!(keep.join("k.bin").exists());
+
+        let err = tauri::async_runtime::block_on(delete_single_item("/System/Library", true, false));
+        assert!(err.unwrap_err().contains("protected"));
+    }
+
+    fn fs_exists_no_follow(p: &Path) -> bool {
+        std::fs::symlink_metadata(p).is_ok()
+    }
 }

@@ -64,6 +64,12 @@ pub fn check_sip_status() -> bool {
 
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
 
+#[cfg(test)]
+fn log_path() -> PathBuf {
+    std::env::temp_dir().join("kyra-test-operations.log")
+}
+
+#[cfg(not(test))]
 fn log_path() -> PathBuf {
     if let Some(home) = dirs::home_dir() {
         let dir = home.join("Library/Logs/Kyra");
@@ -420,4 +426,63 @@ pub async fn get_app_icon(app_name: String) -> Option<String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Some(format!("data:image/png;base64,{}", b64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leap_years_follow_gregorian_rules() {
+        assert!(is_leap(2024));
+        assert!(is_leap(2000));
+        assert!(!is_leap(1900));
+        assert!(!is_leap(2023));
+    }
+
+    #[test]
+    fn days_to_date_converts_epoch_offsets() {
+        assert_eq!(days_to_date(0), (1970, 1, 1));
+        assert_eq!(days_to_date(31), (1970, 2, 1));
+        // 2000-02-29 exists (leap), 2000-03-01 is the day after.
+        assert_eq!(days_to_date(11_016), (2000, 2, 29));
+        assert_eq!(days_to_date(11_017), (2000, 3, 1));
+        assert_eq!(days_to_date(19_723), (2024, 1, 1));
+        assert_eq!(days_to_date(20_088), (2024, 12, 31));
+    }
+
+    #[test]
+    fn timestamp_is_iso8601_utc() {
+        let ts = chrono_timestamp();
+        assert_eq!(ts.len(), 20, "{ts}");
+        assert!(ts.ends_with('Z'));
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[10..11], "T");
+    }
+
+    #[test]
+    fn test_builds_never_write_to_the_real_log() {
+        let path = log_path();
+        assert!(path.starts_with(std::env::temp_dir()));
+        if let Some(home) = dirs::home_dir() {
+            assert!(!path.starts_with(home.join("Library")));
+        }
+    }
+
+    #[test]
+    fn log_is_rotated_once_it_exceeds_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("operations.log");
+
+        fs::write(&log, b"small").unwrap();
+        rotate_log_if_needed(&log);
+        assert!(log.exists());
+        assert!(!dir.path().join("operations.log.1").exists());
+
+        let f = fs::File::create(&log).unwrap();
+        f.set_len(MAX_LOG_SIZE + 1).unwrap();
+        rotate_log_if_needed(&log);
+        assert!(!log.exists());
+        assert!(dir.path().join("operations.log.1").exists());
+    }
 }

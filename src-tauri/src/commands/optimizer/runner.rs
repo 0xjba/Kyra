@@ -317,14 +317,18 @@ fn is_process_running(name: &str) -> bool {
 /// Rejects empty paths, traversal components, system roots, and anything
 /// outside the user's ~/Library directory.
 fn is_safe_optimizer_path(path: &std::path::Path) -> bool {
+    is_safe_optimizer_path_for_home(path, dirs::home_dir().as_deref())
+}
+
+fn is_safe_optimizer_path_for_home(path: &std::path::Path, home: Option<&std::path::Path>) -> bool {
     let path_str = path.to_string_lossy();
     if path_str.is_empty() { return false; }
     if path_str.contains("..") { return false; }
 
-    // Must be under user's Library directory
-    if let Some(home) = dirs::home_dir() {
+    // Must be strictly inside the user's Library directory
+    if let Some(home) = home {
         let library = home.join("Library");
-        if !path.starts_with(&library) {
+        if !path.starts_with(&library) || path == library {
             return false;
         }
     } else {
@@ -335,6 +339,13 @@ fn is_safe_optimizer_path(path: &std::path::Path) -> bool {
     const BLOCKED: &[&str] = &["/System", "/usr", "/bin", "/sbin", "/etc", "/var"];
     for b in BLOCKED {
         if path_str.starts_with(b) { return false; }
+    }
+
+    // Browsers restore windows/tabs from their saved state and keep settings
+    // in their plists, so no optimizer task may touch browser data.
+    if let Err(refusal) = crate::commands::data_guard::check_general(path) {
+        crate::commands::shared::log_operation("OPTIMIZE", &path_str, &format!("skipped: {}", refusal));
+        return false;
     }
 
     true
@@ -356,8 +367,8 @@ fn is_sqlite_file(path: &std::path::Path) -> bool {
 
 /// Custom SQLite VACUUM runner with smarter checks.
 fn run_sqlite_vacuum() -> (bool, String) {
-    // Check if Mail, Messages, or Safari are running
-    let blockers: Vec<&str> = ["Mail", "Messages", "Safari"]
+    // Check if Mail or Messages are running
+    let blockers: Vec<&str> = ["Mail", "Messages"]
         .iter()
         .filter(|&&name| is_process_running(name))
         .copied()
@@ -398,12 +409,8 @@ fn run_sqlite_vacuum() -> (bool, String) {
         }
     }
 
-    // Messages and Safari: check specific paths directly
-    let specific_dbs = [
-        home.join("Library/Messages/chat.db"),
-        home.join("Library/Safari/History.db"),
-        home.join("Library/Safari/TopSites.db"),
-    ];
+    // Browser databases are deliberately left alone.
+    let specific_dbs = [home.join("Library/Messages/chat.db")];
     for db in &specific_dbs {
         if db.exists() {
             db_candidates.push(db.clone());
@@ -537,7 +544,7 @@ fn run_sqlite_vacuum() -> (bool, String) {
 
 /// Custom plist repair runner.
 /// Scan a directory for corrupted .plist files and remove them.
-fn repair_plists_in_dir(dir: &std::path::Path, checked: &mut usize, repaired: &mut usize) {
+fn repair_plists_in_dir(dir: &std::path::Path, home: &std::path::Path, checked: &mut usize, repaired: &mut usize) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -573,7 +580,7 @@ fn repair_plists_in_dir(dir: &std::path::Path, checked: &mut usize, repaired: &m
 
         if let Ok(output) = result {
             if !output.status.success() {
-                if !is_safe_optimizer_path(&path) { continue; }
+                if !is_safe_optimizer_path_for_home(&path, Some(home)) { continue; }
                 if fs::remove_file(&path).is_ok() {
                     *repaired += 1;
                 }
@@ -583,11 +590,13 @@ fn repair_plists_in_dir(dir: &std::path::Path, checked: &mut usize, repaired: &m
 }
 
 fn run_plist_repair() -> (bool, String) {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return (false, "Could not determine home directory".into()),
-    };
+    match dirs::home_dir() {
+        Some(home) => plist_repair_in(&home),
+        None => (false, "Could not determine home directory".into()),
+    }
+}
 
+fn plist_repair_in(home: &std::path::Path) -> (bool, String) {
     let prefs_dir = home.join("Library/Preferences");
     let byhost_dir = prefs_dir.join("ByHost");
 
@@ -595,11 +604,11 @@ fn run_plist_repair() -> (bool, String) {
     let mut repaired: usize = 0;
 
     if prefs_dir.exists() {
-        repair_plists_in_dir(&prefs_dir, &mut checked, &mut repaired);
+        repair_plists_in_dir(&prefs_dir, home, &mut checked, &mut repaired);
     }
 
     if byhost_dir.exists() {
-        repair_plists_in_dir(&byhost_dir, &mut checked, &mut repaired);
+        repair_plists_in_dir(&byhost_dir, home, &mut checked, &mut repaired);
     }
 
     let msg = format!(
@@ -611,11 +620,13 @@ fn run_plist_repair() -> (bool, String) {
 
 /// Custom saved-state cleaner: only removes *.savedState dirs older than 30 days.
 fn run_saved_state_cleanup() -> (bool, String) {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return (false, "Could not determine home directory".into()),
-    };
+    match dirs::home_dir() {
+        Some(home) => saved_state_cleanup_in(&home),
+        None => (false, "Could not determine home directory".into()),
+    }
+}
 
+fn saved_state_cleanup_in(home: &std::path::Path) -> (bool, String) {
     let saved_state_dir = home.join("Library/Saved Application State");
     if !saved_state_dir.exists() {
         return (true, "No Saved Application State directory found".into());
@@ -659,7 +670,7 @@ fn run_saved_state_cleanup() -> (bool, String) {
             continue;
         }
 
-        if !is_safe_optimizer_path(&path) { continue; }
+        if !is_safe_optimizer_path_for_home(&path, Some(home)) { continue; }
         if fs::remove_dir_all(&path).is_ok() {
             removed += 1;
         }
@@ -1251,5 +1262,85 @@ where
         tasks_succeeded: succeeded,
         tasks_failed: failed,
         tasks_skipped: skipped,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn saved_state_and_plist_tasks_never_touch_browser_data() {
+        use crate::commands::browser_guard::fixtures;
+        use crate::commands::test_support::{canon, set_age_days, workspace_tempdir, write_file};
+        let dir = workspace_tempdir();
+        let fx = fixtures::build(&canon(&dir).join("home"));
+        let data = crate::commands::data_guard::fixtures::build(&fx.home);
+        let old_state = fx.home.join("Library/Saved Application State/com.example.old.savedState");
+        write_file(&old_state.join("windows.plist"), 100);
+        set_age_days(&old_state, 400);
+        let broken = fx.home.join("Library/Preferences/com.example.broken.plist");
+        std::fs::write(&broken, b"not a plist").unwrap();
+
+        let (ok, _) = saved_state_cleanup_in(&fx.home);
+        assert!(ok);
+        let (ok, _) = plist_repair_in(&fx.home);
+        assert!(ok);
+
+        fx.assert_profiles_intact();
+        data.assert_intact();
+        assert!(!old_state.exists());
+        assert!(!broken.exists());
+        for p in fx.protected.keys().chain(fx.protected_dirs.iter()).chain(data.protected_dirs.iter()) {
+            assert!(!is_safe_optimizer_path_for_home(p, Some(&fx.home)), "{}", p.display());
+        }
+        for rel in crate::commands::data_guard::fixtures::PROTECTED {
+            assert!(!is_safe_optimizer_path_for_home(&data.path(rel), Some(&fx.home)), "{rel}");
+        }
+    }
+
+    #[test]
+    fn sqlite_vacuum_leaves_browser_databases_alone() {
+        let src = include_str!("runner.rs");
+        let vacuum = &src[src.find("fn run_sqlite_vacuum").unwrap()..src.find("fn repair_plists_in_dir").unwrap()];
+        for needle in ["Library/Safari", "Safari/History", "Chrome", "Firefox"] {
+            assert!(!vacuum.contains(needle), "vacuum mentions {needle}");
+        }
+    }
+
+    #[test]
+    fn optimizer_paths_must_be_inside_user_library() {
+        let home = Some(Path::new("/Users/tester"));
+        let ok = |p: &str| is_safe_optimizer_path_for_home(Path::new(p), home);
+        assert!(ok("/Users/tester/Library/Saved Application State/com.foo.savedState"));
+        assert!(ok("/Users/tester/Library/Preferences/com.foo.plist"));
+        assert!(!ok("/Users/tester/Library"));
+        assert!(!ok("/Users/tester/Library/"));
+        assert!(!ok("/Users/tester"));
+        assert!(!ok("/Users/tester/Documents/a.plist"));
+        assert!(!ok("/Users/tester/LibraryX/a.plist"));
+        assert!(!ok("/Users/tester/Library/../Documents"));
+        assert!(!ok("/Library/Preferences/com.foo.plist"));
+        assert!(!ok("/System/Library/x"));
+        assert!(!ok(""));
+        assert!(!is_safe_optimizer_path_for_home(
+            Path::new("/Users/tester/Library/Preferences/x.plist"),
+            None
+        ));
+    }
+
+    #[test]
+    fn sqlite_header_is_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("a.db");
+        let mut header = b"SQLite format 3\0".to_vec();
+        header.extend_from_slice(&[0u8; 84]);
+        std::fs::write(&db, header).unwrap();
+        let fake = dir.path().join("b.db");
+        std::fs::write(&fake, b"not a database at all").unwrap();
+        assert!(is_sqlite_file(&db));
+        assert!(!is_sqlite_file(&fake));
+        assert!(!is_sqlite_file(&dir.path().join("missing.db")));
     }
 }

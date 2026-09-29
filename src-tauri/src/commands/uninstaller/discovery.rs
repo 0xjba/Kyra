@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use super::brew;
 use super::AppInfo;
@@ -279,6 +280,7 @@ fn read_app_info(app_path: &Path) -> Option<AppInfo> {
         is_data_sensitive,
         brew_cask,
         is_background_only,
+        last_used_secs: None,
     })
 }
 
@@ -416,5 +418,115 @@ pub fn scan_apps() -> Vec<AppInfo> {
     // Deduplicate by path
     apps.dedup_by(|a, b| a.path == b.path);
 
+    fill_last_used(&mut apps);
+
     apps
+}
+
+const MDLS_CHUNK: usize = 200;
+
+/// Fills `last_used_secs` from Spotlight with one batched `mdls` call per
+/// chunk. With `-raw`, mdls prints values NUL-separated in argument order,
+/// but it aborts on the first path it cannot resolve, so any chunk whose
+/// value count doesn't match its path count is discarded rather than
+/// risking misattributed dates.
+fn fill_last_used(apps: &mut [AppInfo]) {
+    for chunk in apps.chunks_mut(MDLS_CHUNK) {
+        let output = Command::new("/usr/bin/mdls")
+            .args(["-name", "kMDItemLastUsedDate", "-raw", "-nullMarker", "(null)"])
+            .args(chunk.iter().map(|a| a.path.as_str()))
+            .output();
+        let Ok(output) = output else { continue };
+        if !output.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let values: Vec<&str> = text.split('\0').collect();
+        if values.len() != chunk.len() {
+            continue;
+        }
+        for (app, value) in chunk.iter_mut().zip(values) {
+            app.last_used_secs = parse_mdls_date(value.trim());
+        }
+    }
+}
+
+/// Parses mdls dates of the form `2026-03-04 10:22:31 +0000` into Unix seconds.
+fn parse_mdls_date(s: &str) -> Option<u64> {
+    let mut parts = s.split(' ');
+    let date = parts.next()?;
+    let time = parts.next()?;
+    let offset = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    let mut t = time.split(':').map(|p| p.parse::<i64>().ok());
+    let (hh, mm, ss) = (t.next()??, t.next()??, t.next()??);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let (sign, digits) = match offset.as_bytes().first()? {
+        b'+' => (1, &offset[1..]),
+        b'-' => (-1, &offset[1..]),
+        _ => return None,
+    };
+    if digits.len() != 4 {
+        return None;
+    }
+    let off_h: i64 = digits[..2].parse().ok()?;
+    let off_m: i64 = digits[2..].parse().ok()?;
+    let offset_secs = sign * (off_h * 3600 + off_m * 60);
+
+    // Days since 1970-01-01 (Howard Hinnant's days_from_civil).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    let secs = days * 86_400 + hh * 3600 + mm * 60 + ss - offset_secs;
+    u64::try_from(secs).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_mdls_dates() {
+        assert_eq!(parse_mdls_date("1970-01-01 00:00:00 +0000"), Some(0));
+        assert_eq!(parse_mdls_date("2026-03-04 10:22:31 +0000"), Some(1_772_619_751));
+        assert_eq!(parse_mdls_date("2026-03-04 12:22:31 +0200"), Some(1_772_619_751));
+        assert_eq!(parse_mdls_date("(null)"), None);
+        assert_eq!(parse_mdls_date(""), None);
+    }
+
+    #[test]
+    fn system_critical_bundles_match_by_prefix() {
+        assert!(is_system_critical_bundle("com.apple.finder"));
+        assert!(is_system_critical_bundle("com.apple.dock"));
+        assert!(!is_system_critical_bundle("com.example.finder"));
+        assert!(!is_system_critical_bundle(""));
+    }
+
+    #[test]
+    fn data_sensitive_apps_are_flagged_by_id_or_name() {
+        assert!(check_data_sensitive("com.agilebits.onepassword7", "1Password 7"));
+        assert!(check_data_sensitive("com.example.app", "Bitwarden"));
+        assert!(!check_data_sensitive("com.example.editor", "Editor"));
+    }
+
+    #[test]
+    fn nested_helper_apps_are_detected() {
+        assert!(is_nested_app(Path::new("/Applications/Foo.app/Contents/Helpers/Bar.app")));
+        assert!(is_nested_app(Path::new("/Applications/Foo.app/Bar.app")));
+        assert!(!is_nested_app(Path::new("/Applications/Foo.app")));
+        assert!(!is_nested_app(Path::new("/Applications/Utilities/Foo.app")));
+    }
 }
