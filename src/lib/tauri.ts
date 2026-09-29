@@ -449,7 +449,6 @@ export interface AppSettings {
   low_disk_threshold_gb: number;
   onboarding_completed: boolean;
   pawtrol_enabled: boolean;
-  pawtrol_auto_clean: boolean;
   pawtrol_login_prompted: boolean;
 }
 
@@ -562,7 +561,19 @@ export interface Account {
   devices_count: number;
 }
 
-export type PatrolTrigger = "schedule" | "low_disk" | "manual";
+export type PatrolTrigger = "schedule" | "low_disk" | "critical" | "manual";
+
+export type PatrolFrequency = "6h" | "daily" | "weekly" | "low_disk_only";
+
+export interface PatrolRules {
+  enabled: boolean;
+  frequency: PatrolFrequency;
+  low_gb: number;
+  critical_gb: number;
+  safe_action: "auto" | "ask";
+  review_action: "notify" | "quiet";
+  data_action: "notify" | "quiet" | "ignore";
+}
 
 export interface ReviewItem {
   id: string;
@@ -597,6 +608,7 @@ export interface PatrolStatus {
   freed_last: number;
   pending_review: ReviewItem[];
   history: PatrolRun[];
+  rules: PatrolRules;
 }
 
 // ── Guardian Module Commands ───────────────────────────
@@ -669,8 +681,8 @@ export async function guardianReviewDismiss(ids: string[]): Promise<void> {
   return invoke<void>("guardian_review_dismiss", { ids });
 }
 
-export async function guardianSetPatrol(enabled: boolean, autoClean: boolean): Promise<void> {
-  return invoke<void>("guardian_set_patrol", { enabled, autoClean });
+export async function guardianSetRules(rules: PatrolRules): Promise<void> {
+  return invoke<void>("guardian_set_rules", { rules });
 }
 
 export async function listenPatrolStarted(

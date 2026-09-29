@@ -1,3 +1,4 @@
+use crate::commands::settings::{DataAction, PawtrolFrequency, ReviewAction, SafeAction};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -94,7 +95,20 @@ pub struct Account {
 pub enum PatrolTrigger {
     Schedule,
     LowDisk,
+    Critical,
     Manual,
+}
+
+/// Mirrors the Pawtrol fields of AppSettings.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PatrolRules {
+    pub enabled: bool,
+    pub frequency: PawtrolFrequency,
+    pub low_gb: u64,
+    pub critical_gb: u32,
+    pub safe_action: SafeAction,
+    pub review_action: ReviewAction,
+    pub data_action: DataAction,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -130,7 +144,7 @@ pub struct ReviewItem {
     #[serde(default)]
     pub data_loss: Option<String>,
     pub found_at: u64,
-    /// Safe to clean without confirmation; only pending because auto-clean is off.
+    /// Safe to clean without confirmation; only pending because safe items are set to ask.
     #[serde(default)]
     pub safe: bool,
 }
@@ -146,6 +160,7 @@ pub struct PatrolStatus {
     pub freed_last: u64,
     pub pending_review: Vec<ReviewItem>,
     pub history: Vec<PatrolRun>,
+    pub rules: PatrolRules,
 }
 
 #[derive(Clone, Debug, Serialize)]

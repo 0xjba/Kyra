@@ -13,7 +13,7 @@ beforeEach(() => {
 
 describe("defaults", () => {
   it("turns Pawtrol patrol and auto-clean on", () => {
-    expect(defaults).toMatchObject({ pawtrol_enabled: true, pawtrol_auto_clean: true, pawtrol_login_prompted: false });
+    expect(defaults).toMatchObject({ pawtrol_enabled: true, pawtrol_login_prompted: false });
   });
 });
 
@@ -47,8 +47,6 @@ describe("setters persist via saveSettings", () => {
     ["setNotificationsEnabled", (s) => s.setNotificationsEnabled(false), { notifications_enabled: false }],
     ["setLowDiskThreshold", (s) => s.setLowDiskThreshold(25), { low_disk_threshold_gb: 25 }],
     ["setOnboardingCompleted", (s) => s.setOnboardingCompleted(true), { onboarding_completed: true }],
-    ["setPawtrolEnabled", (s) => s.setPawtrolEnabled(false), { pawtrol_enabled: false }],
-    ["setPawtrolAutoClean", (s) => s.setPawtrolAutoClean(false), { pawtrol_auto_clean: false }],
     ["setPawtrolLoginPrompted", (s) => s.setPawtrolLoginPrompted(true), { pawtrol_login_prompted: true }],
   ])("%s", async (_name, call, patch) => {
     await call(useSettingsStore.getState());

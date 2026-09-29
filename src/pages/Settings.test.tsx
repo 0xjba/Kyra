@@ -29,11 +29,15 @@ afterEach(() => {
   useGuardianStore.setState(initialGuardian, true);
 });
 
+const rowDesc = (name: string) =>
+  screen.getByText(name, { selector: ".st-row-name" }).parentElement!.querySelector(".st-row-desc")?.textContent;
+
 function renderSettings() {
   return render(
     <MemoryRouter initialEntries={["/settings"]}>
       <Routes>
         <Route path="/settings" element={<Settings />} />
+        <Route path="/guardian" element={<div>pawtrol page</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -44,23 +48,30 @@ describe("Pawtrol settings", () => {
     useGuardianStore.setState({ checkLicense: async () => {} });
   });
 
-  it("hides patrol toggles without a Pawtrol license", () => {
+  it("has no Pawtrol rules row without a license, and keeps the low-disk stepper", () => {
+    renderSettings();
+    expect(screen.queryByText("Pawtrol rules")).toBeNull();
+    expect(rowDesc("Low disk space alert")).toBe("Warn when free space drops below");
+    const row = screen.getByText("Low disk space alert", { selector: ".st-row-name" }).closest(".st-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Increase" }));
+    expect(invokedWith("save_settings").pop()).toMatchObject({ settings: { low_disk_threshold_gb: 15 } });
+  });
+
+  it("moves the Pawtrol controls to the Pawtrol page", () => {
+    useGuardianStore.setState({ license: { active: true, expires: null } });
     renderSettings();
     expect(screen.queryByRole("switch", { name: "Run automatically" })).toBeNull();
     expect(screen.queryByRole("switch", { name: "Auto-clean safe items" })).toBeNull();
+    expect(rowDesc("Pawtrol rules")).toBe("Schedule, low-space alerts and what it cleans");
+    expect(rowDesc("Low disk space alert")).toBe("Managed by Pawtrol");
   });
 
-  it("saves patrol toggles and locks auto-clean while patrol is off", () => {
-    useGuardianStore.setState({ license: { active: true, expires: null } });
+  it.each(["Open", "View rules"])("%s goes to the Rules tab", async (label) => {
+    useGuardianStore.setState({ license: { active: true, expires: null }, pawtrolTab: "overview" });
     renderSettings();
-
-    const autoClean = screen.getByRole("switch", { name: "Auto-clean safe items" }) as HTMLButtonElement;
-    expect(autoClean.disabled).toBe(false);
-
-    fireEvent.click(screen.getByRole("switch", { name: "Run automatically" }));
-    expect(useSettingsStore.getState().settings.pawtrol_enabled).toBe(false);
-    expect(invokedWith("save_settings").pop()).toMatchObject({ settings: { pawtrol_enabled: false } });
-    expect(autoClean.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(await screen.findByText("pawtrol page")).toBeTruthy();
+    expect(useGuardianStore.getState().pawtrolTab).toBe("rules");
   });
 });
 
@@ -73,8 +84,6 @@ const ACCOUNT = {
   devices_count: 2,
 };
 
-const rowDesc = (name: string) =>
-  screen.getByText(name, { selector: ".st-row-name" }).parentElement!.querySelector(".st-row-desc")?.textContent;
 
 describe("Pawtrol account", () => {
   beforeEach(() => {

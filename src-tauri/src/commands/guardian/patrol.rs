@@ -1,7 +1,9 @@
 use super::types::*;
 use super::engine::CleanMode;
 use super::{engine, license, probes, scorer};
-use crate::commands::settings::{self, AppSettings};
+use crate::commands::settings::{
+    self, AppSettings, DataAction, PawtrolFrequency, ReviewAction, SafeAction,
+};
 use crate::commands::shared;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -14,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 const MINUTE: u64 = 60_000;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
+const GIB: u64 = 1 << 30;
 
 pub(crate) const SAFE_SCORE: f32 = 70.0;
 pub(crate) const REVIEW_SCORE: f32 = 40.0;
@@ -21,10 +24,11 @@ pub(crate) const MIN_ITEM_BYTES: u64 = 100 * 1024 * 1024;
 const HISTORY_LEN: usize = 20;
 const SNOOZE_MS: u64 = 30 * DAY;
 
-const PATROL_INTERVAL_MS: u64 = DAY;
 const IDLE_MS: u64 = 5 * MINUTE;
-const OVERDUE_MS: u64 = 48 * HOUR;
+// Without an idle moment a scheduled run still happens once it is two intervals late.
+const OVERDUE_INTERVALS: u64 = 2;
 const LOW_DISK_COOLDOWN_MS: u64 = 6 * HOUR;
+const CRITICAL_COOLDOWN_MS: u64 = 2 * HOUR;
 // The worker allows 10 scoring calls per hour; scheduled patrols stay far below that.
 const SCHEDULED_MIN_GAP_MS: u64 = HOUR;
 const FIRST_TICK: Duration = Duration::from_secs(120);
@@ -49,6 +53,7 @@ pub(crate) struct PatrolState {
     pub snoozed: HashMap<String, u64>,
     pub last_low_disk_trigger_at: Option<u64>,
     pub last_scheduled_at: Option<u64>,
+    pub last_critical_trigger_at: Option<u64>,
 }
 
 static STATE_LOCK: Mutex<()> = Mutex::new(());
@@ -84,6 +89,47 @@ pub(crate) fn update_state<T>(
     let out = f(&mut state);
     save_state(path, &state)?;
     Ok(out)
+}
+
+impl PatrolRules {
+    pub fn from_settings(s: &AppSettings) -> Self {
+        PatrolRules {
+            enabled: s.pawtrol_enabled,
+            frequency: s.pawtrol_frequency,
+            low_gb: s.low_disk_threshold_gb,
+            critical_gb: s.pawtrol_critical_gb,
+            safe_action: s.pawtrol_safe_action,
+            review_action: s.pawtrol_review_action,
+            data_action: s.pawtrol_data_action,
+        }
+    }
+
+    /// Writes the rules into `s`, clamping the critical tier below the low tier.
+    pub fn apply(self, s: &mut AppSettings) {
+        s.pawtrol_enabled = self.enabled;
+        s.pawtrol_frequency = self.frequency;
+        s.low_disk_threshold_gb = self.low_gb;
+        s.pawtrol_critical_gb = self.critical_gb;
+        s.pawtrol_safe_action = self.safe_action;
+        s.pawtrol_review_action = self.review_action;
+        s.pawtrol_data_action = self.data_action;
+        s.normalize();
+    }
+}
+
+impl Default for PatrolRules {
+    fn default() -> Self {
+        PatrolRules::from_settings(&AppSettings::default())
+    }
+}
+
+pub(crate) fn interval_ms(frequency: PawtrolFrequency) -> Option<u64> {
+    match frequency {
+        PawtrolFrequency::SixHours => Some(6 * HOUR),
+        PawtrolFrequency::Daily => Some(DAY),
+        PawtrolFrequency::Weekly => Some(7 * DAY),
+        PawtrolFrequency::LowDiskOnly => None,
+    }
 }
 
 #[derive(Debug, Default)]
@@ -123,6 +169,40 @@ pub(crate) fn partition(
         }
     }
     out
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Plan {
+    pub clean: Vec<ScoredProbe>,
+    /// (item, safe)
+    pub queue: Vec<(ScoredProbe, bool)>,
+}
+
+/// A critical run cleans safe items even when the rules say ask.
+pub(crate) fn plan(part: Partition, rules: &PatrolRules, trigger: PatrolTrigger) -> Plan {
+    let mut out = Plan::default();
+    if rules.safe_action == SafeAction::Auto || trigger == PatrolTrigger::Critical {
+        out.clean = part.safe;
+    } else {
+        out.queue.extend(part.safe.into_iter().map(|s| (s, true)));
+    }
+    out.queue.extend(
+        part.review
+            .into_iter()
+            .filter(|s| !(is_user_data(s) && rules.data_action == DataAction::Ignore))
+            .map(|s| (s, false)),
+    );
+    out
+}
+
+pub(crate) fn is_quiet(item: &ReviewItem, rules: &PatrolRules) -> bool {
+    if item.safe {
+        false
+    } else if item.user_data {
+        rules.data_action != DataAction::Notify
+    } else {
+        rules.review_action == ReviewAction::Quiet
+    }
 }
 
 fn review_item(s: &ScoredProbe, found_at: u64, safe: bool) -> ReviewItem {
@@ -189,7 +269,7 @@ pub(crate) struct PatrolCtx {
     pub state_path: PathBuf,
     pub home: PathBuf,
     pub clock: Box<dyn Fn() -> u64 + Send + Sync>,
-    pub auto_clean: bool,
+    pub rules: PatrolRules,
     pub permanent: bool,
     pub min_bytes: u64,
 }
@@ -198,6 +278,7 @@ pub(crate) struct PatrolCtx {
 pub(crate) struct Notice {
     pub title: String,
     pub body: String,
+    pub urgent: bool,
 }
 
 pub(crate) struct PatrolOutcome {
@@ -213,6 +294,7 @@ struct Found {
 
 async fn scan_and_clean<S, F>(
     ctx: &PatrolCtx,
+    trigger: PatrolTrigger,
     license: impl Future<Output = Result<(), String>>,
     score: S,
 ) -> Result<Found, String>
@@ -225,21 +307,22 @@ where
     let scores = score(reports).await?;
     let snoozed = load_state(&ctx.state_path).snoozed;
     let part = partition(scores, &snoozed, (ctx.clock)(), ctx.min_bytes);
+    let plan = plan(part, &ctx.rules, trigger);
 
-    let mut pending: Vec<(ScoredProbe, bool)> = Vec::new();
-    let batch = if ctx.auto_clean {
-        let items = part
-            .safe
+    let batch = if plan.clean.is_empty() {
+        CleanBatch::default()
+    } else {
+        let items = plan
+            .clean
             .iter()
             .map(|s| (s.category.clone(), s.display_name.clone()))
             .collect();
         clean_blocking(&ctx.home, items, ctx.permanent, CleanMode::Autonomous).await?
-    } else {
-        pending.extend(part.safe.into_iter().map(|s| (s, true)));
-        CleanBatch::default()
     };
-    pending.extend(part.review.into_iter().map(|s| (s, false)));
-    Ok(Found { batch, pending })
+    Ok(Found {
+        batch,
+        pending: plan.queue,
+    })
 }
 
 pub(crate) async fn patrol_with<S, F>(
@@ -253,7 +336,7 @@ where
     F: Future<Output = Result<Vec<ScoredProbe>, String>>,
 {
     let started_at = (ctx.clock)();
-    let found = scan_and_clean(ctx, license, score).await;
+    let found = scan_and_clean(ctx, trigger, license, score).await;
     let finished_at = (ctx.clock)();
     let mut run = PatrolRun {
         started_at,
@@ -318,7 +401,15 @@ where
     });
 
     let notice = match &merged {
-        Ok((pending, new_ids)) => build_notice(&run, pending, new_ids),
+        Ok((pending, _)) if trigger == PatrolTrigger::Critical => critical_notice(&run, pending),
+        Ok((pending, new_ids)) => {
+            let announced: Vec<ReviewItem> = pending
+                .iter()
+                .filter(|i| !is_quiet(i, &ctx.rules))
+                .cloned()
+                .collect();
+            build_notice(&run, &announced, new_ids)
+        }
         Err(e) => {
             run.error = Some(format!("Couldn't save Pawtrol's progress: {}", e));
             None
@@ -440,6 +531,7 @@ pub(crate) fn build_notice(
         return Some(Notice {
             title: format!("Pawtrol freed {}", format_size(run.freed)),
             body: parts.join(" · "),
+            urgent: false,
         });
     }
 
@@ -452,6 +544,7 @@ pub(crate) fn build_notice(
         return Some(Notice {
             title: format!("Pawtrol found {} safe to clean", format_size(safe_total)),
             body: "Open Kyra to clean it in one tap".into(),
+            urgent: false,
         });
     }
 
@@ -463,6 +556,34 @@ pub(crate) fn build_notice(
     Some(Notice {
         title,
         body: format!("{} · {}", biggest.name, format_size(biggest.size)),
+        urgent: false,
+    })
+}
+
+/// Sent after every critical run, whatever the review and data rules say.
+pub(crate) fn critical_notice(run: &PatrolRun, pending: &[ReviewItem]) -> Option<Notice> {
+    if run.error.is_some() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if run.freed > 0 {
+        parts.push(format!("Freed {}", format_size(run.freed)));
+    }
+    if let Some(biggest) = pending.iter().max_by_key(|i| i.size) {
+        let count = match pending.len() {
+            1 => "1 item needs you".to_string(),
+            n => format!("{} items need you", n),
+        };
+        parts.push(count);
+        parts.push(format!("biggest: {} {}", biggest.name, format_size(biggest.size)));
+    }
+    if parts.is_empty() {
+        parts.push("Nothing left that Kyra can clean on its own".into());
+    }
+    Some(Notice {
+        title: "Your Mac is almost out of space".into(),
+        body: parts.join(" · "),
+        urgent: true,
     })
 }
 
@@ -472,10 +593,11 @@ pub(crate) struct Conditions {
     pub last_patrol_at: Option<u64>,
     pub last_scheduled_at: Option<u64>,
     pub last_low_disk_trigger_at: Option<u64>,
+    pub last_critical_trigger_at: Option<u64>,
     pub idle_ms: Option<u64>,
     pub on_ac: bool,
     pub free_bytes: Option<u64>,
-    pub low_disk_threshold_bytes: u64,
+    pub rules: PatrolRules,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -486,24 +608,31 @@ pub(crate) enum Decision {
 
 pub(crate) fn decide(c: &Conditions) -> Decision {
     let ago = |t: u64| c.now.saturating_sub(t);
+    let below = |gb: u64| c.free_bytes.is_some_and(|f| f < gb.saturating_mul(GIB));
+    let cooled = |last: Option<u64>, cooldown: u64| last.map_or(true, |t| ago(t) >= cooldown);
 
+    if !c.rules.enabled {
+        return Decision::Wait("paused");
+    }
     if c.last_scheduled_at
         .is_some_and(|t| ago(t) < SCHEDULED_MIN_GAP_MS)
     {
-        return Decision::Wait("patrolled within the last hour");
+        return Decision::Wait("ran within the last hour");
     }
 
-    let low_disk = c.free_bytes.is_some_and(|f| f < c.low_disk_threshold_bytes);
-    let cooled_down = c
-        .last_low_disk_trigger_at
-        .map_or(true, |t| ago(t) >= LOW_DISK_COOLDOWN_MS);
-    if low_disk && cooled_down {
+    if below(c.rules.critical_gb as u64) && cooled(c.last_critical_trigger_at, CRITICAL_COOLDOWN_MS) {
+        return Decision::Run(PatrolTrigger::Critical);
+    }
+    if below(c.rules.low_gb) && cooled(c.last_low_disk_trigger_at, LOW_DISK_COOLDOWN_MS) {
         return Decision::Run(PatrolTrigger::LowDisk);
     }
 
+    let Some(interval) = interval_ms(c.rules.frequency) else {
+        return Decision::Wait("scheduled runs are off");
+    };
     let since = c.last_patrol_at.map(ago);
-    if since.is_some_and(|s| s < PATROL_INTERVAL_MS) {
-        return Decision::Wait("patrolled within the last day");
+    if since.is_some_and(|s| s < interval) {
+        return Decision::Wait("not due yet");
     }
     if !c.on_ac {
         return Decision::Wait("on battery");
@@ -511,14 +640,27 @@ pub(crate) fn decide(c: &Conditions) -> Decision {
     if c.idle_ms.is_some_and(|i| i >= IDLE_MS) {
         return Decision::Run(PatrolTrigger::Schedule);
     }
-    if since.is_some_and(|s| s >= PATROL_INTERVAL_MS + OVERDUE_MS) {
+    if since.is_some_and(|s| s >= interval.saturating_mul(1 + OVERDUE_INTERVALS)) {
         return Decision::Run(PatrolTrigger::Schedule);
     }
     Decision::Wait("Mac is in use")
 }
 
-pub(crate) fn next_patrol_estimate(state: &PatrolState, now: u64) -> u64 {
-    let due = state.last_patrol_at.map_or(now, |t| t + PATROL_INTERVAL_MS);
+/// A critical run also restarts the low-disk cooldown so the two tiers don't fire back to back.
+pub(crate) fn record_trigger(state: &mut PatrolState, trigger: PatrolTrigger, now: u64) {
+    state.last_scheduled_at = Some(now);
+    match trigger {
+        PatrolTrigger::Critical => {
+            state.last_critical_trigger_at = Some(now);
+            state.last_low_disk_trigger_at = Some(now);
+        }
+        PatrolTrigger::LowDisk => state.last_low_disk_trigger_at = Some(now),
+        PatrolTrigger::Schedule | PatrolTrigger::Manual => {}
+    }
+}
+
+pub(crate) fn next_patrol_estimate(state: &PatrolState, now: u64, interval: u64) -> u64 {
+    let due = state.last_patrol_at.map_or(now, |t| t + interval);
     let gap = state
         .last_scheduled_at
         .map_or(0, |t| t + SCHEDULED_MIN_GAP_MS);
@@ -563,21 +705,24 @@ fn free_disk_bytes() -> Option<u64> {
 
 pub(crate) fn status_from(
     state: PatrolState,
-    enabled: bool,
-    auto_clean: bool,
+    rules: PatrolRules,
     running: bool,
     now: u64,
 ) -> PatrolStatus {
+    let next_patrol_at = interval_ms(rules.frequency)
+        .filter(|_| rules.enabled)
+        .map(|interval| next_patrol_estimate(&state, now, interval));
     PatrolStatus {
-        enabled,
-        auto_clean,
+        enabled: rules.enabled,
+        auto_clean: rules.safe_action == SafeAction::Auto,
         running,
         last_patrol_at: state.last_patrol_at,
-        next_patrol_at: enabled.then(|| next_patrol_estimate(&state, now)),
+        next_patrol_at,
         freed_total: state.freed_total,
         freed_last: state.freed_last,
         pending_review: state.pending_review,
         history: state.history,
+        rules,
     }
 }
 
@@ -692,11 +837,9 @@ fn home_dir() -> Result<PathBuf, String> {
 }
 
 pub fn current_status() -> PatrolStatus {
-    let s = current_settings();
     status_from(
         load_state(&state_path()),
-        s.pawtrol_enabled,
-        s.pawtrol_auto_clean,
+        PatrolRules::from_settings(&current_settings()),
         BUSY.current() == Some(Busy::Patrol),
         now_ms(),
     )
@@ -736,7 +879,11 @@ fn notify(app: &AppHandle, notice: &Notice) {
     if !matches!(n.permission_state(), Ok(PermissionState::Granted)) {
         return;
     }
-    let _ = n.builder().title(&notice.title).body(&notice.body).show();
+    let mut builder = n.builder().title(&notice.title).body(&notice.body);
+    if notice.urgent {
+        builder = builder.sound("Sosumi");
+    }
+    let _ = builder.show();
 }
 
 pub async fn run_patrol(app: &AppHandle, trigger: PatrolTrigger) -> Result<PatrolRun, String> {
@@ -745,7 +892,7 @@ pub async fn run_patrol(app: &AppHandle, trigger: PatrolTrigger) -> Result<Patro
         state_path: state_path(),
         home: home_dir()?,
         clock: Box::new(now_ms),
-        auto_clean: settings.pawtrol_auto_clean,
+        rules: PatrolRules::from_settings(&settings),
         permanent: !settings.use_trash,
         min_bytes: MIN_ITEM_BYTES,
     };
@@ -832,13 +979,22 @@ pub fn dismiss(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-pub fn set_patrol(app: &AppHandle, enabled: bool, auto_clean: bool) -> Result<(), String> {
+pub fn set_rules(app: &AppHandle, rules: PatrolRules) -> Result<PatrolRules, String> {
     let mut s = settings::load_settings_internal()?;
-    s.pawtrol_enabled = enabled;
-    s.pawtrol_auto_clean = auto_clean;
+    rules.apply(&mut s);
     settings::save_settings_internal(&s)?;
     emit_status(app);
-    Ok(())
+    Ok(PatrolRules::from_settings(&s))
+}
+
+pub fn set_patrol(app: &AppHandle, enabled: bool, auto_clean: bool) -> Result<(), String> {
+    let s = settings::load_settings_internal()?;
+    let rules = PatrolRules {
+        enabled,
+        safe_action: if auto_clean { SafeAction::Auto } else { SafeAction::Ask },
+        ..PatrolRules::from_settings(&s)
+    };
+    set_rules(app, rules).map(|_| ())
 }
 
 async fn scheduler_tick(app: &AppHandle) {
@@ -862,18 +1018,14 @@ async fn scheduler_tick(app: &AppHandle) {
         last_patrol_at: state.last_patrol_at,
         last_scheduled_at: state.last_scheduled_at,
         last_low_disk_trigger_at: state.last_low_disk_trigger_at,
+        last_critical_trigger_at: state.last_critical_trigger_at,
         idle_ms,
         on_ac,
         free_bytes,
-        low_disk_threshold_bytes: s.low_disk_threshold_gb.saturating_mul(1 << 30),
+        rules: PatrolRules::from_settings(&s),
     });
     if let Decision::Run(trigger) = decision {
-        let _ = update_state(&path, |st| {
-            st.last_scheduled_at = Some(now);
-            if trigger == PatrolTrigger::LowDisk {
-                st.last_low_disk_trigger_at = Some(now);
-            }
-        });
+        let _ = update_state(&path, |st| record_trigger(st, trigger, now));
         let _ = run_patrol(app, trigger).await;
     }
 }
@@ -957,7 +1109,7 @@ mod tests {
             state_path: data.path().join(STATE_FILE),
             home: fx.home.clone(),
             clock: Box::new(|| T0),
-            auto_clean: true,
+            rules: PatrolRules::default(),
             permanent: true,
             min_bytes: 0,
         };
@@ -1001,6 +1153,13 @@ mod tests {
         );
     }
 
+    fn rules_with(auto_clean: bool) -> PatrolRules {
+        PatrolRules {
+            safe_action: if auto_clean { SafeAction::Auto } else { SafeAction::Ask },
+            ..PatrolRules::default()
+        }
+    }
+
     struct Env {
         home: TestDir,
         data: TestDir,
@@ -1027,11 +1186,15 @@ mod tests {
         }
 
         fn ctx(&self, auto_clean: bool, now: u64) -> PatrolCtx {
+            self.ctx_with(rules_with(auto_clean), now)
+        }
+
+        fn ctx_with(&self, rules: PatrolRules, now: u64) -> PatrolCtx {
             PatrolCtx {
                 state_path: self.state_path(),
                 home: self.home.path().to_path_buf(),
                 clock: Box::new(move || now),
-                auto_clean,
+                rules,
                 permanent: true,
                 min_bytes: 16 * 1024,
             }
@@ -1052,18 +1215,203 @@ mod tests {
         }
 
         fn patrol(&self, auto_clean: bool, now: u64) -> PatrolOutcome {
+            self.patrol_with(rules_with(auto_clean), PatrolTrigger::Schedule, now)
+        }
+
+        fn patrol_with(&self, rules: PatrolRules, trigger: PatrolTrigger, now: u64) -> PatrolOutcome {
+            self.patrol_scored(rules, trigger, now, |_| 90.0)
+        }
+
+        fn patrol_scored(
+            &self,
+            rules: PatrolRules,
+            trigger: PatrolTrigger,
+            now: u64,
+            score: fn(&str) -> f32,
+        ) -> PatrolOutcome {
             block_on(patrol_with(
-                &self.ctx(auto_clean, now),
-                PatrolTrigger::Schedule,
+                &self.ctx_with(rules, now),
+                trigger,
                 async { Ok(()) },
-                |reports| async move {
+                move |reports| async move {
                     Ok(reports
                         .iter()
-                        .map(|r| scored(&r.category, r.cleanable_bytes, 90.0))
+                        .map(|r| scored(&r.category, r.cleanable_bytes, score(&r.category)))
                         .collect())
                 },
             ))
         }
+
+        fn pending_ids(&self) -> Vec<String> {
+            let mut ids: Vec<String> = load_state(&self.state_path())
+                .pending_review
+                .into_iter()
+                .map(|i| i.id)
+                .collect();
+            ids.sort();
+            ids
+        }
+    }
+
+    fn rules(review_action: ReviewAction, data_action: DataAction) -> PatrolRules {
+        PatrolRules {
+            review_action,
+            data_action,
+            ..PatrolRules::default()
+        }
+    }
+
+    fn node_mid_score(category: &str) -> f32 {
+        if category == "node" { 55.0 } else { 90.0 }
+    }
+
+    #[test]
+    fn critical_run_cleans_safe_items_even_when_set_to_ask() {
+        let env = Env::new("patrol-critical");
+        env.home.write(".Trash/big.dmg", 256 * 1024);
+        let ask_quiet = PatrolRules {
+            safe_action: SafeAction::Ask,
+            ..rules(ReviewAction::Quiet, DataAction::Quiet)
+        };
+        let out = env.patrol_with(ask_quiet, PatrolTrigger::Critical, T0);
+
+        assert!(!env.npm().exists(), "critical runs clean safe items");
+        assert!(env.vm().exists() && env.trash().exists());
+        assert_eq!(out.run.trigger, PatrolTrigger::Critical);
+        assert_eq!(env.pending_ids(), ["docker_vm", "trash"]);
+
+        let state = load_state(&env.state_path());
+        let trash = state.pending_review.iter().find(|i| i.id == "trash").unwrap();
+        let notice = out.notice.unwrap();
+        assert!(notice.urgent);
+        assert_eq!(notice.title, "Your Mac is almost out of space");
+        assert_eq!(
+            notice.body,
+            format!(
+                "Freed {} · 2 items need you · biggest: Trash {}",
+                format_size(out.run.freed),
+                format_size(trash.size)
+            )
+        );
+
+        let again = env.patrol_with(ask_quiet, PatrolTrigger::Critical, T0 + 2 * HOUR);
+        assert!(again.notice.is_some_and(|n| n.urgent), "critical runs always notify");
+    }
+
+    #[test]
+    fn critical_run_ignores_data_the_user_ignores() {
+        let env = Env::new("patrol-critical-ignore");
+        let out = env.patrol_with(
+            rules(ReviewAction::Notify, DataAction::Ignore),
+            PatrolTrigger::Critical,
+            T0,
+        );
+        assert!(env.pending_ids().is_empty());
+        assert_eq!(
+            out.notice.unwrap().body,
+            format!("Freed {}", format_size(out.run.freed))
+        );
+    }
+
+    #[test]
+    fn critical_notice_texts() {
+        let n = critical_notice(&run_with(&[]), &[]).unwrap();
+        assert_eq!(n.title, "Your Mac is almost out of space");
+        assert_eq!(n.body, "Nothing left that Kyra can clean on its own");
+        let one = vec![item("ai_ml", 12 * GB, false)];
+        let n = critical_notice(&run_with(&[]), &one).unwrap();
+        assert_eq!(n.body, "1 item needs you · biggest: AI & ML Models 12.0 GB");
+        let mut failed = run_with(&[("Xcode", GB)]);
+        failed.error = Some("x".into());
+        assert!(critical_notice(&failed, &one).is_none());
+    }
+
+    #[test]
+    fn review_and_data_actions_decide_what_is_announced() {
+        let title = |review, data| {
+            let env = Env::new("patrol-actions");
+            let out = env.patrol_scored(rules(review, data), PatrolTrigger::Schedule, T0, node_mid_score);
+            assert!(env.npm().exists(), "mid-score items are never auto-cleaned");
+            assert_eq!(env.pending_ids(), ["docker_vm", "node", "trash"]);
+            let state = load_state(&env.state_path());
+            assert!(state.pending_review.iter().all(|i| !i.safe));
+            out.notice.map(|n| n.title)
+        };
+        use DataAction as D;
+        use ReviewAction as R;
+        assert_eq!(title(R::Notify, D::Notify).as_deref(), Some("3 items need your review"));
+        assert_eq!(title(R::Quiet, D::Notify).as_deref(), Some("2 items need your review"));
+        assert_eq!(title(R::Notify, D::Quiet).as_deref(), Some("1 item needs your review"));
+        assert_eq!(title(R::Quiet, D::Quiet), None);
+    }
+
+    #[test]
+    fn quiet_items_are_left_out_of_the_freed_summary() {
+        let env = Env::new("patrol-quiet-freed");
+        let out = env.patrol_with(rules(ReviewAction::Notify, DataAction::Quiet), PatrolTrigger::Schedule, T0);
+        assert!(!env.npm().exists());
+        assert_eq!(out.notice.unwrap().body, "Node.js");
+        assert_eq!(out.run.review_count, 2, "quiet items are still queued");
+    }
+
+    #[test]
+    fn ignored_data_leaves_the_queue_on_the_next_run() {
+        let env = Env::new("patrol-ignore");
+        env.patrol(false, T0);
+        assert_eq!(env.pending_ids(), ["docker_vm", "node", "trash"]);
+
+        let ignore = PatrolRules {
+            safe_action: SafeAction::Ask,
+            ..rules(ReviewAction::Notify, DataAction::Ignore)
+        };
+        let out = env.patrol_with(ignore, PatrolTrigger::Schedule, T0 + DAY);
+        assert_eq!(env.pending_ids(), ["node"]);
+        assert_eq!(out.run.review_count, 0);
+        assert!(out.notice.is_none());
+        assert!(env.vm().exists() && env.trash().exists());
+    }
+
+    #[test]
+    fn plan_follows_the_safe_action() {
+        let part = || Partition {
+            safe: vec![scored("node", GB, 90.0)],
+            review: vec![scored("ide", GB, 50.0), scored("docker_vm", GB, 55.0)],
+        };
+        let ask = rules_with(false);
+        let p = plan(part(), &PatrolRules::default(), PatrolTrigger::Schedule);
+        assert_eq!(ids(&p.clean), ["node"]);
+        assert_eq!(p.queue.iter().map(|(s, safe)| (s.category.as_str(), *safe)).collect::<Vec<_>>(), [("ide", false), ("docker_vm", false)]);
+
+        let p = plan(part(), &ask, PatrolTrigger::Schedule);
+        assert!(p.clean.is_empty());
+        assert_eq!(p.queue.iter().map(|(s, safe)| (s.category.as_str(), *safe)).collect::<Vec<_>>(), [("node", true), ("ide", false), ("docker_vm", false)]);
+
+        for trigger in [PatrolTrigger::LowDisk, PatrolTrigger::Manual] {
+            assert!(plan(part(), &ask, trigger).clean.is_empty(), "{trigger:?}");
+        }
+        assert_eq!(ids(&plan(part(), &ask, PatrolTrigger::Critical).clean), ["node"]);
+
+        let ignore = PatrolRules { data_action: DataAction::Ignore, ..ask };
+        let p = plan(part(), &ignore, PatrolTrigger::Schedule);
+        assert_eq!(p.queue.iter().map(|(s, _)| s.category.as_str()).collect::<Vec<_>>(), ["node", "ide"]);
+    }
+
+    #[test]
+    fn rules_serialize_for_the_frontend_and_clamp_on_apply() {
+        assert_eq!(
+            serde_json::to_string(&PatrolRules::default()).unwrap(),
+            r#"{"enabled":true,"frequency":"daily","low_gb":10,"critical_gb":3,"safe_action":"auto","review_action":"notify","data_action":"notify"}"#
+        );
+        let parsed: PatrolRules = serde_json::from_str(
+            r#"{"enabled":false,"frequency":"low_disk_only","low_gb":5,"critical_gb":9,"safe_action":"ask","review_action":"quiet","data_action":"ignore"}"#,
+        )
+        .unwrap();
+        let mut s = AppSettings::default();
+        parsed.apply(&mut s);
+        let back = PatrolRules::from_settings(&s);
+        assert_eq!(back, PatrolRules { critical_gb: 4, ..parsed });
+        assert!(serde_json::from_str::<PatrolRules>(r#"{"enabled":true,"frequency":"hourly","low_gb":10,"critical_gb":3,"safe_action":"auto","review_action":"notify","data_action":"notify"}"#).is_err());
+        assert_eq!(serde_json::to_value(PatrolTrigger::Critical).unwrap(), "critical");
     }
 
     #[test]
@@ -1134,6 +1482,7 @@ mod tests {
             Notice {
                 title: format!("Pawtrol found {} safe to clean", format_size(node.size)),
                 body: "Open Kyra to clean it in one tap".into(),
+                urgent: false,
             }
         );
 
@@ -1306,6 +1655,7 @@ mod tests {
             snoozed: HashMap::from([("docker_vm".to_string(), 9)]),
             last_low_disk_trigger_at: Some(4),
             last_scheduled_at: Some(5),
+            last_critical_trigger_at: Some(6),
         };
         save_state(&path, &state).unwrap();
         assert_eq!(load_state(&path), state);
@@ -1343,7 +1693,7 @@ mod tests {
             idle_ms: Some(10 * MINUTE),
             on_ac: true,
             free_bytes: Some(100 * GB),
-            low_disk_threshold_bytes: 10 * GB,
+            ..Default::default()
         }
     }
 
@@ -1363,7 +1713,7 @@ mod tests {
                 last_patrol_at: Some(T0 - 23 * HOUR),
                 ..cond()
             }),
-            Decision::Wait("patrolled within the last day")
+            Decision::Wait("not due yet")
         );
         assert_eq!(
             decide(&Conditions {
@@ -1441,7 +1791,7 @@ mod tests {
                 last_low_disk_trigger_at: Some(T0 - 5 * HOUR),
                 ..low
             }),
-            Decision::Wait("patrolled within the last day")
+            Decision::Wait("not due yet")
         );
         assert_eq!(
             decide(&Conditions {
@@ -1455,28 +1805,28 @@ mod tests {
                 free_bytes: Some(10 * GB),
                 ..low
             }),
-            Decision::Wait("patrolled within the last day")
+            Decision::Wait("not due yet")
         );
         assert_eq!(
             decide(&Conditions {
                 free_bytes: None,
                 ..low
             }),
-            Decision::Wait("patrolled within the last day")
+            Decision::Wait("not due yet")
         );
         assert_eq!(
             decide(&Conditions {
-                low_disk_threshold_bytes: 0,
+                rules: PatrolRules { low_gb: 0, critical_gb: 0, ..PatrolRules::default() },
                 free_bytes: Some(0),
                 ..low
             }),
-            Decision::Wait("patrolled within the last day")
+            Decision::Wait("not due yet")
         );
     }
 
     #[test]
     fn scheduled_patrols_are_at_most_hourly() {
-        let limited = Decision::Wait("patrolled within the last hour");
+        let limited = Decision::Wait("ran within the last hour");
         let recent = Some(T0 - 59 * MINUTE);
         assert_eq!(
             decide(&Conditions {
@@ -1502,20 +1852,156 @@ mod tests {
         );
     }
 
+    fn with_rules(rules: PatrolRules, c: Conditions) -> Conditions {
+        Conditions { rules, ..c }
+    }
+
+    fn every(frequency: PawtrolFrequency) -> PatrolRules {
+        PatrolRules { frequency, ..PatrolRules::default() }
+    }
+
+    #[test]
+    fn frequency_sets_the_schedule_interval() {
+        use PawtrolFrequency as F;
+        let run = Decision::Run(PatrolTrigger::Schedule);
+        let since = |f, ago: u64| decide(&with_rules(every(f), Conditions { last_patrol_at: Some(T0 - ago), ..cond() }));
+        for (f, interval) in [(F::SixHours, 6 * HOUR), (F::Daily, DAY), (F::Weekly, 7 * DAY)] {
+            assert_eq!(interval_ms(f), Some(interval));
+            assert_eq!(since(f, interval), run, "{f:?}");
+            assert_eq!(since(f, interval - 1), Decision::Wait("not due yet"), "{f:?}");
+
+            let busy = |ago: u64| {
+                decide(&with_rules(every(f), Conditions { idle_ms: Some(0), last_patrol_at: Some(T0 - ago), ..cond() }))
+            };
+            assert_eq!(busy(3 * interval), run, "overdue {f:?}");
+            assert_eq!(busy(3 * interval - 1), Decision::Wait("Mac is in use"), "{f:?}");
+        }
+
+        assert_eq!(interval_ms(F::LowDiskOnly), None);
+        assert_eq!(since(F::LowDiskOnly, 365 * DAY), Decision::Wait("scheduled runs are off"));
+        let low = Conditions { free_bytes: Some(5 * GB), ..cond() };
+        assert_eq!(decide(&with_rules(every(F::LowDiskOnly), low)), Decision::Run(PatrolTrigger::LowDisk));
+
+        let st = status_from(PatrolState::default(), every(F::LowDiskOnly), false, T0);
+        assert_eq!(st.next_patrol_at, None);
+        let s = PatrolState { last_patrol_at: Some(T0 - HOUR), ..Default::default() };
+        let st = status_from(s, every(F::Weekly), false, T0);
+        assert_eq!(st.next_patrol_at, Some(T0 - HOUR + 7 * DAY));
+    }
+
+    #[test]
+    fn paused_rules_never_run() {
+        let paused = PatrolRules { enabled: false, ..PatrolRules::default() };
+        for free in [0, 2 * GB, 5 * GB, 100 * GB] {
+            let c = with_rules(paused, Conditions { free_bytes: Some(free), last_patrol_at: None, ..cond() });
+            assert_eq!(decide(&c), Decision::Wait("paused"));
+        }
+    }
+
+    #[test]
+    fn critical_tier_bypasses_idle_and_power() {
+        let critical = Conditions {
+            free_bytes: Some(2 * GB),
+            idle_ms: Some(0),
+            on_ac: false,
+            last_patrol_at: Some(T0 - 30 * MINUTE),
+            last_low_disk_trigger_at: Some(T0 - HOUR),
+            ..cond()
+        };
+        assert_eq!(decide(&critical), Decision::Run(PatrolTrigger::Critical));
+        assert_eq!(
+            decide(&with_rules(every(PawtrolFrequency::LowDiskOnly), critical)),
+            Decision::Run(PatrolTrigger::Critical)
+        );
+        assert_eq!(
+            decide(&Conditions { free_bytes: Some(3 * GB), ..critical }),
+            Decision::Wait("not due yet"),
+            "exactly at the critical threshold is only low"
+        );
+        assert_eq!(
+            decide(&Conditions { free_bytes: Some(3 * GB), last_low_disk_trigger_at: None, ..critical }),
+            Decision::Run(PatrolTrigger::LowDisk)
+        );
+        assert_eq!(
+            decide(&Conditions { last_scheduled_at: Some(T0 - 59 * MINUTE), ..critical }),
+            Decision::Wait("ran within the last hour"),
+            "the hourly cap still applies"
+        );
+        assert_eq!(
+            decide(&Conditions { last_critical_trigger_at: Some(T0 - 2 * HOUR + 1), ..critical }),
+            Decision::Wait("not due yet")
+        );
+        assert_eq!(
+            decide(&Conditions { last_critical_trigger_at: Some(T0 - 2 * HOUR), ..critical }),
+            Decision::Run(PatrolTrigger::Critical)
+        );
+        let off = PatrolRules { critical_gb: 0, ..PatrolRules::default() };
+        assert_eq!(
+            decide(&with_rules(off, Conditions { free_bytes: Some(0), last_low_disk_trigger_at: None, ..critical })),
+            Decision::Run(PatrolTrigger::LowDisk)
+        );
+    }
+
+    #[test]
+    fn tier_cooldowns_across_ticks() {
+        let mut state = PatrolState::default();
+        let tick = |state: &PatrolState, now: u64, free: u64| {
+            decide(&Conditions {
+                now,
+                last_patrol_at: state.last_patrol_at,
+                last_scheduled_at: state.last_scheduled_at,
+                last_low_disk_trigger_at: state.last_low_disk_trigger_at,
+                last_critical_trigger_at: state.last_critical_trigger_at,
+                idle_ms: Some(0),
+                on_ac: false,
+                free_bytes: Some(free),
+                rules: PatrolRules::default(),
+            })
+        };
+        let fire = |state: &mut PatrolState, now: u64, free: u64| {
+            let d = tick(state, now, free);
+            if let Decision::Run(t) = d {
+                record_trigger(state, t, now);
+                state.last_patrol_at = Some(now);
+            }
+            d
+        };
+
+        assert_eq!(fire(&mut state, T0, 2 * GB), Decision::Run(PatrolTrigger::Critical));
+        assert_eq!(state.last_critical_trigger_at, Some(T0));
+        assert_eq!(state.last_low_disk_trigger_at, Some(T0), "critical also restarts the low cooldown");
+        assert_eq!(fire(&mut state, T0 + 30 * MINUTE, GB), Decision::Wait("ran within the last hour"));
+        assert_eq!(fire(&mut state, T0 + HOUR, 2 * GB), Decision::Wait("not due yet"));
+        assert_eq!(fire(&mut state, T0 + HOUR, 5 * GB), Decision::Wait("not due yet"));
+        assert_eq!(fire(&mut state, T0 + 2 * HOUR, 2 * GB), Decision::Run(PatrolTrigger::Critical));
+        assert_eq!(fire(&mut state, T0 + 3 * HOUR, 5 * GB), Decision::Wait("not due yet"));
+        assert_eq!(fire(&mut state, T0 + 8 * HOUR, 5 * GB), Decision::Run(PatrolTrigger::LowDisk));
+        assert_eq!(state.last_critical_trigger_at, Some(T0 + 2 * HOUR));
+        assert_eq!(fire(&mut state, T0 + 9 * HOUR, 2 * GB), Decision::Run(PatrolTrigger::Critical));
+        assert_eq!(state.last_scheduled_at, Some(T0 + 9 * HOUR));
+
+        let mut manual = PatrolState::default();
+        record_trigger(&mut manual, PatrolTrigger::Schedule, T0);
+        assert_eq!(manual.last_scheduled_at, Some(T0));
+        assert_eq!((manual.last_low_disk_trigger_at, manual.last_critical_trigger_at), (None, None));
+    }
+
     #[test]
     fn next_patrol_estimate_respects_interval_and_rate_limit() {
         let mut s = PatrolState::default();
-        assert_eq!(next_patrol_estimate(&s, T0), T0);
+        assert_eq!(next_patrol_estimate(&s, T0, DAY), T0);
         s.last_patrol_at = Some(T0 - HOUR);
-        assert_eq!(next_patrol_estimate(&s, T0), T0 - HOUR + DAY);
+        assert_eq!(next_patrol_estimate(&s, T0, DAY), T0 - HOUR + DAY);
         s.last_patrol_at = Some(T0 - 3 * DAY);
-        assert_eq!(next_patrol_estimate(&s, T0), T0);
+        assert_eq!(next_patrol_estimate(&s, T0, DAY), T0);
         s.last_scheduled_at = Some(T0 - 10 * MINUTE);
-        assert_eq!(next_patrol_estimate(&s, T0), T0 + 50 * MINUTE);
+        assert_eq!(next_patrol_estimate(&s, T0, DAY), T0 + 50 * MINUTE);
 
-        let st = status_from(s.clone(), false, true, false, T0);
+        let paused = PatrolRules { enabled: false, ..PatrolRules::default() };
+        let st = status_from(s.clone(), paused, false, T0);
         assert_eq!(st.next_patrol_at, None);
-        let st = status_from(s, true, false, true, T0);
+        assert!(!st.enabled && st.auto_clean && st.rules == paused);
+        let st = status_from(s, rules_with(false), true, T0);
         assert_eq!(st.next_patrol_at, Some(T0 + 50 * MINUTE));
         assert!(st.running && st.enabled && !st.auto_clean);
     }

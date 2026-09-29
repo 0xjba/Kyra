@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Clock, Hand, LockKeyhole, Radar, Siren } from "lucide-react";
-import { useGuardianStore } from "../stores/guardianStore";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AlertTriangle, Check, Clock, Hand, LockKeyhole, OctagonAlert, Radar, Siren } from "lucide-react";
+import { useGuardianStore, type PawtrolTab } from "../stores/guardianStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatSize } from "../utils/format";
 import { agoLabel, dataLossCopy, nextPatrolLabel, patrolStatusLine, runSummary } from "../utils/patrol";
-import type { PatrolRun, PatrolStatus, PatrolTrigger, ReviewItem } from "../lib/tauri";
+import type { PatrolFrequency, PatrolRules, PatrolRun, PatrolStatus, PatrolTrigger, ReviewItem } from "../lib/tauri";
 import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import SubscribeSheet from "../components/SubscribeSheet";
 import RestoreSheet from "../components/RestoreSheet";
@@ -38,10 +38,46 @@ const TEASER = [
 ];
 
 const TRIGGERS: Record<PatrolTrigger, { icon: typeof Clock; label: string }> = {
-  schedule: { icon: Clock, label: "Daily run" },
-  low_disk: { icon: AlertTriangle, label: "Low disk" },
+  schedule: { icon: Clock, label: "Scheduled run" },
+  low_disk: { icon: AlertTriangle, label: "Low space" },
+  critical: { icon: OctagonAlert, label: "Space critical" },
   manual: { icon: Hand, label: "You asked" },
 };
+
+type Option<T extends string> = { value: T; label: string };
+
+const TABS: Option<PawtrolTab>[] = [
+  { value: "overview", label: "Overview" },
+  { value: "rules", label: "Rules" },
+];
+
+const FREQUENCIES: Option<PatrolFrequency>[] = [
+  { value: "6h", label: "Every 6 hours" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "low_disk_only", label: "Only when space is low" },
+];
+
+const SAFE_ACTIONS: Option<PatrolRules["safe_action"]>[] = [
+  { value: "auto", label: "Clean automatically" },
+  { value: "ask", label: "Ask me first" },
+];
+
+const REVIEW_ACTIONS: Option<PatrolRules["review_action"]>[] = [
+  { value: "notify", label: "Notify me" },
+  { value: "quiet", label: "List quietly" },
+];
+
+const DATA_ACTIONS: Option<PatrolRules["data_action"]>[] = [
+  { value: "notify", label: "Notify me" },
+  { value: "quiet", label: "List quietly" },
+  { value: "ignore", label: "Ignore" },
+];
+
+const LOW_MIN = 5;
+const LOW_MAX = 100;
+const LOW_STEP = 5;
+const CRITICAL_MIN = 1;
 
 function tierColor(score: number): string {
   if (score > 70) return "#2AC852";
@@ -152,7 +188,7 @@ function LockedView({ onSubscribe, onRestore }: { onSubscribe: () => void; onRes
         </div>
         <div className="guardian-teaser-lock">
           <LockKeyhole size={14} strokeWidth={2} />
-          Your patrol reports show up here
+          Your Pawtrol reports show up here
         </div>
       </div>
     </div>
@@ -160,7 +196,7 @@ function LockedView({ onSubscribe, onRestore }: { onSubscribe: () => void; onRes
 }
 
 function DutyHero({ status, now }: { status: PatrolStatus | null; now: number }) {
-  const setPatrol = useGuardianStore((s) => s.setPatrol);
+  const setRules = useGuardianStore((s) => s.setRules);
   const patrolError = useGuardianStore((s) => s.patrolError);
 
   const running = status?.running ?? false;
@@ -194,7 +230,7 @@ function DutyHero({ status, now }: { status: PatrolStatus | null; now: number })
         </div>
         <div className="guardian-duty-actions">
           {paused && status && (
-            <button className="guardian-pill guardian-pill-primary" onClick={() => setPatrol(true, status.auto_clean)}>
+            <button className="guardian-pill guardian-pill-primary" onClick={() => setRules({ ...status.rules, enabled: true })}>
               Resume Pawtrol
             </button>
           )}
@@ -361,7 +397,7 @@ function ReviewPanel({ status }: { status: PatrolStatus | null }) {
             <>
               <div className="guardian-group-head">
                 <span className="guardian-group-label">
-                  Safe to clean{status && !status.auto_clean ? " · waiting because auto-clean is off" : ""}
+                  Safe to clean{status?.rules.safe_action === "ask" ? " · waiting because you chose Ask me first" : ""}
                 </span>
                 <button
                   className="guardian-btn-clean guardian-btn-compact"
@@ -463,7 +499,9 @@ function ActivityPanel({ status, now }: { status: PatrolStatus | null; now: numb
           <div className="guardian-activity-empty">
             {status?.next_patrol_at
               ? `Pawtrol hasn't run yet. First run ${nextPatrolLabel(status.next_patrol_at, now).replace(/^next /, "")}.`
-              : "Pawtrol hasn't run yet."}
+              : status?.enabled && status.rules.frequency === "low_disk_only"
+                ? "Pawtrol hasn't run yet. It runs when space is low."
+                : "Pawtrol hasn't run yet."}
           </div>
         )}
       </div>
@@ -471,16 +509,229 @@ function ActivityPanel({ status, now }: { status: PatrolStatus | null; now: numb
   );
 }
 
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  disabled,
+  tabs,
+}: {
+  label: string;
+  options: Option<T>[];
+  value: T;
+  onChange: (v: T) => void;
+  disabled?: boolean;
+  tabs?: boolean;
+}) {
+  return (
+    <div className={`gd-seg${tabs ? " gd-seg-tabs" : ""}`} role={tabs ? "tablist" : "radiogroup"} aria-label={label}>
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role={tabs ? "tab" : "radio"}
+            aria-selected={tabs ? on : undefined}
+            aria-checked={tabs ? undefined : on}
+            className={`gd-seg-opt${on ? " on" : ""}`}
+            disabled={disabled}
+            onClick={() => {
+              if (!on) onChange(o.value);
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function RuleRow({ name, desc, off, children }: { name: string; desc: ReactNode; off?: boolean; children: ReactNode }) {
+  return (
+    <div className={`gd-row${off ? " gd-row-off" : ""}`}>
+      <div className="gd-row-info">
+        <div className="gd-row-name">{name}</div>
+        <div className="gd-row-desc">{desc}</div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function RuleSection({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
+  return (
+    <div className="gd-section">
+      <div className="gd-section-label">{label}</div>
+      <div className="gd-card">{children}</div>
+      {note && <div className="gd-note">{note}</div>}
+    </div>
+  );
+}
+
+function Stepper({
+  label,
+  value,
+  onDec,
+  onInc,
+  canDec,
+  canInc,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onDec: () => void;
+  onInc: () => void;
+  canDec: boolean;
+  canInc: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="gd-stepper" role="group" aria-label={label}>
+      <button type="button" className="gd-stepper-btn" onClick={onDec} disabled={disabled || !canDec} aria-label={`Lower ${label}`}>
+        &minus;
+      </button>
+      <span className="gd-stepper-value">{value}</span>
+      <button type="button" className="gd-stepper-btn" onClick={onInc} disabled={disabled || !canInc} aria-label={`Raise ${label}`}>
+        +
+      </button>
+    </div>
+  );
+}
+
+function RulesView({ status }: { status: PatrolStatus | null }) {
+  const setRules = useGuardianStore((s) => s.setRules);
+  const patrolError = useGuardianStore((s) => s.patrolError);
+  const rules = status?.rules;
+
+  if (!rules) return <div className="gd-rules gd-rules-loading">Checking in…</div>;
+
+  const off = !rules.enabled;
+  const update = (patch: Partial<PatrolRules>) => setRules({ ...rules, ...patch });
+  const setLow = (low: number) => {
+    const next = Math.max(LOW_MIN, Math.min(LOW_MAX, low));
+    update({ low_gb: next, critical_gb: Math.max(CRITICAL_MIN, Math.min(rules.critical_gb, next - 1)) });
+  };
+  const setCritical = (gb: number) =>
+    update({ critical_gb: Math.max(CRITICAL_MIN, Math.min(rules.low_gb - 1, gb)) });
+
+  const scheduleHint =
+    rules.frequency === "low_disk_only"
+      ? "Runs only when free space drops below your low-space level."
+      : "Runs when your Mac is idle and plugged in.";
+
+  return (
+    <div className="gd-rules">
+      {patrolError && <div className="gd-rules-error">{patrolError}</div>}
+
+      <RuleSection label="Schedule">
+        <RuleRow name="Pawtrol" desc={off ? "Paused. Nothing runs until you turn it back on." : "On duty. Runs on its own."}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={rules.enabled}
+            aria-label="Pawtrol"
+            className={`gd-toggle${rules.enabled ? " on" : ""}`}
+            onClick={() => update({ enabled: !rules.enabled })}
+          >
+            <span className="gd-toggle-knob" />
+          </button>
+        </RuleRow>
+        <RuleRow name="How often" desc={scheduleHint} off={off}>
+          <Segmented
+            label="How often"
+            options={FREQUENCIES}
+            value={rules.frequency}
+            onChange={(frequency) => update({ frequency })}
+            disabled={off}
+          />
+        </RuleRow>
+      </RuleSection>
+
+      <RuleSection
+        label="When space runs low"
+        note="Low-space runs don't wait for idle or power. Below the critical level, safe caches are cleaned even if you chose Ask me first."
+      >
+        <RuleRow name="Low space" desc={`Run right away below ${rules.low_gb} GB`} off={off}>
+          <Stepper
+            label="low-space level"
+            value={`${rules.low_gb} GB`}
+            onDec={() => setLow(rules.low_gb - LOW_STEP)}
+            onInc={() => setLow(rules.low_gb + LOW_STEP)}
+            canDec={rules.low_gb > LOW_MIN}
+            canInc={rules.low_gb < LOW_MAX}
+            disabled={off}
+          />
+        </RuleRow>
+        <RuleRow name="Critical space" desc={`Below ${rules.critical_gb} GB, clean safe caches immediately and alert you`} off={off}>
+          <Stepper
+            label="critical level"
+            value={`${rules.critical_gb} GB`}
+            onDec={() => setCritical(rules.critical_gb - 1)}
+            onInc={() => setCritical(rules.critical_gb + 1)}
+            canDec={rules.critical_gb > CRITICAL_MIN}
+            canInc={rules.critical_gb < rules.low_gb - 1}
+            disabled={off}
+          />
+        </RuleRow>
+      </RuleSection>
+
+      <RuleSection label="What Pawtrol does">
+        <RuleRow name="Safe caches" desc="Caches and logs your apps rebuild on their own" off={off}>
+          <Segmented
+            label="Safe caches"
+            options={SAFE_ACTIONS}
+            value={rules.safe_action}
+            onChange={(safe_action) => update({ safe_action })}
+            disabled={off}
+          />
+        </RuleRow>
+        <RuleRow name="Worth a look" desc="Probably fine to remove, but worth a glance (score 40–70)" off={off}>
+          <Segmented
+            label="Worth a look"
+            options={REVIEW_ACTIONS}
+            value={rules.review_action}
+            onChange={(review_action) => update({ review_action })}
+            disabled={off}
+          />
+        </RuleRow>
+        <RuleRow name="Your data" desc="Docker, AI models, archives and Trash. Never removed without you." off={off}>
+          <Segmented
+            label="Your data"
+            options={DATA_ACTIONS}
+            value={rules.data_action}
+            onChange={(data_action) => update({ data_action })}
+            disabled={off}
+          />
+        </RuleRow>
+      </RuleSection>
+    </div>
+  );
+}
+
 function Dashboard() {
   const status = useGuardianStore((s) => s.patrolStatus);
+  const tab = useGuardianStore((s) => s.pawtrolTab);
+  const setTab = useGuardianStore((s) => s.setPawtrolTab);
   const now = useNow(60_000);
   return (
     <div className="guardian-dash">
-      <DutyHero status={status} now={now} />
-      <div className="guardian-panels">
-        <ReviewPanel status={status} />
-        <ActivityPanel status={status} now={now} />
+      <div className="gd-tabs">
+        <Segmented tabs label="Pawtrol view" options={TABS} value={tab} onChange={setTab} />
       </div>
+      {tab === "rules" ? (
+        <RulesView status={status} />
+      ) : (
+        <>
+          <DutyHero status={status} now={now} />
+          <div className="guardian-panels">
+            <ReviewPanel status={status} />
+            <ActivityPanel status={status} now={now} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

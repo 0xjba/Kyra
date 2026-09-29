@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { emit, flush, invokedWith, listenerCount, onInvoke } from "../test/tauri";
-import { patrolRun, patrolStatus, reviewItem, toWireRun, toWireStatus } from "../test/fixtures";
+import { patrolRules, patrolRun, patrolStatus, reviewItem, toWireRun, toWireStatus } from "../test/fixtures";
 import { useGuardianStore } from "./guardianStore";
+import { useSettingsStore } from "./settingsStore";
 
 const initial = useGuardianStore.getState();
+const initialSettings = useSettingsStore.getState();
 const EVENTS = ["patrol-started", "patrol-finished", "patrol-status"];
 
 beforeEach(() => {
@@ -15,6 +17,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useGuardianStore.getState().unsubscribePatrol();
+  useSettingsStore.setState(initialSettings, true);
 });
 
 describe("patrol events", () => {
@@ -160,11 +163,41 @@ describe("patrol actions", () => {
     expect(useGuardianStore.getState().patrolStatus?.pending_review).toEqual([]);
   });
 
-  it("setPatrol sends both flags", async () => {
+  it("setRules saves the full rules and applies them right away", async () => {
     useGuardianStore.setState({ patrolStatus: patrolStatus({ enabled: false }) });
-    onInvoke("guardian_set_patrol", () => undefined);
-    await useGuardianStore.getState().setPatrol(true, false);
-    expect(invokedWith("guardian_set_patrol")).toEqual([{ enabled: true, autoClean: false }]);
+    onInvoke("guardian_set_rules", () => undefined);
+    const rules = patrolRules({ enabled: true, frequency: "weekly" });
+    const pending = useGuardianStore.getState().setRules(rules);
+    expect(useGuardianStore.getState().patrolStatus).toMatchObject({ enabled: true, rules });
+    await pending;
+    expect(invokedWith("guardian_set_rules")).toEqual([{ rules }]);
+    expect(useGuardianStore.getState().patrolStatus?.rules).toEqual(rules);
+  });
+
+  it("setRules rolls back and reports when saving fails", async () => {
+    const before = patrolStatus();
+    useGuardianStore.setState({ patrolStatus: before });
+    onInvoke("guardian_set_rules", () => {
+      throw "disk full";
+    });
+    await useGuardianStore.getState().setRules({ ...before.rules, enabled: false, safe_action: "ask" });
+    expect(useGuardianStore.getState().patrolStatus).toMatchObject({ enabled: true, rules: before.rules });
+    expect(useGuardianStore.getState().patrolError).toBe("disk full");
+  });
+
+  it("setRules refreshes cached settings so a later settings save can't undo the rules", async () => {
+    useSettingsStore.setState({ loaded: true });
+    useGuardianStore.setState({ patrolStatus: patrolStatus() });
+    onInvoke("guardian_set_rules", () => undefined);
+    onInvoke("load_settings", () => ({ ...useSettingsStore.getState().settings, low_disk_threshold_gb: 30 }));
+    await useGuardianStore.getState().setRules(patrolRules({ low_gb: 30 }));
+    expect(useSettingsStore.getState().settings.low_disk_threshold_gb).toBe(30);
+  });
+
+  it("remembers the last Pawtrol tab", () => {
+    useGuardianStore.getState().setPawtrolTab("rules");
+    expect(useGuardianStore.getState().pawtrolTab).toBe("rules");
+    expect(localStorage.getItem("kyra.pawtrol.tab")).toBe("rules");
   });
 });
 

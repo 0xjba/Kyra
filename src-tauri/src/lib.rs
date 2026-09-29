@@ -144,6 +144,7 @@ pub fn run() {
             commands::guardian::guardian_review_clean,
             commands::guardian::guardian_review_dismiss,
             commands::guardian::guardian_set_patrol,
+            commands::guardian::guardian_set_rules,
             commands::guardian::get_device_name,
             tray::set_tray_visible,
             #[cfg(target_os = "macos")]

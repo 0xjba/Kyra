@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agoLabel, dataLossCopy, nextPatrolLabel, patrolStatusLine, runSummary } from "./patrol";
-import { patrolRun, patrolStatus } from "../test/fixtures";
+import { patrolRules, patrolRun, patrolStatus } from "../test/fixtures";
 
 const NOW = new Date(2026, 8, 29, 14, 0).getTime();
 const at = (h: number, m = 0, dayOffset = 0) => new Date(2026, 8, 29 + dayOffset, h, m).getTime() / 1000;
@@ -30,6 +30,14 @@ describe("patrol labels", () => {
     expect(patrolStatusLine(patrolStatus({ ...base, running: true }), NOW)).toBe("Checking now…");
     expect(patrolStatusLine(patrolStatus({ ...base, enabled: false }), NOW)).toBe("Paused · last run 3h ago");
     expect(patrolStatusLine(patrolStatus({ last_patrol_at: null, next_patrol_at: null }), NOW)).toBe("Hasn't run yet");
+    const lowOnly = { rules: patrolRules({ frequency: "low_disk_only" }), next_patrol_at: null };
+    expect(patrolStatusLine(patrolStatus({ ...lowOnly, last_patrol_at: null }), NOW)).toBe("Runs when space is low");
+    expect(patrolStatusLine(patrolStatus({ ...lowOnly, last_patrol_at: S - 3 * 3600 }), NOW)).toBe(
+      "Last run 3h ago · runs when space is low",
+    );
+    expect(patrolStatusLine(patrolStatus({ ...lowOnly, enabled: false, last_patrol_at: null }), NOW)).toBe(
+      "Paused until you resume it",
+    );
   });
 
   it("summarises a run", () => {

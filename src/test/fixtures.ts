@@ -5,6 +5,7 @@ import type {
   OptTask,
   ScanItem,
   PatrolRun,
+  PatrolRules,
   PatrolStatus,
   ReviewItem,
 } from "../lib/tauri";
@@ -82,7 +83,18 @@ export const patrolRun = (overrides: Partial<PatrolRun> = {}): PatrolRun => ({
   ...overrides,
 });
 
-export const patrolStatus = (overrides: Partial<PatrolStatus> = {}): PatrolStatus => ({
+export const patrolRules = (overrides: Partial<PatrolRules> = {}): PatrolRules => ({
+  enabled: true,
+  frequency: "daily",
+  low_gb: 20,
+  critical_gb: 5,
+  safe_action: "auto",
+  review_action: "notify",
+  data_action: "notify",
+  ...overrides,
+});
+
+export const patrolStatus = ({ rules, ...overrides }: Partial<PatrolStatus> = {}): PatrolStatus => ({
   enabled: true,
   auto_clean: true,
   running: false,
@@ -93,6 +105,7 @@ export const patrolStatus = (overrides: Partial<PatrolStatus> = {}): PatrolStatu
   pending_review: [],
   history: [],
   ...overrides,
+  rules: patrolRules({ enabled: overrides.enabled ?? true, ...rules }),
 });
 
 /** The patrol engine sends epoch milliseconds; the tauri.ts wrappers convert to seconds. */

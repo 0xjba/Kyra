@@ -65,7 +65,7 @@ function Row({ name, desc, children, mono }: { name: ReactNode; desc?: ReactNode
   );
 }
 
-function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button
       type="button"
@@ -74,7 +74,6 @@ function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: 
       aria-label={label}
       className={`st-toggle${on ? " on" : ""}`}
       onClick={() => onChange(!on)}
-      disabled={disabled}
     >
       <span className="st-toggle-knob" />
     </button>
@@ -126,8 +125,6 @@ export default function Settings() {
   const setNotificationsEnabled = useSettingsStore((s) => s.setNotificationsEnabled);
   const setLowDiskThreshold = useSettingsStore((s) => s.setLowDiskThreshold);
   const setOnboardingCompleted = useSettingsStore((s) => s.setOnboardingCompleted);
-  const setPawtrolEnabled = useSettingsStore((s) => s.setPawtrolEnabled);
-  const setPawtrolAutoClean = useSettingsStore((s) => s.setPawtrolAutoClean);
   const addWhitelist = useSettingsStore((s) => s.addWhitelist);
   const removeWhitelist = useSettingsStore((s) => s.removeWhitelist);
 
@@ -138,6 +135,7 @@ export default function Settings() {
   const accountError = useGuardianStore((s) => s.accountError);
   const loadAccount = useGuardianStore((s) => s.loadAccount);
   const cancelSubscription = useGuardianStore((s) => s.cancelSubscription);
+  const setPawtrolTab = useGuardianStore((s) => s.setPawtrolTab);
 
   const [active, setActive] = useState<SectionId>("general");
   const [frame, setFrame] = useState(0);
@@ -306,12 +304,16 @@ export default function Settings() {
       low_disk_threshold_gb: 10,
       onboarding_completed: false,
       pawtrol_enabled: true,
-      pawtrol_auto_clean: true,
       pawtrol_login_prompted: settings.pawtrol_login_prompted,
     };
     try { await disable(); } catch {}
     await saveSettings(defaults);
     await load();
+  };
+
+  const openRules = () => {
+    setPawtrolTab("rules");
+    navigate("/guardian");
   };
 
   const link = (url: string) => (e: React.MouseEvent) => {
@@ -382,16 +384,8 @@ export default function Settings() {
               )}
               <Row name="Plan" desc={planLine(account ?? null, license.expires)} />
               {account && <Row name="Devices" desc={devicesLine(account)} />}
-              <Row name="Run automatically" desc="Runs daily and when space runs low">
-                <Toggle label="Run automatically" on={settings.pawtrol_enabled} onChange={setPawtrolEnabled} />
-              </Row>
-              <Row name="Auto-clean safe items" desc="Clears regenerable caches on its own. Anything risky waits for you.">
-                <Toggle
-                  label="Auto-clean safe items"
-                  on={settings.pawtrol_auto_clean}
-                  onChange={setPawtrolAutoClean}
-                  disabled={!settings.pawtrol_enabled}
-                />
+              <Row name="Pawtrol rules" desc="Schedule, low-space alerts and what it cleans">
+                <Pill onClick={openRules}>Open</Pill>
               </Row>
               {account && (
                 <Row
@@ -445,13 +439,19 @@ export default function Settings() {
           <Row name="Notifications" desc="Low disk space and update alerts">
             <Toggle label="Notifications" on={settings.notifications_enabled} onChange={setNotificationsEnabled} />
           </Row>
-          <Row name="Low disk space alert" desc="Warn when free space drops below">
-            <Stepper
-              value={`${settings.low_disk_threshold_gb} GB`}
-              onDec={() => setLowDiskThreshold(stepOption(LOW_DISK_OPTIONS, settings.low_disk_threshold_gb, -1))}
-              onInc={() => setLowDiskThreshold(stepOption(LOW_DISK_OPTIONS, settings.low_disk_threshold_gb, 1))}
-            />
-          </Row>
+          {license.active ? (
+            <Row name="Low disk space alert" desc="Managed by Pawtrol">
+              <Pill onClick={openRules}>View rules</Pill>
+            </Row>
+          ) : (
+            <Row name="Low disk space alert" desc="Warn when free space drops below">
+              <Stepper
+                value={`${settings.low_disk_threshold_gb} GB`}
+                onDec={() => setLowDiskThreshold(stepOption(LOW_DISK_OPTIONS, settings.low_disk_threshold_gb, -1))}
+                onInc={() => setLowDiskThreshold(stepOption(LOW_DISK_OPTIONS, settings.low_disk_threshold_gb, 1))}
+              />
+            </Row>
+          )}
           <Row name="Check for updates" desc="Automatically on launch">
             <Toggle label="Check for updates" on={settings.check_for_updates} onChange={setCheckForUpdates} />
           </Row>

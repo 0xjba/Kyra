@@ -38,6 +38,7 @@ export function patrolStatusLine(status: PatrolStatus, nowMs = Date.now()): stri
   if (status.running) return "Checking now…";
   const ago = status.last_patrol_at ? agoLabel(status.last_patrol_at, nowMs) : null;
   if (!status.enabled) return ago ? `Paused · last run ${ago}` : "Paused until you resume it";
+  if (status.rules?.frequency === "low_disk_only") return ago ? `Last run ${ago} · runs when space is low` : "Runs when space is low";
   const head = ago ? `Last run ${ago}` : "Hasn't run yet";
   return status.next_patrol_at ? `${head} · ${nextPatrolLabel(status.next_patrol_at, nowMs)}` : head;
 }

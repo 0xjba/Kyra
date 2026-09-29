@@ -151,6 +151,15 @@ pub fn guardian_review_dismiss(app: tauri::AppHandle, ids: Vec<String>) -> Resul
 }
 
 #[tauri::command]
+pub fn guardian_set_rules(
+    app: tauri::AppHandle,
+    rules: PatrolRules,
+) -> Result<PatrolRules, String> {
+    patrol::set_rules(&app, rules)
+}
+
+/// Kept for older callers; `guardian_set_rules` is the full form.
+#[tauri::command]
 pub fn guardian_set_patrol(
     app: tauri::AppHandle,
     enabled: bool,

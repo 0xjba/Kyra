@@ -12,7 +12,7 @@ import {
   guardianPatrolNow,
   guardianReviewClean,
   guardianReviewDismiss,
-  guardianSetPatrol,
+  guardianSetRules,
   listenPatrolStarted,
   listenPatrolFinished,
   listenPatrolStatus,
@@ -20,12 +20,14 @@ import {
   type GuardianCleanResult,
   type LicenseStatus,
   type CheckoutSession,
+  type PatrolRules,
   type PatrolRun,
   type PatrolStatus,
 } from "../lib/tauri";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { errorText } from "../utils/pawtrolAccount";
+import { useSettingsStore } from "./settingsStore";
 
 const HISTORY_LIMIT = 20;
 export const CHECKOUT_POLL_MS = 5_000;
@@ -40,6 +42,17 @@ let patrolGeneration = 0;
 let patrolSubscription: Promise<void> | null = null;
 let patrolUnlisten: UnlistenFn[] = [];
 let checkoutTimer: ReturnType<typeof setInterval> | null = null;
+
+export type PawtrolTab = "overview" | "rules";
+const TAB_KEY = "kyra.pawtrol.tab";
+
+function savedTab(): PawtrolTab {
+  try {
+    return localStorage.getItem(TAB_KEY) === "rules" ? "rules" : "overview";
+  } catch {
+    return "overview";
+  }
+}
 
 interface GuardianStore {
   license: LicenseStatus;
@@ -58,6 +71,7 @@ interface GuardianStore {
   reviewBusy: string[];
   reviewResult: GuardianCleanResult | null;
   reviewError: string | null;
+  pawtrolTab: PawtrolTab;
 
   checkLicense: () => Promise<void>;
   /** Creates a hosted checkout for this Mac, opens it and polls until the license turns active. */
@@ -76,7 +90,8 @@ interface GuardianStore {
   patrolNow: () => Promise<void>;
   reviewClean: (ids: string[]) => Promise<void>;
   reviewDismiss: (ids: string[]) => Promise<void>;
-  setPatrol: (enabled: boolean, autoClean: boolean) => Promise<void>;
+  setRules: (rules: PatrolRules) => Promise<void>;
+  setPawtrolTab: (tab: PawtrolTab) => void;
 }
 
 export const useGuardianStore = create<GuardianStore>((set, get) => {
@@ -134,6 +149,7 @@ export const useGuardianStore = create<GuardianStore>((set, get) => {
     reviewBusy: [],
     reviewResult: null,
     reviewError: null,
+    pawtrolTab: savedTab(),
 
     checkLicense: async () => {
       try {
@@ -300,14 +316,26 @@ export const useGuardianStore = create<GuardianStore>((set, get) => {
 
     reviewDismiss: (ids) => runReview(ids, () => guardianReviewDismiss(ids)),
 
-    setPatrol: async (enabled, autoClean) => {
-      patchStatus(() => ({ enabled, auto_clean: autoClean }));
+    setRules: async (rules) => {
+      const prev = get().patrolStatus?.rules;
+      set({ patrolError: null });
+      patchStatus(() => ({ rules, enabled: rules.enabled }));
       try {
-        await guardianSetPatrol(enabled, autoClean);
+        await guardianSetRules(rules);
+        // Rules live in AppSettings; a stale cached copy would overwrite them on the next settings save.
+        if (useSettingsStore.getState().loaded) await useSettingsStore.getState().load();
       } catch (e) {
         set({ patrolError: failed(e) });
+        // A newer change may already be in flight; only roll back our own.
+        if (prev && get().patrolStatus?.rules === rules) patchStatus(() => ({ rules: prev, enabled: prev.enabled }));
       }
-      await get().loadPatrolStatus();
+    },
+
+    setPawtrolTab: (tab) => {
+      set({ pawtrolTab: tab });
+      try {
+        localStorage.setItem(TAB_KEY, tab);
+      } catch {}
     },
   };
 });
