@@ -36,6 +36,7 @@
         "resizable": true,
         "decorations": true,
         "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 20, "y": 29 },
         "transparent": true,
         "acceptFirstMouse": true,
         "minWidth": 680,
