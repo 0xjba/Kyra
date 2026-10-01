@@ -8,6 +8,9 @@ export interface Env {
   REVENUECAT_WEB_PURCHASE_LINK: string;
   // Entitlement identifier that unlocks Pawtrol; "pawtrol" when unset.
   REVENUECAT_ENTITLEMENT?: string;
+  // Product ids (comma-separated) of the monthly and yearly products, for `plan`.
+  REVENUECAT_PRODUCT_MONTHLY?: string;
+  REVENUECAT_PRODUCT_YEARLY?: string;
   // "1" accepts sandbox purchases (testing only); a leaked sandbox link would otherwise grant free access.
   REVENUECAT_ALLOW_SANDBOX?: string;
   RESEND_API_KEY: string;

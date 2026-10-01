@@ -39,24 +39,26 @@ export function environmentAccepted(env: Env, value: unknown): boolean {
 
 export type Plan = "monthly" | "yearly";
 
-// Whole tokens only, so an opaque id like `pri_01m2…` never reads as a period.
-const YEARLY_ID = /(^|[^a-z0-9])(year|yearly|annual|annually|1y|p1y|12m|p12m)([^a-z0-9]|$)/;
-const MONTHLY_ID = /(^|[^a-z0-9])(month|monthly|1m|p1m)([^a-z0-9]|$)/;
+const productIds = (value: string | undefined) =>
+  (value || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
 
-// Product ids decide when they name the period (e.g. `pawtrol_yearly`). Imported Paddle prices
-// keep Paddle's opaque id (`pri_…`), so otherwise the period length decides
-// (expiration minus purchase, as RevenueCat documents for the period duration).
-export function derivePlan(productId: unknown, startMs: unknown, endMs: unknown): Plan | null {
-  if (typeof productId === "string") {
-    const id = productId.toLowerCase();
-    if (YEARLY_ID.test(id)) return "yearly";
-    if (MONTHLY_ID.test(id)) return "monthly";
+const YEAR_THRESHOLD_MS = 60 * DAY * 1000;
+
+// 1. The product id is one of REVENUECAT_PRODUCT_MONTHLY / REVENUECAT_PRODUCT_YEARLY (each a
+//    comma-separated list; imported Paddle prices keep Paddle's `pri_…` id).
+// 2. Otherwise the period length (expiration minus purchase, as RevenueCat documents for the
+//    period duration): more than 60 days is yearly, anything shorter monthly.
+// 3. Otherwise null.
+export function derivePlan(env: Env, productId: unknown, startMs: unknown, endMs: unknown): Plan | null {
+  if (typeof productId === "string" && productId) {
+    if (productIds(env.REVENUECAT_PRODUCT_YEARLY).includes(productId)) return "yearly";
+    if (productIds(env.REVENUECAT_PRODUCT_MONTHLY).includes(productId)) return "monthly";
   }
   if (typeof startMs !== "number" || typeof endMs !== "number" || endMs <= startMs) return null;
-  const days = (endMs - startMs) / (DAY * 1000);
-  if (days >= 26 && days <= 33) return "monthly";
-  if (days >= 350 && days <= 380) return "yearly";
-  return null;
+  return endMs - startMs > YEAR_THRESHOLD_MS ? "yearly" : "monthly";
 }
 
 // Web Purchase Link for an identified customer: `<link>/<app_user_id>?email=<email>`.
@@ -151,7 +153,7 @@ export async function fetchEntitlement(env: Env, appUserId: string): Promise<Ent
     subscription_id: sub.id,
     management_url: typeof sub.management_url === "string" ? sub.management_url : null,
     environment: normalizeEnvironment(sub.environment),
-    plan: derivePlan(sub.product_id, sub.current_period_starts_at, sub.current_period_ends_at),
+    plan: derivePlan(env, sub.product_id, sub.current_period_starts_at, sub.current_period_ends_at),
   };
 }
 

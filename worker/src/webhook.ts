@@ -58,11 +58,16 @@ function isRefund(event: RcEvent): boolean {
   return reason !== "BILLING_ERROR" && typeof event.price === "number" && event.price < 0;
 }
 
-function applyEvent(account: Account, event: RcEvent, type: string): void {
+function applyEvent(env: Env, account: Account, event: RcEvent, type: string): void {
   const expires = secs(event.expiration_at_ms);
   account.environment = normalizeEnvironment(event.environment);
   // For RevenueCat Billing PRODUCT_CHANGE, `product_id` is the old product and `new_product_id` the new one.
-  const plan = derivePlan(event.new_product_id ?? event.product_id, event.purchased_at_ms, event.expiration_at_ms);
+  const plan = derivePlan(
+    env,
+    event.new_product_id ?? event.product_id,
+    event.purchased_at_ms,
+    event.expiration_at_ms
+  );
   if (plan) account.plan = plan;
   if (GRANTING.has(type)) {
     account.status = "active";
@@ -203,7 +208,7 @@ export async function handleRevenueCatWebhook(request: Request, env: Env): Promi
     firstSighting = true;
   }
 
-  applyEvent(account, event, type);
+  applyEvent(env, account, event, type);
   if (ts != null) account.last_event_at = Math.max(ts, account.last_event_at ?? 0);
   // Bind the purchasing Mac only once, so a device evicted later is not re-added on renewal.
   if (firstSighting && pending?.device_id) await bindDevice(env, account, pending.device_id, now);

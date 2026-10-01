@@ -5,7 +5,10 @@ compatibility_date = "2024-01-01"
 [vars]
 JEV_API_URL = "https://api.typesafe.ai/v1/score"
 # Must match the entitlement identifier in RevenueCat (Product catalog > Entitlements).
-REVENUECAT_ENTITLEMENT = "Kyra_pawtrol"
+REVENUECAT_ENTITLEMENT = "kyra_pawtrol"
+# RevenueCat product ids (the Paddle price ids) of the two plans, for `plan` on /account.
+REVENUECAT_PRODUCT_MONTHLY = "pri_01m3vkwxv1sbaj3dxv691s6dr9"
+REVENUECAT_PRODUCT_YEARLY = "pri_01m3vkxpfbmb521vtade5s20rv"
 
 [[kv_namespaces]]
 binding = "LICENSES"

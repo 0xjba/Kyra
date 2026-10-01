@@ -830,16 +830,34 @@ describe("plan", () => {
     expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
   });
 
-  it("prefers a product id that names the period", async () => {
-    await purchase(NOW, { product_id: "pawtrol_yearly", purchased_at_ms: undefined });
+  it("prefers the configured product ids over the period", async () => {
+    env.REVENUECAT_PRODUCT_MONTHLY = "pri_01m3vkwxv1sbaj3dxv691s6dr9";
+    env.REVENUECAT_PRODUCT_YEARLY = "pri_sandbox_yearly, pri_01m3vkxpfbmb521vtade5s20rv";
+    // A yearly price with a short (e.g. accelerated) period is still yearly.
+    await purchase(NOW, {
+      product_id: "pri_01m3vkxpfbmb521vtade5s20rv",
+      expiration_at_ms: (NOW + DAY) * 1000,
+    });
     expect(await plan()).toBe("yearly");
     // RevenueCat Billing PRODUCT_CHANGE: product_id is the old product, new_product_id the new one.
     await event("PRODUCT_CHANGE", NOW + 100, {
-      product_id: "pawtrol_yearly",
-      new_product_id: "pawtrol_monthly",
+      product_id: "pri_01m3vkxpfbmb521vtade5s20rv",
+      new_product_id: "pri_01m3vkwxv1sbaj3dxv691s6dr9",
       purchased_at_ms: undefined,
     });
     expect(await plan()).toBe("monthly");
+    await event("RENEWAL", NOW + 200, { product_id: "pri_sandbox_yearly", purchased_at_ms: undefined });
+    expect(await plan()).toBe("yearly");
+  });
+
+  it.each([
+    [3, "monthly"],
+    [60, "monthly"],
+    [61, "yearly"],
+    [365, "yearly"],
+  ])("reads a %i-day period of an unlisted product as %s", async (days, want) => {
+    await purchase(NOW, { product_id: "monthly", expiration_at_ms: (NOW + days * DAY) * 1000 });
+    expect(await plan()).toBe(want);
   });
 
   it("keeps the known plan when an event does not reveal one, and is null when never known", async () => {
@@ -860,8 +878,9 @@ describe("plan", () => {
     expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
   });
 
-  it("does not read a period out of opaque ids", async () => {
-    await purchase(NOW, { product_id: "pri_01m2y4", purchased_at_ms: undefined });
+  it("is null without a listed product id or a period", async () => {
+    env.REVENUECAT_PRODUCT_MONTHLY = "pri_monthly";
+    await purchase(NOW, { product_id: "yearly", purchased_at_ms: undefined });
     expect(await plan()).toBeNull();
   });
 });
@@ -1011,10 +1030,10 @@ describe("POST /account/manage with Paddle subscriptions", () => {
 
 describe("REVENUECAT_ENTITLEMENT", () => {
   const kyraSub = (overrides: Record<string, unknown> = {}) =>
-    rcSub({ entitlements: { items: [{ lookup_key: "Kyra_pawtrol" }] }, ...overrides });
+    rcSub({ entitlements: { items: [{ lookup_key: "kyra_pawtrol" }] }, ...overrides });
 
   it("uses the configured entitlement for the license fallback and Manage", async () => {
-    env.REVENUECAT_ENTITLEMENT = "Kyra_pawtrol";
+    env.REVENUECAT_ENTITLEMENT = "kyra_pawtrol";
     rcSubs[U1] = [rcSub({ id: "sub_default" }), kyraSub({ id: "sub_kyra" })];
     expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
 
@@ -1025,7 +1044,7 @@ describe("REVENUECAT_ENTITLEMENT", () => {
   });
 
   it("does not count the default entitlement when another one is configured", async () => {
-    env.REVENUECAT_ENTITLEMENT = "Kyra_pawtrol";
+    env.REVENUECAT_ENTITLEMENT = "kyra_pawtrol";
     rcSubs[U1] = [rcSub()];
     expect(await license(D1)).toEqual({ active: false, expires: null });
   });
