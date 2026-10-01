@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy - Kyra</title>
+  <meta name="description" content="What Kyra and Pawtrol send off your Mac, to whom, why, and how long it is kept." />
+  <link rel="icon" href="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" />
+  <link rel="stylesheet" href="assets/legal.css" />
+</head>
+<body>
+  <div class="glow"></div>
+
+  <nav class="site-nav">
+    <div class="wrap">
+      <a href="index.html" class="nav-left">
+        <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" alt="" />
+        Kyra
+      </a>
+      <div class="nav-right">
+        <a href="https://github.com/0xjba/Kyra">GitHub</a>
+        <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/0xjba/Kyra/releases/latest" class="nav-cta">Download</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="doc">
+    <div class="wrap">
+      <article class="doc-inner">
+        <nav class="doc-tabs" aria-label="Legal">
+          <a href="terms.html">Terms</a>
+          <a href="privacy.html" aria-current="page">Privacy</a>
+          <a href="refund.html">Refunds</a>
+        </nav>
+
+        <h1>Privacy Policy</h1>
+        <p class="doc-meta">Last updated: October 1, 2026</p>
+
+        <section class="doc-summary">
+          <h2>The short version</h2>
+          <ul>
+            <li>Kyra scans and cleans your Mac locally. Your files and their contents never leave your Mac.</li>
+            <li>There are no analytics, no tracking, no ads and no crash reporting in Kyra or on this website.</li>
+            <li>The free app only goes online to check for updates on GitHub, and to open ChatGPT if you click Ask AI.</li>
+            <li>Pawtrol, the optional subscription, sends a random device ID, your email address and short storage summaries (category names and sizes, never file names or paths) to our server.</li>
+            <li>Payments are handled by Paddle. We never see your card details.</li>
+            <li>We don't sell or share your data for advertising. You can ask us to delete it at any time.</li>
+          </ul>
+        </section>
+
+        <h2>Who we are</h2>
+        <p>Kyra and Pawtrol are made by <strong>Eleven Tribes</strong> ("we", "us"). We are responsible for the personal data described here, except payment data, which <a href="https://www.paddle.com">Paddle.com</a> handles as the Merchant of Record for Pawtrol (see <a href="#payments">Payments</a>).</p>
+        <p>Questions or requests: <a href="mailto:support@kyra-contact.invalid">support@kyra-contact.invalid</a>.</p>
+
+        <h2>The free Kyra app</h2>
+        <p>Clean, Uninstall, Prune, Installers, Optimize, Analyze and Status all run entirely on your Mac. Kyra doesn't need an account, and it doesn't collect usage statistics or send scan results anywhere. The app connects to the internet only in these cases:</p>
+        <ul>
+          <li><strong>Update checks.</strong> When "Check for updates" is on in Settings (it is on by default), Kyra fetches a small update manifest from GitHub at launch. Updates are downloaded from GitHub Releases, and so is the app itself. GitHub sees your IP address and the request, as with any download. You can switch update checks off in Settings.</li>
+          <li><strong>Ask AI, only when you click it.</strong> Ask AI opens <code>chatgpt.com</code> in your web browser with a prefilled question. The question lists the items you selected, with their names, categories and sizes. In Prune, it also includes up to three project folder names per artifact type. Nothing is sent until you click the button, and what happens afterwards is covered by OpenAI's privacy policy.</li>
+          <li><strong>Links you open</strong>, such as GitHub or this website, open in your browser.</li>
+        </ul>
+
+        <h2>Pawtrol: what leaves your Mac</h2>
+        <p>Pawtrol is an optional paid subscription. It runs as a background agent that scans your storage on a schedule, clears safe caches that apps rebuild on their own, and flags riskier items for you to review. To do that it talks to our server, a Cloudflare Worker. This is everything it sends:</p>
+
+        <div class="flow">
+          <div class="flow-item">
+            <h3>A random device ID</h3>
+            <p>A 64-character random value that Kyra creates the first time Pawtrol needs it and stores in its app data folder, readable only by your user account. It is not derived from your hardware, serial number or name. Kyra sends it with every Pawtrol request so our server knows which Mac's license to check.</p>
+            <p class="flow-to">Sent to: our server. Not passed on to anyone else.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Your email address and plan</h3>
+            <p>Collected when you subscribe (along with your choice of monthly or yearly), and when you restore Pawtrol on another Mac. Your subscription is tied to this address. There is no password.</p>
+            <p class="flow-to">Sent to: our server, which passes it to Paddle to set up the checkout, and to Resend to deliver restore codes.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Storage summaries for scoring</h3>
+            <p>To decide what is worth cleaning, Pawtrol sends one short line of text per storage category that has something to clean. Each line contains the category name, its total cleanable size, the number of locations, and a fixed label plus a size for each location. For Homebrew it also includes the number of outdated packages. For example: <em>"Node.js has 1.1 GB cleanable (2 items). npm cache 955 MB, Yarn cache 120 MB."</em></p>
+            <p>These lines never contain file names, folder paths, your username or file contents. The labels are fixed text built into Kyra.</p>
+            <p class="flow-to">Sent to: our server, which checks your license and forwards only the text lines (without your device ID or email) to the scoring service at api.typesafe.ai. The scores come back to your Mac. If scoring is unavailable, Kyra scores locally instead.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Restore codes</h3>
+            <p>When you restore Pawtrol on a new Mac, our server emails a 6-digit code to your address. You type it into Kyra, and Kyra sends it back together with your email and device ID.</p>
+            <p class="flow-to">Sent to: Resend (your email address and the code, to deliver the message), then our server.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Your IP address</h3>
+            <p>Like any internet request, Pawtrol requests reveal your IP address to our server. We use it only for short-lived rate-limit counters that stop abuse of checkout, restore and subscription management.</p>
+            <p class="flow-to">Seen by: Cloudflare, which runs our server.</p>
+          </div>
+        </div>
+
+        <p><strong>Cleaning always happens on your Mac.</strong> Pawtrol measures folder sizes and deletes on your Mac. No file contents, file names or file paths are uploaded, either to us or to the scoring service.</p>
+
+        <h2>What we store and for how long</h2>
+        <p>Pawtrol data is stored in Cloudflare Workers KV. Some records are deleted automatically after a fixed time:</p>
+        <div class="flow">
+          <div class="flow-item">
+            <h3>Subscription account</h3>
+            <p>Your email address, your Paddle customer and subscription IDs, your plan, the subscription status, when the current paid period ends, whether it is set to cancel, a link to Paddle's customer portal, and the device IDs of up to 3 linked Macs with the date each was linked. Small lookup records connect each linked device ID and Paddle ID to your account.</p>
+            <p class="flow-to">Kept while you have an account with us. Deleted on request (see <a href="#rights">Your choices</a>).</p>
+          </div>
+          <div class="flow-item">
+            <h3>License for each Mac</h3>
+            <p>Whether Pawtrol is active, when it expires, and an anonymous reference (a one-way hash of the device ID that buys).</p>
+            <p class="flow-to">Deleted automatically 35 days after it is written, or 5 days after the paid period ends, whichever is later. It is renewed while the subscription is active.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Checkout in progress</h3>
+            <p>The device ID, email address, plan and Paddle customer and transaction IDs for a checkout you started, so the payment can be matched to your Mac.</p>
+            <p class="flow-to">Deleted automatically after 7 days.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Restore code</h3>
+            <p>Stored only as a salted hash, never as the code itself.</p>
+            <p class="flow-to">Deleted after 10 minutes, after it is used once, or after 5 wrong attempts.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Rate-limit counters</h3>
+            <p>Counters keyed by IP address, email address or device ID.</p>
+            <p class="flow-to">Deleted automatically after 1 hour.</p>
+          </div>
+          <div class="flow-item">
+            <h3>Payment notification IDs</h3>
+            <p>The IDs of notifications Paddle has sent us, so none is processed twice. They contain no personal data.</p>
+            <p class="flow-to">Deleted automatically after 7 days.</p>
+          </div>
+        </div>
+        <p>Our server does not log your email address or the storage summaries. Its error logs contain status codes only.</p>
+
+        <h2 id="payments">Payments</h2>
+        <p>Pawtrol is sold through <strong>Paddle.com</strong>, our online reseller and Merchant of Record. When you subscribe, our server creates a Paddle customer with your email address and starts a checkout tagged with the anonymous reference described above. You enter your payment details on Paddle's checkout. Paddle processes the payment, calculates sales tax or VAT, sends receipts and invoices, and runs the customer portal where you cancel or change your card.</p>
+        <p>We never see or store your card or bank details. Paddle tells us the status of your subscription (for example active, cancelled, past due or refunded), your plan, the billing period and its own customer and subscription IDs. Paddle handles your payment data under its own <a href="https://www.paddle.com/legal/privacy">privacy policy</a>.</p>
+
+        <h2>Who processes data for us</h2>
+        <ul>
+          <li><strong>Cloudflare</strong> runs our server and stores the records above in Workers KV.</li>
+          <li><strong>Paddle</strong> handles checkout, payments, taxes, invoices and the subscription portal.</li>
+          <li><strong>Resend</strong> delivers restore-code emails.</li>
+          <li><strong>The scoring service at api.typesafe.ai</strong> receives the anonymous storage summaries described above and returns scores.</li>
+          <li><strong>GitHub</strong> hosts this website, the app downloads and the update manifest.</li>
+          <li><strong>OpenAI</strong> receives an Ask AI question only when you click Ask AI and send it from your browser.</li>
+        </ul>
+        <p>We use these providers only to run Kyra and Pawtrol. We don't sell your data or share it for advertising. These providers may process data outside your country. We would disclose data to anyone else only if the law requires it.</p>
+
+        <h2>What stays on your Mac</h2>
+        <ul>
+          <li>Scan results, cleaning history and your settings.</li>
+          <li>An operations log at <code>~/Library/Logs/Kyra/operations.log</code> that records what Kyra cleaned, including file paths, so you can check its work. It rotates at 5 MB and is never uploaded.</li>
+          <li>The device ID and a cached copy of your Pawtrol license status, in <code>~/Library/Application Support/com.kyra.app/</code>.</li>
+        </ul>
+
+        <h2>Why we use this data</h2>
+        <p>We use the Pawtrol data above to provide the subscription you asked for: checking your license, linking your Macs, restoring access, scoring cleanup and processing payments through Paddle. We keep rate-limit counters because we have a legitimate interest in preventing abuse. We don't use your data for profiling, marketing or advertising.</p>
+
+        <h2 id="rights">Your choices and rights</h2>
+        <ul>
+          <li><strong>Don't use Pawtrol</strong> and nothing about you reaches our server.</li>
+          <li><strong>Turn off update checks</strong> in Kyra's Settings.</li>
+          <li><strong>Access, correction or deletion.</strong> Email <a href="mailto:support@kyra-contact.invalid">support@kyra-contact.invalid</a> from the address on your subscription. We'll send you a copy of what we hold, correct it, or delete your account record, linked devices and licenses. Deleting your data stops Pawtrol on your linked Macs, so cancel any active subscription first. Paddle keeps its own transaction records as the law requires; contact Paddle for those.</li>
+          <li><strong>Reset this Mac's device ID</strong> by quitting Kyra and deleting <code>device_id.v2</code> from the folder above.</li>
+        </ul>
+        <p>Depending on where you live (for example in the EU, UK or California), you may have more rights, such as objecting to processing, data portability, or complaining to your local data protection authority. We'll honour them. We reply to requests within 30 days.</p>
+
+        <h2>Security</h2>
+        <p>All traffic to our server and to Paddle uses HTTPS. Because the device ID identifies your Mac's subscription, Kyra stores it with owner-only file permissions, never displays or logs it, and only ever sends it to our server. Restore codes are random, expire quickly and are stored hashed.</p>
+
+        <h2>This website</h2>
+        <p>This site is a static page hosted on GitHub Pages. It sets no cookies and runs no analytics or third-party scripts. GitHub may log your IP address when you visit, as described in <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</p>
+
+        <h2>Children</h2>
+        <p>Kyra isn't directed at children, and we don't knowingly collect personal data from anyone under 16. Pawtrol subscriptions must be bought by an adult.</p>
+
+        <h2>Changes</h2>
+        <p>If we change what data Kyra or Pawtrol collects, we'll update this page and the date at the top before the change ships. For significant changes, we'll also tell Pawtrol subscribers by email.</p>
+
+        <h2>Contact</h2>
+        <p>Eleven Tribes &middot; <a href="mailto:support@kyra-contact.invalid">support@kyra-contact.invalid</a></p>
+      </article>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" alt="Kyra" />
+          <span>Kyra</span>
+        </div>
+        <nav class="footer-nav">
+          <a href="https://github.com/0xjba/Kyra/releases/latest">Download</a>
+          <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://github.com/0xjba/Kyra">GitHub</a>
+          <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">License</a>
+          <a href="terms.html">Terms</a>
+          <a href="privacy.html">Privacy</a>
+          <a href="refund.html">Refunds</a>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+        <span>Copyright &copy; 2026 Jobin Ayathil. All rights reserved.</span>
+        <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">MIT License</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

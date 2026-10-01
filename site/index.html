@@ -526,7 +526,9 @@
     }
     .footer-nav {
       display: flex;
-      gap: 32px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 12px 32px;
     }
     .footer-nav a {
       font-size: 13px;
@@ -560,7 +562,7 @@
       .paw-card { grid-template-columns: 1fr; padding: 32px 24px; }
       .nav-right a:not(.nav-cta) { display: none; }
       .footer-top { flex-direction: column; gap: 16px; align-items: center; }
-      .footer-nav { gap: 20px; }
+      .footer-nav { gap: 12px 20px; justify-content: center; }
       .footer-bottom { flex-direction: column; gap: 8px; text-align: center; }
       .reframe p { font-size: 20px; }
     }
@@ -710,7 +712,7 @@
           <div class="paw-tag">Pawtrol <span class="paw-pro">PRO</span></div>
           <h2>Storage that looks<br />after itself.</h2>
           <p class="paw-lead">Pawtrol runs in the background and keeps your Mac clean without you opening Kyra. It clears what's safe on its own and asks before touching anything that matters.</p>
-          <p class="paw-price"><strong>$0.99</strong> / month &middot; cancel anytime</p>
+          <p class="paw-price"><strong>$0.99</strong>/month or <strong>$9.99</strong>/year &middot; cancel anytime</p>
         </div>
         <ul class="paw-list">
           <li>
@@ -741,7 +743,7 @@
       <div class="faq-grid">
         <div class="faq-item">
           <h3>Is it really free?</h3>
-          <p>Every cleaning tool is free and open source under the MIT license, with no trials or limits. Pawtrol, the optional autopilot, is $0.99 a month.</p>
+          <p>Every cleaning tool is free and open source under the MIT license, with no trials or limits. Pawtrol, the optional autopilot, is $0.99/month or $9.99/year.</p>
         </div>
         <div class="faq-item">
           <h3>Is it safe?</h3>
@@ -784,6 +786,9 @@
           <a href="https://github.com/0xjba/Kyra/blob/main/CHANGELOG.md">Changelog</a>
           <a href="https://github.com/0xjba/Kyra">GitHub</a>
           <a href="https://github.com/0xjba/Kyra/blob/main/LICENSE">License</a>
+          <a href="terms.html">Terms</a>
+          <a href="privacy.html">Privacy</a>
+          <a href="refund.html">Refunds</a>
         </nav>
       </div>
       <div class="footer-bottom">
