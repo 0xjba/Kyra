@@ -1,9 +1,10 @@
 # Pawtrol worker
 
-Cloudflare Worker behind Pawtrol ($0.99/month): licenses, the scoring proxy, RevenueCat
-Billing subscriptions (hosted checkout through a Web Purchase Link, cards processed by
-Stripe), email-code restore and account management. Everything is stored in the `LICENSES`
-KV namespace.
+Cloudflare Worker behind Pawtrol ($0.99/month or $9.99/year): licenses, the scoring proxy,
+RevenueCat subscriptions with Paddle Billing as the payment provider (a RevenueCat Web
+Purchase Link hosts plan selection on `pay.rev.cat` and embeds a Paddle checkout; Paddle is
+merchant of record and runs the subscription), email-code restore and account management.
+Everything is stored in the `LICENSES` KV namespace.
 
 ## Endpoints
 
@@ -15,8 +16,8 @@ KV namespace.
 | POST | `/checkout/create` | `{device_id, email}` | `{short_url, app_user_id}` |
 | POST | `/restore/start` | `{email}` | always `{ok: true}` |
 | POST | `/restore/verify` | `{email, code, device_id}` | `{active, expires, app_user_id}` |
-| GET | `/account` | `?device_id=` | `{email (masked), status, current_end, cancel_at_period_end, devices_count, management_url}` or 404 |
-| POST | `/account/manage` | `{device_id}` | `{url}`: single-use link to the RevenueCat customer portal |
+| GET | `/account` | `?device_id=` | `{email (masked), status, current_end, cancel_at_period_end, devices_count, management_url, plan}` or 404; `plan` is `monthly`, `yearly` or null |
+| POST | `/account/manage` | `{device_id}` | `{url}`: https link to the Paddle customer portal (see "Subscription management") |
 | POST | `/subscription/cancel` | any | always 410 `use_management_url` |
 
 New endpoints return errors as `{error, code}`. `code` is one of `invalid_json`,
@@ -45,8 +46,8 @@ New endpoints return errors as `{error, code}`. `code` is one of `invalid_json`,
 
 | Key | Value | TTL |
 | --- | --- | --- |
-| `license:{device_id}` | `{active, expires, app_user_id}` | max(35 d, period + 5 d) |
-| `account:{email}` | `{email, app_user_id, status, current_end, grace_end, cancel_at_period_end, management_url, devices: [{device_id, bound_at}], last_event_at}` | none |
+| `license:{device_id}` | `{active, expires, app_user_id, environment}` | max(35 d, period + 5 d) |
+| `account:{email}` | `{email, app_user_id, status, current_end, grace_end, cancel_at_period_end, management_url, plan, environment, devices: [{device_id, bound_at}], last_event_at}` | none |
 | `device:{device_id}` | email (reverse index) | none |
 | `rcuser:{app_user_id}` | email (reverse index) | none |
 | `pending:{app_user_id}` | `{device_id, email}` from checkout | 7 d |
@@ -56,18 +57,37 @@ New endpoints return errors as `{error, code}`. `code` is one of `invalid_json`,
 
 Emails are trimmed and lower-cased before use as keys.
 
+`environment` is `SANDBOX` or `PRODUCTION`, from the webhook event's `environment` or the
+REST subscription's `environment`. A record without it counts as `SANDBOX`.
+
 ### Subscription rules
 
 - Handled webhook events: `INITIAL_PURCHASE`, `RENEWAL`, `UNCANCELLATION`,
   `PRODUCT_CHANGE` (access until `expiration_at_ms`); `CANCELLATION` (access until the
-  period ends, except `cancel_reason` `CUSTOMER_SUPPORT`, a refund, which ends it now, and
-  `BILLING_ERROR`, which is the retry that accompanies `BILLING_ISSUE`); `BILLING_ISSUE`
-  (access until `grace_period_expiration_at_ms`, or the period end without a grace
-  period); `EXPIRATION` (access ends); `TRANSFER` (the account follows the purchases from
-  `transferred_from` to `transferred_to[0]`). Everything else is acknowledged with 200 and
-  ignored.
-- `SANDBOX` events are ignored unless `REVENUECAT_ALLOW_SANDBOX=1`, so a leaked sandbox
-  link cannot unlock Pawtrol with Stripe test cards. Set it only while testing.
+  period ends, except a refund, which ends it now, and `cancel_reason` `BILLING_ERROR`,
+  the retry that accompanies `BILLING_ISSUE`); `BILLING_ISSUE` (access until
+  `grace_period_expiration_at_ms`, or the period end without a grace period); `EXPIRATION`
+  (access ends); `TRANSFER` (the account follows the purchases from `transferred_from` to
+  `transferred_to[0]`). Everything else is acknowledged with 200 and ignored.
+- Handling does not depend on `store`: `PADDLE` events (this setup) and `RC_BILLING` events
+  take the same path.
+- Refunds: RevenueCat sends `CANCELLATION` with `cancel_reason` `CUSTOMER_SUPPORT` for
+  refunded web subscriptions. `REFUND` and a negative `price` ("negative for refunds") are
+  treated as refunds too. A refund for an earlier period sends no event, and a refund that
+  leaves the Paddle subscription running is followed by the next `RENEWAL`, which restores
+  access.
+- `plan` comes from the product id when it names the period (`…_monthly`, `…_yearly`),
+  otherwise from the period length (`expiration_at_ms - purchased_at_ms`, ~1 month or
+  ~1 year). Imported Paddle prices keep Paddle's `pri_…` id, so for them the period
+  decides. Events that reveal neither keep the stored plan. The RevenueCat fallback fills it
+  in from `current_period_starts_at`/`current_period_ends_at`.
+- Environments: with `REVENUECAT_ALLOW_SANDBOX=1` both are accepted; without it only
+  `PRODUCTION`. Lifecycle events from another environment (or without one) are
+  acknowledged and ignored, and stored licenses and accounts from another environment are
+  treated as absent everywhere (license checks, scoring, account, manage, restore,
+  checkout). Sandbox purchases made while testing therefore stop counting the moment the
+  flag is removed, and a leaked sandbox link cannot unlock Pawtrol with Paddle test cards.
+  Set the flag only while testing.
 - The email comes from the account already linked to the `app_user_id`, else the pending
   checkout, else the `$email` subscriber attribute. Events for customers with none of these
   are acknowledged and skipped.
@@ -84,11 +104,33 @@ Emails are trimmed and lower-cased before use as keys.
   device per 10 minutes, which covers a webhook that is late or lost, e.g. while the app
   polls right after checkout. It never does this for a device that is not bound to an
   account that already exists, so the device cap cannot be bypassed.
-- Cancel, resume and card changes happen in RevenueCat's customer portal
-  (`POST /account/manage`). RevenueCat also emails that portal link with every receipt.
-  The REST API can cancel RevenueCat Billing subscriptions server-side
-  (`POST /v2/projects/{project_id}/subscriptions/{id}/actions/cancel`) if an in-app cancel
-  button is wanted again.
+- `POST /checkout/create` answers 409 `already_active` when this Mac's account is entitled
+  ("Pawtrol is already active on this Mac") or when the email's account is entitled ("This
+  email already has an active Pawtrol subscription"); the app sends that customer to
+  Restore instead of starting a second subscription.
+
+### Subscription management
+
+Paddle runs the subscription, so cancel, resume and card changes happen in Paddle's
+customer portal (`customer-portal.paddle.com`, sandbox `sandbox-customer-portal.paddle.com`);
+RevenueCat's own customer portal is not used with Paddle. `POST /account/manage`:
+
+1. Lists the customer's subscriptions (`GET /projects/{pid}/customers/{cid}/subscriptions`)
+   and picks the `pawtrol` one.
+2. Asks `GET /projects/{pid}/subscriptions/{id}/authenticated_management_url`. The API
+   reference says its `management_url` is, for Paddle subscriptions, "a short-lived
+   authenticated Paddle Customer Portal URL when the API key has the Customer portal session
+   (Write) permission and Paddle returns the required management URLs; otherwise a
+   non-authenticated URL (customer signs in via email) or `null`".
+3. If that call fails or returns no https URL, uses the subscription's own `management_url`
+   (RevenueCat embeds Paddle's authenticated session token in it when the Paddle key has
+   Customer portal sessions: Write). The endpoint's summary still only names the "Web
+   Billing customer portal", hence the fallback.
+4. Answers `{url}` (https only), 409 `no_active_subscription` without one, 502 when the
+   subscription list itself fails.
+
+The server-side cancel and refund endpoints of the REST API are Web Billing only and do not
+apply to Paddle subscriptions.
 
 ### Security notes
 
@@ -101,6 +143,9 @@ Emails are trimmed and lower-cased before use as keys.
   answers `{ok: true}`, counts its per-email limit for every address (so a 429 reveals
   nothing), and sends the email after responding so timing does not reveal accounts
   either.
+- `checkout/create` does reveal whether an email has an active subscription (409
+  `already_active`), which is the price of refusing duplicate subscriptions. It is limited
+  to 10 requests per hour per IP.
 - Account and manage are authorised by possession of a bound `device_id`. There is no
   password or session: anyone who learns a bound device id can read the masked account
   and open the customer portal (where RevenueCat shows the subscription and can cancel
@@ -117,35 +162,39 @@ Emails are trimmed and lower-cased before use as keys.
 
 What this worker relies on, as documented on 2026-10-01:
 
+- Paddle Billing integration (API key permissions, `pay.rev.cat` website approval, product
+  import, Web Purchase Links with Paddle as the payment provider, sandbox testing, "Paddle
+  acts as the billing engine and merchant of record", RevenueCat's customer portal is not
+  used): https://www.revenuecat.com/docs/web/integrations/paddle
 - Web Purchase Links: `https://pay.rev.cat/<token>/<url-encoded app_user_id>`, `?email=`
   presets a non-editable email; a production and a sandbox URL per link; the app_user_id
-  is required (404 without it):
+  is required (404 without it); Paddle Billing is a supported billing engine:
   https://www.revenuecat.com/docs/web/web-billing/web-purchase-links
-- RevenueCat Billing (Stripe as gateway, you are merchant of record; customers based in
-  India are not supported) and the engine comparison (RevenueCat Billing, Stripe Billing,
-  Paddle Billing all work with Web Purchase Links):
-  https://www.revenuecat.com/docs/web/web-billing/configuring-overview,
-  https://www.revenuecat.com/docs/web/overview
-- Lifecycle (renewal failure sends `CANCELLATION` + `BILLING_ISSUE`, grace periods, refunds
-  send `CANCELLATION` with `CUSTOMER_SUPPORT`, uncancel sends `UNCANCELLATION`):
-  https://www.revenuecat.com/docs/web/web-billing/subscription-lifecycle
-- Customer portal (cancel, resume, update card, invoices):
-  https://www.revenuecat.com/docs/web/web-billing/customer-portal
+- Engine comparison (RevenueCat Billing, Stripe Billing and Paddle Billing all work with
+  Web Purchase Links): https://www.revenuecat.com/docs/web/overview
 - Webhooks (Authorization header, 200 required, retries 5x, out-of-order delivery) and
-  event fields (`event_timestamp_ms`, `expiration_at_ms`, `grace_period_expiration_at_ms`,
-  `cancel_reason`, `transferred_from/to`, `subscriber_attributes`, `environment`):
-  https://www.revenuecat.com/docs/integrations/webhooks,
+  event fields (`event_timestamp_ms`, `purchased_at_ms`, `expiration_at_ms` and "subtract
+  `purchased_at_ms` from `expiration_at_ms` to get the period duration",
+  `grace_period_expiration_at_ms`, `cancel_reason`, `price` negative for refunds,
+  `transferred_from/to`, `subscriber_attributes`, `store` including `PADDLE`,
+  `environment` `SANDBOX`/`PRODUCTION`; refunds send `CANCELLATION`, only for the latest
+  period): https://www.revenuecat.com/docs/integrations/webhooks,
   https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields
 - REST API v2 (Bearer v2 secret key; `GET /projects/{id}/customers/{id}/subscriptions`,
-  `GET /projects/{id}/subscriptions/{id}/authenticated_management_url`, 480 requests/min
-  for customer information): https://www.revenuecat.com/docs/api-v2,
+  `GET /projects/{id}/subscriptions/{id}/authenticated_management_url` with
+  `customer_information:subscriptions:read` and its Paddle behaviour quoted above;
+  subscription `store` including `paddle`, `environment` `sandbox`/`production`,
+  `management_url`; 480 requests/min for customer information):
+  https://www.revenuecat.com/docs/api-v2,
   https://www.revenuecat.com/docs/api-v2/subscription,
   https://www.revenuecat.com/docs/api-v2/customer/resources
 
-Not confirmed by the docs and isolated in `src/revenuecat.ts`: whether RevenueCat Billing
-copies the checkout email into the `$email` attribute (the pending checkout covers it), and
-the exact shape of the long-lived `management_url` for RevenueCat Billing subscriptions
-(the single-use authenticated link is used for the button).
+Not confirmed by the docs and isolated in `src/revenuecat.ts` / `src/webhook.ts`: whether
+RevenueCat copies the checkout email into the `$email` attribute (the pending checkout
+covers it); which `cancel_reason` a Paddle refund carries (the cancellation-reasons table
+names only RevenueCat Billing and Stripe Billing for `CUSTOMER_SUPPORT`, so `REFUND` and a
+negative `price` are accepted as well); and how long the Paddle portal URLs stay valid
+(both are fetched fresh on every Manage click).
 
 ## Tests
 
@@ -179,7 +228,8 @@ With the flag in `.dev.vars` and requests addressed to `127.0.0.1`/`localhost`:
 
 - `/checkout/create` returns `http://127.0.0.1:8787/dev/mock-pay?app_user_id=kyra-…`
   instead of the Web Purchase Link. Opening it sends a correctly authorised
-  `INITIAL_PURCHASE` webhook through the real webhook handler.
+  `INITIAL_PURCHASE` webhook (store `PADDLE`, environment `PRODUCTION`, monthly plan;
+  append `&days=365` for a yearly one) through the real webhook handler.
 - `/account/manage` returns `http://127.0.0.1:8787/dev/mock-manage?app_user_id=…`, a page
   with links that fire `CANCELLATION`, `UNCANCELLATION`, `RENEWAL`, `BILLING_ISSUE` and
   `EXPIRATION` webhooks.
@@ -223,25 +273,61 @@ Pick a route: the default `kyra-guardian.<account>.workers.dev`, or a custom dom
 `api.kyra.app`, on a zone in the same account). Release builds of the app must point at
 that URL.
 
-### RevenueCat
+### RevenueCat + Paddle setup
 
-1. Create a project, then add a **RevenueCat Billing** (Web Billing) app to it.
-2. Attach Stripe to its billing config: connect your Stripe account (or start with the
-   claimable sandbox and claim it before going live). Optionally enable Stripe Tax.
-3. Product catalog: create a subscription product, 1 month, USD 0.99 (add other currencies
-   if wanted). Create the entitlement with identifier **`pawtrol`** and attach the product.
-   Create an offering (e.g. `pawtrol`) with one package holding the product.
-4. Funnels > Purchase Links: create a Web Purchase Link for that offering. Set the success
-   behaviour to the default success page (or a page that says "return to Kyra"). Copy the
-   **production** URL template (`https://pay.rev.cat/<token>`), without the app user id.
-   Keep the sandbox URL private.
-5. Customize the customer emails and the customer portal (brand, support email).
-6. Integrations > Webhooks: URL `https://<worker-host>/webhook/revenuecat`, Authorization
-   header value `Bearer <long random string>`, all events, production (add sandbox only
-   while testing).
-7. Project settings > API keys: create a **v2 secret key** with the
-   `customer_information:subscriptions:read` permission (nothing else is needed). Note the
-   project id (`proj…`).
+Do the Paddle steps in the Paddle **sandbox** account (`https://sandbox-vendors.paddle.com/`)
+first, then repeat them in the live account (`https://login.paddle.com/`) before launch.
+Paddle sandbox and live are separate accounts, each with its own key and prices.
+
+**Paddle**
+
+- [ ] Paddle Billing is active (needed for the product import).
+- [ ] Catalog > Products: a Pawtrol product with two recurring prices, USD 0.99 / 1 month and
+      USD 9.99 / 1 year. Each Paddle price becomes one RevenueCat product.
+- [ ] Developer Tools > Authentication > **+ New API key**, set to **not expire** (the
+      default is to expire), with the permissions RevenueCat lists:
+      - Read: Addresses, Adjustments, Businesses, Client-side tokens, Customers, Discounts,
+        Notification settings, Notifications, Payment methods, Prices, Products,
+        Subscriptions, Transactions.
+      - Write: Client-side tokens, Customer portal sessions, Notification settings,
+        Transactions.
+      Customer portal sessions (Write) is what lets RevenueCat put authenticated Paddle
+      portal links in `management_url`; without it Manage cannot open the portal signed in.
+      Keep the key window open until the key is saved in RevenueCat.
+- [ ] Checkout > Website approval: add `pay.rev.cat`. Not required in sandbox; required
+      live, and Paddle reviews it, which can take a while.
+- [ ] Checkout > Checkout settings: if no default payment link is set, enter
+      `https://pay.rev.cat`.
+- [ ] Checkout recovery: turn off abandoned cart emails (their link cannot reopen a checkout
+      RevenueCat started).
+
+**RevenueCat**
+
+- [ ] Create a project.
+- [ ] Web > add a **Paddle** config: set the Paddle API key as its secret, choose
+      **Automatic purchase tracking** (and autogenerated user IDs), then **Connect to Paddle**.
+      Optionally Webhook Configuration > **Apply in Paddle** for faster updates.
+- [ ] Product catalog > Products > the Paddle provider > **Import** both Paddle prices.
+- [ ] Entitlements: create **`pawtrol`** and attach both products.
+- [ ] Offerings: create **`default`** with two packages, monthly ($0.99 product) and yearly
+      ($9.99 product). The plan is chosen on RevenueCat's hosted page.
+- [ ] Funnels > Purchase Links: create a Web Purchase Link for the `default` offering with
+      **Paddle** as the payment provider; set the success behaviour to the default success
+      page (or a page that says "return to Kyra") and a terms link. Share URL > **Copy
+      sandbox URL** for testing (the production URL for launch), without the app user id:
+      `https://pay.rev.cat/<token>`.
+- [ ] Integrations > Webhooks: URL
+      `https://kyra-guardian.flashbacks.workers.dev/webhook/revenuecat`, Authorization header
+      value `Bearer <long random string>`, all events; production, plus sandbox while
+      testing.
+- [ ] Project settings > API keys: create a **v2 secret key** with
+      `customer_information:subscriptions:read` (reads customers and subscriptions; it is
+      also the only permission `authenticated_management_url` requires; customer reads use
+      the same Customer Information domain). Note the project id (`proj…`).
+
+Paddle sends receipts and subscription emails. Sandbox purchases use Paddle's test card
+`4242 4242 4242 4242`, any future expiry, CVC `100`. Paddle's webhook simulator is ignored by
+RevenueCat; test renewals with real sandbox purchases (sandbox periods are full length).
 
 ### Resend
 
@@ -251,17 +337,22 @@ key with sending access, and choose the from address on that domain, e.g.
 
 ### Secrets
 
+Copy each value, then pipe it in so it never lands in shell history:
+
 ```sh
-npx wrangler secret put REVENUECAT_SECRET_API_KEY      # sk_… (v2)
-npx wrangler secret put REVENUECAT_PROJECT_ID          # proj…
-npx wrangler secret put REVENUECAT_WEBHOOK_AUTH        # exact header value, e.g. "Bearer …"
-npx wrangler secret put REVENUECAT_WEB_PURCHASE_LINK   # https://pay.rev.cat/<token>
-npx wrangler secret put RESEND_API_KEY
-npx wrangler secret put MAIL_FROM
-npx wrangler secret put JEV_API_KEY
-# Testing only, remove before launch:
-# npx wrangler secret put REVENUECAT_ALLOW_SANDBOX     # 1
+pbpaste | npx wrangler secret put REVENUECAT_SECRET_API_KEY      # sk_… (v2)
+pbpaste | npx wrangler secret put REVENUECAT_PROJECT_ID          # proj…
+pbpaste | npx wrangler secret put REVENUECAT_WEBHOOK_AUTH        # exact header value, e.g. "Bearer …"
+pbpaste | npx wrangler secret put REVENUECAT_WEB_PURCHASE_LINK   # https://pay.rev.cat/<token> (sandbox URL while testing)
+pbpaste | npx wrangler secret put REVENUECAT_ALLOW_SANDBOX       # 1, testing only (see below)
+pbpaste | npx wrangler secret put RESEND_API_KEY
+pbpaste | npx wrangler secret put MAIL_FROM
+pbpaste | npx wrangler secret put JEV_API_KEY
 ```
+
+Before launch, put the production purchase link and remove the sandbox flag
+(`npx wrangler secret delete REVENUECAT_ALLOW_SANDBOX`). Every sandbox license and account
+then stops counting.
 
 `JEV_API_URL` is a plain var in `wrangler.toml`.
 
@@ -273,6 +364,7 @@ npx wrangler deploy
 ```
 
 Then, with `REVENUECAT_ALLOW_SANDBOX=1` and the sandbox purchase link as
-`REVENUECAT_WEB_PURCHASE_LINK`, run one checkout with a Stripe test card, confirm the
-webhook shows 200 in RevenueCat, `GET /license?device_id=…` reports active, and Manage
-opens the portal. Switch both back to production values before release.
+`REVENUECAT_WEB_PURCHASE_LINK`, run one checkout with the Paddle test card, confirm the
+webhook shows 200 in RevenueCat (store `PADDLE`, environment `SANDBOX`),
+`GET /license?device_id=…` reports active, `GET /account` shows the plan, and Manage opens
+`sandbox-customer-portal.paddle.com`. Switch both back to production values before release.

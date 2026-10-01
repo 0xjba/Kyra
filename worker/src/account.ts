@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { getJson, putJson } from "./kv";
 import { deleteLicense, writeLicense } from "./license";
+import { type Environment, type Plan, environmentAccepted, normalizeEnvironment } from "./revenuecat";
 import { maskEmail } from "./validate";
 
 export type SubStatus = "active" | "cancelled" | "billing_issue" | "expired" | "refunded";
@@ -20,6 +21,10 @@ export interface Account {
   grace_end: number | null;
   cancel_at_period_end: boolean;
   management_url: string | null;
+  /** Billing period of the subscription, when known. */
+  plan?: Plan | null;
+  /** Environment of the newest applied event; missing means sandbox. */
+  environment?: Environment;
   devices: Device[];
   /** RevenueCat `event_timestamp_ms` of the newest applied event. */
   last_event_at: number | null;
@@ -50,8 +55,11 @@ export function isEntitled(s: SubState, now: number): boolean {
   return expires != null && expires > now;
 }
 
-export function getAccount(env: Env, email: string): Promise<Account | null> {
-  return getJson<Account>(env.LICENSES, accountKey(email));
+// An account from an environment the worker does not accept right now (sandbox once
+// REVENUECAT_ALLOW_SANDBOX is removed) is treated as absent everywhere.
+export async function getAccount(env: Env, email: string): Promise<Account | null> {
+  const account = await getJson<Account>(env.LICENSES, accountKey(email));
+  return account && environmentAccepted(env, account.environment) ? account : null;
 }
 
 export async function putAccount(env: Env, account: Account): Promise<void> {
@@ -103,7 +111,7 @@ export async function syncLicenses(env: Env, account: Account): Promise<number |
   const expires = entitlementExpiry(account);
   for (const { device_id } of account.devices) {
     if (expires == null) await deleteLicense(env, device_id);
-    else await writeLicense(env, device_id, expires, account.app_user_id);
+    else await writeLicense(env, device_id, expires, account.app_user_id, normalizeEnvironment(account.environment));
   }
   return expires;
 }
@@ -116,5 +124,6 @@ export function accountView(account: Account) {
     cancel_at_period_end: account.cancel_at_period_end,
     devices_count: account.devices.length,
     management_url: account.management_url,
+    plan: account.plan ?? null,
   };
 }

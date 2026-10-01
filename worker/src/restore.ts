@@ -6,6 +6,7 @@ import { getJson, nowSecs, putJson, rateLimit } from "./kv";
 import { writeLicense } from "./license";
 import { sendRestoreCode } from "./mail";
 import { mockEnabled } from "./mock";
+import { normalizeEnvironment } from "./revenuecat";
 import { isDeviceId, normalizeEmail } from "./validate";
 
 const CODE_TTL_SECONDS = 600;
@@ -103,6 +104,6 @@ export async function handleRestoreVerify(request: Request, env: Env): Promise<R
   await bindDevice(env, account, deviceId, now);
   await putAccount(env, account);
   const expires = entitlementExpiry(account)!;
-  await writeLicense(env, deviceId, expires, account.app_user_id);
+  await writeLicense(env, deviceId, expires, account.app_user_id, normalizeEnvironment(account.environment));
   return json({ active: true, expires, app_user_id: account.app_user_id });
 }

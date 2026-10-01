@@ -1,4 +1,4 @@
-import { accountForDevice, isEntitled } from "./account";
+import { accountForDevice, getAccount, isEntitled } from "./account";
 import type { Env } from "./env";
 import { clientIp, fail, invalidJson, json, readJson } from "./http";
 import { DAY, nowSecs, putJson, rateLimit } from "./kv";
@@ -24,9 +24,16 @@ export async function handleCheckoutCreate(request: Request, env: Env): Promise<
   }
 
   // A Mac already on an account resubscribes as the same RevenueCat customer.
+  const now = nowSecs();
   const account = await accountForDevice(env, deviceId);
-  if (account && isEntitled(account, nowSecs())) {
+  if (account && isEntitled(account, now)) {
     return fail(409, "already_active", "Pawtrol is already active on this Mac");
+  }
+  // A second checkout for an email that already pays would start a duplicate subscription;
+  // that Mac should be added with restore instead.
+  const byEmail = account?.email === email ? account : await getAccount(env, email);
+  if (byEmail && isEntitled(byEmail, now)) {
+    return fail(409, "already_active", "This email already has an active Pawtrol subscription");
   }
   const appUserId = account?.app_user_id ?? (await appUserIdForDevice(deviceId));
 

@@ -38,7 +38,7 @@ function call(path: string, init?: RequestInit): Promise<Response> {
 
 function seedLicense(deviceId: string, active: boolean, expires: number) {
   kv.store.set(`license:${deviceId}`, {
-    value: JSON.stringify({ active, expires, app_user_id: "kyra-1" }),
+    value: JSON.stringify({ active, expires, app_user_id: "kyra-1", environment: "PRODUCTION" }),
   });
 }
 

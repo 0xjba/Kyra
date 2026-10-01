@@ -11,7 +11,7 @@ import { secretsEqual } from "./crypto";
 import type { Env } from "./env";
 import { legacyError, legacyJson } from "./http";
 import { getJson, nowSecs } from "./kv";
-import { sandboxAllowed } from "./revenuecat";
+import { derivePlan, environmentAccepted, normalizeEnvironment } from "./revenuecat";
 import { normalizeEmail } from "./validate";
 
 export interface RcEvent {
@@ -19,7 +19,12 @@ export interface RcEvent {
   id?: string;
   app_user_id?: string;
   environment?: string;
+  store?: string;
+  product_id?: string | null;
+  new_product_id?: string | null;
+  price?: number | null;
   event_timestamp_ms?: number;
+  purchased_at_ms?: number | null;
   expiration_at_ms?: number | null;
   grace_period_expiration_at_ms?: number | null;
   cancel_reason?: string;
@@ -43,8 +48,22 @@ const secs = (ms: unknown) => (typeof ms === "number" ? Math.floor(ms / 1000) : 
 const isStale = (account: Account, ts: number | null) =>
   ts != null && account.last_event_at != null && ts < account.last_event_at;
 
+// Refunds arrive as CANCELLATION. RevenueCat documents `CUSTOMER_SUPPORT` for refunded web
+// subscriptions but only names RevenueCat Billing and Stripe Billing there, so `REFUND` and a
+// negative `price` ("negative for refunds") also count, and a Paddle refund is never read as
+// a plain cancellation.
+function isRefund(event: RcEvent): boolean {
+  const reason = event.cancel_reason;
+  if (reason === "CUSTOMER_SUPPORT" || reason === "REFUND") return true;
+  return reason !== "BILLING_ERROR" && typeof event.price === "number" && event.price < 0;
+}
+
 function applyEvent(account: Account, event: RcEvent, type: string): void {
   const expires = secs(event.expiration_at_ms);
+  account.environment = normalizeEnvironment(event.environment);
+  // For RevenueCat Billing PRODUCT_CHANGE, `product_id` is the old product and `new_product_id` the new one.
+  const plan = derivePlan(event.new_product_id ?? event.product_id, event.purchased_at_ms, event.expiration_at_ms);
+  if (plan) account.plan = plan;
   if (GRANTING.has(type)) {
     account.status = "active";
     account.current_end = expires ?? account.current_end;
@@ -54,7 +73,7 @@ function applyEvent(account: Account, event: RcEvent, type: string): void {
   }
   switch (type) {
     case "CANCELLATION":
-      if (event.cancel_reason === "CUSTOMER_SUPPORT") {
+      if (isRefund(event)) {
         // A refund ends access immediately.
         account.status = "refunded";
         account.cancel_at_period_end = false;
@@ -124,7 +143,14 @@ export async function handleRevenueCatWebhook(request: Request, env: Env): Promi
 
   const type = typeof event.type === "string" ? event.type : "";
   if (!HANDLED.has(type)) return ok({ message: "Event ignored" });
-  if (event.environment === "SANDBOX" && !sandboxAllowed(env)) return ok({ message: "Sandbox event ignored" });
+  // Store-agnostic from here on: RC_BILLING and PADDLE (and any other store) take the same path.
+  // Lifecycle events always carry `environment`; TRANSFER only sometimes, and its accounts are
+  // already filtered by environment when they are looked up.
+  const sandbox =
+    type === "TRANSFER"
+      ? event.environment != null && !environmentAccepted(env, event.environment)
+      : !environmentAccepted(env, event.environment);
+  if (sandbox) return ok({ message: "Sandbox event ignored" });
 
   // Retries reuse event_timestamp_ms, so ordering on it makes redelivery harmless.
   const ts = typeof event.event_timestamp_ms === "number" ? event.event_timestamp_ms : null;
@@ -153,6 +179,7 @@ export async function handleRevenueCatWebhook(request: Request, env: Env): Promi
     account.grace_end = null;
     account.cancel_at_period_end = false;
     account.management_url = null;
+    account.plan = null;
     account.last_event_at = null;
     firstSighting = true;
   }
@@ -168,6 +195,8 @@ export async function handleRevenueCatWebhook(request: Request, env: Env): Promi
       grace_end: null,
       cancel_at_period_end: false,
       management_url: null,
+      plan: null,
+      environment: normalizeEnvironment(event.environment),
       devices: [],
       last_event_at: null,
     };

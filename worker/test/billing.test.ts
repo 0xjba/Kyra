@@ -31,7 +31,10 @@ const DAY = 86_400;
 const EMAIL = "jane@gmail.com";
 const LINK = "https://pay.rev.cat/tok123";
 const RC_API = "https://api.revenuecat.com/v2/projects/proj_test";
-const PORTAL = "https://billing.revenuecat.com/app1/sub1?token=abc";
+const PORTAL = "https://sandbox-customer-portal.paddle.com/cpl_01abc?action=overview&token=pga_auth";
+const PADDLE_MANAGE = "https://sandbox-customer-portal.paddle.com/cpl_01abc?action=overview&token=pga_sub";
+// Imported Paddle prices keep Paddle's opaque price id as the RevenueCat product id.
+const PADDLE_PRICE = "pri_01jss4bz50g1z5yw121npeb3ag";
 const dev = (n: number) => createHash("sha256").update(`device-${n}`).digest("hex");
 const rcId = (deviceId: string) =>
   `kyra-${createHash("sha256").update(`pawtrol-rc:${deviceId}`).digest("hex")}`;
@@ -45,6 +48,7 @@ let revenuecat: ReturnType<typeof vi.fn>;
 let resend: ReturnType<typeof vi.fn>;
 let emails: { to: string[]; subject: string; text: string }[];
 let rcSubs: Record<string, any[]>;
+let authenticatedUrl: () => Response;
 
 function setTime(t: number) {
   vi.setSystemTime(t * 1000);
@@ -79,10 +83,11 @@ function rcEvent(type: string, at = NOW, overrides: Record<string, unknown> = {}
     original_app_user_id: U1,
     aliases: [U1],
     environment: "PRODUCTION",
-    store: "RC_BILLING",
-    product_id: "pawtrol_monthly",
+    store: "PADDLE",
+    product_id: PADDLE_PRICE,
     entitlement_ids: ["pawtrol"],
     event_timestamp_ms: at * 1000,
+    purchased_at_ms: at * 1000,
     expiration_at_ms: (NOW + 30 * DAY) * 1000,
     subscriber_attributes: {},
     ...overrides,
@@ -110,13 +115,15 @@ function rcSub(overrides: Record<string, unknown> = {}) {
     object: "subscription",
     id: "sub1",
     environment: "production",
-    store: "rc_billing",
+    store: "paddle",
+    product_id: PADDLE_PRICE,
     status: "active",
     gives_access: true,
     auto_renewal_status: "will_renew",
+    current_period_starts_at: NOW * 1000,
     current_period_ends_at: (NOW + 30 * DAY) * 1000,
     ends_at: (NOW + 30 * DAY) * 1000,
-    management_url: "https://billing.revenuecat.com/manage/app1",
+    management_url: PADDLE_MANAGE,
     entitlements: { object: "list", items: [{ object: "entitlement", id: "entl1", lookup_key: "pawtrol" }] },
     ...overrides,
   };
@@ -139,6 +146,7 @@ beforeEach(() => {
   };
   emails = [];
   rcSubs = {};
+  authenticatedUrl = () => Response.json({ object: "authenticated_management_url", management_url: PORTAL });
   revenuecat = vi.fn(async (url: string) => {
     const subs = /\/customers\/([^/]+)\/subscriptions$/.exec(url);
     if (subs) {
@@ -146,9 +154,7 @@ beforeEach(() => {
       if (!items) return Response.json({ type: "resource_missing" }, { status: 404 });
       return Response.json({ object: "list", items, next_page: null });
     }
-    if (url.endsWith("/authenticated_management_url")) {
-      return Response.json({ object: "authenticated_management_url", management_url: PORTAL });
-    }
+    if (url.endsWith("/authenticated_management_url")) return authenticatedUrl();
     throw new Error(`unexpected RevenueCat call ${url}`);
   });
   resend = vi.fn(async (_url: string, init: RequestInit) => {
@@ -257,7 +263,12 @@ describe("webhook lifecycle", () => {
     const res = await purchase();
     expect(await res.json()).toEqual({ ok: true, action: "activated", expires: NOW + 30 * DAY });
     expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
-    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, app_user_id: U1 });
+    expect(kv.json(`license:${D1}`)).toEqual({
+      active: true,
+      expires: NOW + 30 * DAY,
+      app_user_id: U1,
+      environment: "PRODUCTION",
+    });
     expect(kv.json(`account:${EMAIL}`)).toEqual({
       email: EMAIL,
       app_user_id: U1,
@@ -266,6 +277,8 @@ describe("webhook lifecycle", () => {
       grace_end: null,
       cancel_at_period_end: false,
       management_url: null,
+      plan: "monthly",
+      environment: "PRODUCTION",
       devices: [{ device_id: D1, bound_at: NOW }],
       last_event_at: NOW * 1000,
     });
@@ -470,7 +483,12 @@ describe("GET /license RevenueCat fallback", () => {
     const [url, init] = revenuecat.mock.calls[0];
     expect(url).toBe(`${RC_API}/customers/${U1}/subscriptions`);
     expect(init.headers.Authorization).toBe("Bearer sk_test_key");
-    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, app_user_id: U1 });
+    expect(kv.json(`license:${D1}`)).toEqual({
+      active: true,
+      expires: NOW + 30 * DAY,
+      app_user_id: U1,
+      environment: "PRODUCTION",
+    });
 
     kv.store.delete(`license:${D1}`);
     expect(await license(D1)).toEqual({ active: false, expires: null });
@@ -492,7 +510,7 @@ describe("GET /license RevenueCat fallback", () => {
     rcSubs[U1] = [rcSub({ ends_at: (NOW + 90 * DAY) * 1000 })];
     setTime(NOW + 31 * DAY);
     expect(await license(D1)).toEqual({ active: true, expires: NOW + 90 * DAY });
-    expect(kv.json(`account:${EMAIL}`).management_url).toBe("https://billing.revenuecat.com/manage/app1");
+    expect(kv.json(`account:${EMAIL}`).management_url).toBe(PADDLE_MANAGE);
   });
 
   it("reports inactive when RevenueCat has no access or fails", async () => {
@@ -666,6 +684,7 @@ describe("GET /account", () => {
       cancel_at_period_end: false,
       devices_count: 1,
       management_url: null,
+      plan: "monthly",
     });
   });
 
@@ -676,7 +695,7 @@ describe("GET /account", () => {
 });
 
 describe("POST /account/manage", () => {
-  it("returns a single-use portal link and remembers the stable URL", async () => {
+  it("returns the authenticated portal link and remembers the subscription's management_url", async () => {
     await purchase();
     rcSubs[U1] = [rcSub()];
     const res = await post("/account/manage", { device_id: D1 });
@@ -686,9 +705,7 @@ describe("POST /account/manage", () => {
       `${RC_API}/customers/${U1}/subscriptions`,
       `${RC_API}/subscriptions/sub1/authenticated_management_url`,
     ]);
-    expect((await (await call(`/account?device_id=${D1}`)).json()).management_url).toBe(
-      "https://billing.revenuecat.com/manage/app1"
-    );
+    expect((await (await call(`/account?device_id=${D1}`)).json()).management_url).toBe(PADDLE_MANAGE);
   });
 
   it("needs a bound device and a subscription", async () => {
@@ -761,5 +778,233 @@ describe("mock mode", () => {
     const res = await post("/checkout/create", { device_id: D1, email: EMAIL }, local);
     expect((await res.json()).short_url.startsWith(LINK)).toBe(true);
     expect((await call(`/dev/mock-pay?app_user_id=${U1}`, local)).status).toBe(404);
+  });
+});
+
+describe("Paddle as RevenueCat's payment provider", () => {
+  it.each(["PADDLE", "RC_BILLING"])("handles %s-store events through the same lifecycle", async (store) => {
+    await purchase(NOW, { store });
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+    await event("CANCELLATION", NOW + 10, { store, cancel_reason: "UNSUBSCRIBE" });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "cancelled", cancel_at_period_end: true });
+    await event("EXPIRATION", NOW + 30 * DAY, { store });
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+  });
+
+  it.each([
+    ["CUSTOMER_SUPPORT", undefined],
+    ["REFUND", undefined],
+    ["UNSUBSCRIBE", -0.99],
+  ])("treats a Paddle CANCELLATION with reason %s and price %s as a refund", async (reason, price) => {
+    await purchase();
+    const res = await event("CANCELLATION", NOW + 10, { cancel_reason: reason, price });
+    expect(await res.json()).toEqual({ ok: true, action: "deactivated" });
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "refunded", cancel_at_period_end: false });
+  });
+
+  it("keeps a paid cancellation and a billing retry apart from refunds", async () => {
+    await purchase();
+    await event("CANCELLATION", NOW + 10, { cancel_reason: "UNSUBSCRIBE", price: 0.99 });
+    expect(kv.json(`account:${EMAIL}`).status).toBe("cancelled");
+    await event("CANCELLATION", NOW + 20, { cancel_reason: "BILLING_ERROR", price: -0.99 });
+    expect(kv.json(`account:${EMAIL}`).status).toBe("billing_issue");
+  });
+
+  it("a renewal after a refund that kept the subscription restores access", async () => {
+    await purchase();
+    await event("CANCELLATION", NOW + 10, { cancel_reason: "CUSTOMER_SUPPORT" });
+    await event("RENEWAL", NOW + 30 * DAY, { expiration_at_ms: (NOW + 60 * DAY) * 1000 });
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 60 * DAY });
+  });
+});
+
+describe("plan", () => {
+  const plan = async () => (await (await call(`/account?device_id=${D1}`)).json()).plan;
+
+  it("derives monthly and yearly from the period of an opaque Paddle price id", async () => {
+    await purchase();
+    expect(await plan()).toBe("monthly");
+    await event("PRODUCT_CHANGE", NOW + 100, { expiration_at_ms: (NOW + 100 + 365 * DAY) * 1000 });
+    expect(await plan()).toBe("yearly");
+    expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
+  });
+
+  it("prefers a product id that names the period", async () => {
+    await purchase(NOW, { product_id: "pawtrol_yearly", purchased_at_ms: undefined });
+    expect(await plan()).toBe("yearly");
+    // RevenueCat Billing PRODUCT_CHANGE: product_id is the old product, new_product_id the new one.
+    await event("PRODUCT_CHANGE", NOW + 100, {
+      product_id: "pawtrol_yearly",
+      new_product_id: "pawtrol_monthly",
+      purchased_at_ms: undefined,
+    });
+    expect(await plan()).toBe("monthly");
+  });
+
+  it("keeps the known plan when an event does not reveal one, and is null when never known", async () => {
+    await purchase();
+    await event("EXPIRATION", NOW + 30 * DAY);
+    expect(await plan()).toBe("monthly");
+
+    kv.store.clear();
+    await purchase(NOW, { purchased_at_ms: undefined });
+    expect(await plan()).toBeNull();
+  });
+
+  it("is filled in by the RevenueCat fallback", async () => {
+    await purchase(NOW, { purchased_at_ms: undefined });
+    rcSubs[U1] = [rcSub({ current_period_ends_at: (NOW + 365 * DAY) * 1000, ends_at: (NOW + 365 * DAY) * 1000 })];
+    setTime(NOW + 31 * DAY);
+    expect((await license(D1)).active).toBe(true);
+    expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
+  });
+
+  it("does not read a period out of opaque ids", async () => {
+    await purchase(NOW, { product_id: "pri_01m2y4", purchased_at_ms: undefined });
+    expect(await plan()).toBeNull();
+  });
+});
+
+describe("environment", () => {
+  async function sandboxPurchase() {
+    env.REVENUECAT_ALLOW_SANDBOX = "1";
+    await purchase(NOW, { environment: "SANDBOX" });
+  }
+
+  it("stores the event environment on the account and the license", async () => {
+    await sandboxPurchase();
+    expect(kv.json(`account:${EMAIL}`).environment).toBe("SANDBOX");
+    expect(kv.json(`license:${D1}`).environment).toBe("SANDBOX");
+    expect((await license(D1)).active).toBe(true);
+  });
+
+  it("treats sandbox records as absent once REVENUECAT_ALLOW_SANDBOX is removed", async () => {
+    await sandboxPurchase();
+    delete env.REVENUECAT_ALLOW_SANDBOX;
+    rcSubs[U1] = [rcSub({ environment: "sandbox" })];
+
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    expect((await call(`/account?device_id=${D1}`)).status).toBe(404);
+    expect((await post("/account/manage", { device_id: D1 })).status).toBe(404);
+    await post("/restore/start", { email: EMAIL });
+    expect(resend).not.toHaveBeenCalled();
+    expect((await post("/checkout/create", { device_id: dev(2), email: EMAIL })).status).toBe(200);
+    const score = await post("/jev/score", { device_id: D1, questions: ["q"] });
+    expect(score.status).toBe(403);
+  });
+
+  it("lets a production purchase replace a sandbox account once the flag is gone", async () => {
+    await sandboxPurchase();
+    delete env.REVENUECAT_ALLOW_SANDBOX;
+    expect((await post("/checkout/create", { device_id: D1, email: EMAIL })).status).toBe(200);
+    await event("INITIAL_PURCHASE", NOW + 100);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ environment: "PRODUCTION", status: "active" });
+    expect(kv.json(`license:${D1}`).environment).toBe("PRODUCTION");
+    expect((await license(D1)).active).toBe(true);
+  });
+
+  it("counts records without an environment as sandbox", async () => {
+    kv.store.set(`license:${D1}`, {
+      value: JSON.stringify({ active: true, expires: NOW + DAY, app_user_id: U1 }),
+    });
+    kv.store.set(`rcsync:${D1}`, { value: String(NOW) });
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    env.REVENUECAT_ALLOW_SANDBOX = "1";
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + DAY });
+  });
+
+  it("ignores lifecycle events without an environment unless sandbox is allowed", async () => {
+    await post("/checkout/create", { device_id: D1, email: EMAIL });
+    const res = await event("INITIAL_PURCHASE", NOW, { environment: undefined });
+    expect(await res.json()).toEqual({ ok: true, message: "Sandbox event ignored" });
+    expect(kv.store.has(`account:${EMAIL}`)).toBe(false);
+  });
+
+  it("ignores sandbox transfers but processes transfers without an environment", async () => {
+    await purchase();
+    const sandbox = await event("TRANSFER", NOW + 10, {
+      app_user_id: undefined,
+      environment: "SANDBOX",
+      transferred_from: [U1],
+      transferred_to: ["kyra-new"],
+    });
+    expect(await sandbox.json()).toEqual({ ok: true, message: "Sandbox event ignored" });
+    const plain = await event("TRANSFER", NOW + 20, {
+      app_user_id: undefined,
+      environment: undefined,
+      transferred_from: [U1],
+      transferred_to: ["kyra-new"],
+    });
+    expect(await plain.json()).toEqual({ ok: true, action: "transferred", accounts: 1 });
+  });
+
+  it("writes the subscription's environment when RevenueCat fills in a license", async () => {
+    env.REVENUECAT_ALLOW_SANDBOX = "1";
+    rcSubs[U1] = [rcSub({ environment: "sandbox" })];
+    expect((await license(D1)).active).toBe(true);
+    expect(kv.json(`license:${D1}`).environment).toBe("SANDBOX");
+  });
+});
+
+describe("POST /checkout/create for an email that already pays", () => {
+  it("is 409 already_active from another Mac", async () => {
+    await purchase();
+    const res = await post("/checkout/create", { device_id: dev(2), email: " JANE@gmail.com " });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      code: "already_active",
+      error: "This email already has an active Pawtrol subscription",
+    });
+    expect(kv.store.has(`pending:${rcId(dev(2))}`)).toBe(false);
+  });
+
+  it("still says this Mac when the requesting Mac is the subscribed one", async () => {
+    await purchase();
+    const res = await post("/checkout/create", { device_id: D1, email: "other@example.com" });
+    expect(await res.json()).toEqual({ code: "already_active", error: "Pawtrol is already active on this Mac" });
+  });
+
+  it("allows checkout once the email's subscription has lapsed", async () => {
+    await purchase();
+    await event("EXPIRATION", NOW + 100);
+    expect((await post("/checkout/create", { device_id: dev(2), email: EMAIL })).status).toBe(200);
+  });
+});
+
+describe("POST /account/manage with Paddle subscriptions", () => {
+  beforeEach(async () => {
+    await purchase();
+    rcSubs[U1] = [rcSub()];
+  });
+
+  const manage = () => post("/account/manage", { device_id: D1 });
+
+  it("uses the authenticated Paddle customer portal URL", async () => {
+    expect(await (await manage()).json()).toEqual({ url: PORTAL });
+  });
+
+  it.each([
+    ["an error", () => Response.json({ type: "invalid_request" }, { status: 400 })],
+    ["a 404", () => Response.json({ type: "resource_missing" }, { status: 404 })],
+    ["null", () => Response.json({ object: "authenticated_management_url", management_url: null })],
+    ["a non-https URL", () => Response.json({ management_url: "http://customer-portal.paddle.com/x" })],
+  ])("falls back to the subscription's management_url when the endpoint returns %s", async (_name, reply) => {
+    authenticatedUrl = reply;
+    const res = await manage();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ url: PADDLE_MANAGE });
+  });
+
+  it("is 502 when the endpoint fails and there is no management_url, 409 when neither has a URL", async () => {
+    authenticatedUrl = () => new Response("down", { status: 503 });
+    rcSubs[U1] = [rcSub({ management_url: null })];
+    expect((await manage()).status).toBe(502);
+
+    authenticatedUrl = () => Response.json({ management_url: null });
+    rcSubs[U1] = [rcSub({ management_url: "javascript:alert(1)" })];
+    const none = await manage();
+    expect(none.status).toBe(409);
+    expect((await none.json()).code).toBe("no_active_subscription");
   });
 });

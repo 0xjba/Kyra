@@ -3,13 +3,21 @@ import type { Env } from "./env";
 import { legacyError, legacyJson } from "./http";
 import { DAY, getJson, nowSecs, putJson, rateLimit } from "./kv";
 import { mockEnabled } from "./mock";
-import { ProviderError, appUserIdForDevice, fetchEntitlement } from "./revenuecat";
+import {
+  type Environment,
+  ProviderError,
+  appUserIdForDevice,
+  environmentAccepted,
+  fetchEntitlement,
+} from "./revenuecat";
 import { isDeviceId } from "./validate";
 
 export interface LicenseRecord {
   active: boolean;
   expires: number;
   app_user_id: string;
+  /** Environment of the purchase; missing means sandbox. */
+  environment?: Environment;
 }
 
 export const LICENSE_TTL_SECONDS = 35 * DAY;
@@ -24,12 +32,19 @@ export async function writeLicense(
   env: Env,
   deviceId: string,
   expires: number,
-  appUserId: string
+  appUserId: string,
+  environment: Environment
 ): Promise<void> {
-  const record: LicenseRecord = { active: true, expires, app_user_id: appUserId };
+  const record: LicenseRecord = { active: true, expires, app_user_id: appUserId, environment };
   // Keep the record at least until the paid period ends (annual plans exceed 35 days).
   const ttl = Math.max(LICENSE_TTL_SECONDS, expires - nowSecs() + LICENSE_KV_GRACE_SECONDS);
   await putJson(env.LICENSES, licenseKey(deviceId), record, ttl);
+}
+
+// A license from an environment the worker does not accept right now counts as no license.
+export async function readLicense(env: Env, deviceId: string): Promise<LicenseRecord | null> {
+  const license = await getJson<LicenseRecord>(env.LICENSES, licenseKey(deviceId));
+  return license && environmentAccepted(env, license.environment) ? license : null;
 }
 
 export async function deleteLicense(env: Env, deviceId: string): Promise<void> {
@@ -41,7 +56,7 @@ export async function handleLicenseCheck(request: Request, env: Env): Promise<Re
   if (!deviceId) return legacyError("Missing device_id", 400);
 
   const now = nowSecs();
-  const license = await getJson<LicenseRecord>(env.LICENSES, licenseKey(deviceId));
+  const license = await readLicense(env, deviceId);
   if (license?.active && license.expires >= now) {
     return legacyJson({ active: true, expires: license.expires });
   }
@@ -77,12 +92,20 @@ async function refreshFromRevenueCat(
 
   try {
     const state = await fetchEntitlement(env, appUserId);
-    if (account && state.management_url && state.management_url !== account.management_url) {
-      account.management_url = state.management_url;
-      await putAccount(env, account);
+    if (account) {
+      let changed = false;
+      if (state.management_url && state.management_url !== account.management_url) {
+        account.management_url = state.management_url;
+        changed = true;
+      }
+      if (state.plan && state.plan !== account.plan) {
+        account.plan = state.plan;
+        changed = true;
+      }
+      if (changed) await putAccount(env, account);
     }
     if (!state.active || state.expires == null || state.expires <= now) return null;
-    await writeLicense(env, deviceId, state.expires, appUserId);
+    await writeLicense(env, deviceId, state.expires, appUserId, state.environment);
     return state.expires;
   } catch (err) {
     console.error(`license refresh failed: ${err instanceof ProviderError ? err.message : "unexpected error"}`);
@@ -101,7 +124,7 @@ export async function handleJevScore(request: Request, env: Env): Promise<Respon
     return legacyError("Missing device_id or questions", 400);
   }
 
-  const license = await getJson<LicenseRecord>(env.LICENSES, licenseKey(body.device_id));
+  const license = await readLicense(env, body.device_id);
   if (!license) return legacyError("No active license", 403);
   if (!license.active || license.expires < nowSecs()) return legacyError("License expired", 403);
 
