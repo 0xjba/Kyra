@@ -310,7 +310,7 @@ export default function SuccessOverlay({
             </div>
             <button type="button" className="ks-upsell-btn" onClick={handleUpgrade}>
               Try Pawtrol
-              <span className="ks-upsell-price">$0.99/mo</span>
+              <span className="ks-upsell-price">from $0.99/mo</span>
             </button>
           </div>
           <button type="button" className="ks-done-link" onClick={onDone}>

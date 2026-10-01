@@ -80,10 +80,10 @@ pub fn guardian_get_device_id() -> String {
 }
 
 #[tauri::command]
-pub async fn guardian_checkout_create(email: String) -> Result<CheckoutSession, String> {
+pub async fn guardian_checkout_create(email: String, plan: String) -> Result<CheckoutSession, String> {
     let device_id = license::get_or_create_device_id();
     let base = worker_url();
-    let mut session = account::checkout_create_with(http(), &base, &device_id, &email).await?;
+    let mut session = account::checkout_create_with(http(), &base, &device_id, &email, &plan).await?;
     session.opened_by_app = open_local_dev_page(&base, &session.short_url)?;
     Ok(session)
 }

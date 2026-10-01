@@ -83,6 +83,7 @@ const ACCOUNT = {
   current_end: OCT_29_2026,
   cancel_at_period_end: false,
   devices_count: 2,
+  plan: "yearly" as const,
 };
 
 
@@ -96,20 +97,20 @@ describe("Pawtrol account", () => {
     renderSettings();
     await act(flush);
     expect(rowDesc("Account")).toBe("j***@gmail.com");
-    expect(rowDesc("Plan")).toBe("$0.99/month · renews Oct 29, 2026");
+    expect(rowDesc("Plan")).toBe("Yearly plan · renews Oct 29, 2026");
     expect(rowDesc("Devices")).toBe("2 of 3 Macs");
-    expect(rowDesc("Manage subscription")).toBe("Change card or cancel on RevenueCat's secure page");
+    expect(rowDesc("Manage subscription")).toBe("Change card or cancel on Paddle's secure page");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
   it("opens the subscription portal from Manage", async () => {
-    onInvoke("guardian_manage_subscription", () => ({ url: "https://billing.revenuecat.com/app1/sub1?token=t" }));
+    onInvoke("guardian_manage_subscription", () => ({ url: "https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t" }));
     renderSettings();
     await act(flush);
     fireEvent.click(screen.getByRole("button", { name: "Manage" }));
     await act(flush);
     expect(invokedWith("guardian_manage_subscription")).toHaveLength(1);
-    expect(openUrl).toHaveBeenCalledWith("https://billing.revenuecat.com/app1/sub1?token=t");
+    expect(openUrl).toHaveBeenCalledWith("https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t");
   });
 
   it("shows the end date once cancelled and a manage failure inline", async () => {

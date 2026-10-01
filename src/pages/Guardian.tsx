@@ -166,6 +166,7 @@ function LockedView({ onSubscribe, onRestore }: { onSubscribe: () => void; onRes
               Subscribe
             </button>
             <div className="guardian-price">
+              <span className="guardian-price-period">from</span>
               <span className="guardian-price-amount">$0.99</span>
               <span className="guardian-price-period">/month</span>
             </div>

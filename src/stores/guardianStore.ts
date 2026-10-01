@@ -20,6 +20,7 @@ import {
   type GuardianCleanResult,
   type LicenseStatus,
   type CheckoutSession,
+  type PawtrolPlan,
   type ManageLink,
   type PatrolRules,
   type PatrolRun,
@@ -77,7 +78,7 @@ interface GuardianStore {
 
   checkLicense: () => Promise<void>;
   /** Creates a hosted checkout for this Mac, opens it and polls until the license turns active. */
-  subscribe: (email: string) => Promise<boolean>;
+  subscribe: (email: string, plan: PawtrolPlan) => Promise<boolean>;
   startCheckoutPoll: () => void;
   stopCheckoutPoll: () => void;
   restoreStart: (email: string) => Promise<void>;
@@ -176,11 +177,11 @@ export const useGuardianStore = create<GuardianStore>((set, get) => {
       }
     },
 
-    subscribe: async (email) => {
+    subscribe: async (email, plan) => {
       set({ subscribeError: null });
       let session: CheckoutSession;
       try {
-        session = await guardianCheckoutCreate(email.trim());
+        session = await guardianCheckoutCreate(email.trim(), plan);
       } catch (e) {
         set({ subscribeError: errorText(e) });
         return false;

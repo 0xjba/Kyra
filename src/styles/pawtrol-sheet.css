@@ -115,6 +115,29 @@
   letter-spacing: 0.45em;
 }
 
+.paw-sheet-plans {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.paw-sheet-plans .gd-seg-opt {
+  flex: 1;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.paw-sheet-plans .gd-seg-opt.on {
+  cursor: default;
+}
+
+.paw-sheet-plan-hint {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #1f5fff;
+}
+
 .paw-sheet-error {
   width: 100%;
   font-size: 12px;
@@ -279,6 +302,9 @@
   :root .paw-sheet-btn-primary:hover:not(:disabled) {
     background: linear-gradient(180deg,#4f8bff,#1f5fff);
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -4px rgba(31,95,255,0.45);
+  }
+  :root .paw-sheet-plan-hint {
+    color: #4f8bff;
   }
   :root .paw-sheet-link {
     color: #4f8bff;

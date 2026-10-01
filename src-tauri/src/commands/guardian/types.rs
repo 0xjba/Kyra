@@ -78,7 +78,7 @@ pub struct CheckoutSession {
     pub opened_by_app: bool,
 }
 
-/// RevenueCat's customer portal, where the buyer cancels, resumes or changes card.
+/// Paddle's customer portal, where the buyer cancels, resumes or changes card.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManageLink {
     pub url: String,
@@ -97,6 +97,9 @@ pub struct Account {
     pub cancel_at_period_end: bool,
     #[serde(default)]
     pub devices_count: u32,
+    /// "monthly" or "yearly"; absent when the worker doesn't know.
+    #[serde(default)]
+    pub plan: Option<String>,
     #[serde(default)]
     pub management_url: Option<String>,
 }

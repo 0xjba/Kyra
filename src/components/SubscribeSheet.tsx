@@ -1,8 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ExternalLink, Mail } from "lucide-react";
 import { useGuardianStore } from "../stores/guardianStore";
+import type { PawtrolPlan } from "../lib/tauri";
 import { isValidEmail } from "../utils/pawtrolAccount";
 import PawtrolSheet from "./PawtrolSheet";
+import "../styles/guardian.css";
+
+const PLANS: { value: PawtrolPlan; label: string; price: string; hint?: string }[] = [
+  { value: "yearly", label: "Yearly", price: "$9.99/year", hint: "Save 16%" },
+  { value: "monthly", label: "Monthly", price: "$0.99/month" },
+];
 
 interface SubscribeSheetProps {
   open: boolean;
@@ -23,6 +30,7 @@ function SubscribeFlow({ onClose }: { onClose: () => void }) {
 
   const [step, setStep] = useState<"email" | "checkout">("email");
   const [email, setEmail] = useState("");
+  const [plan, setPlan] = useState<PawtrolPlan>("yearly");
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -44,7 +52,7 @@ function SubscribeFlow({ onClose }: { onClose: () => void }) {
     setTouched(true);
     if (!valid || busy) return;
     setBusy(true);
-    const ok = await subscribe(email);
+    const ok = await subscribe(email, plan);
     setBusy(false);
     if (ok) setStep("checkout");
   };
@@ -117,6 +125,24 @@ function SubscribeFlow({ onClose }: { onClose: () => void }) {
           onChange={(e) => setEmail(e.target.value)}
           onBlur={() => email && setTouched(true)}
         />
+        <div className="gd-seg paw-sheet-plans" role="radiogroup" aria-label="Plan">
+          {PLANS.map((p) => {
+            const on = p.value === plan;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                className={`gd-seg-opt${on ? " on" : ""}`}
+                onClick={() => setPlan(p.value)}
+              >
+                {p.price}
+                {p.hint && <span className="paw-sheet-plan-hint">{p.hint}</span>}
+              </button>
+            );
+          })}
+        </div>
         {error && (
           <div className="paw-sheet-error" role="alert">
             {error}
@@ -127,7 +153,7 @@ function SubscribeFlow({ onClose }: { onClose: () => void }) {
             Cancel
           </button>
           <button type="submit" className="paw-sheet-btn paw-sheet-btn-primary" disabled={busy}>
-            {busy ? "Opening checkout…" : "Continue · $0.99/mo"}
+            {busy ? "Opening checkout…" : `Continue · ${PLANS.find((p) => p.value === plan)!.price}`}
           </button>
         </div>
       </form>

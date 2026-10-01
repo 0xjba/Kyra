@@ -546,6 +546,8 @@ export interface LicenseStatus {
   expires: number | null;
 }
 
+export type PawtrolPlan = "monthly" | "yearly";
+
 export interface CheckoutSession {
   short_url: string;
   opened_by_app?: boolean;
@@ -559,7 +561,9 @@ export interface Account {
   current_end: number | null;
   cancel_at_period_end: boolean;
   devices_count: number;
-  /** RevenueCat's long-lived management URL, when known. Prefer guardianManageSubscription. */
+  /** Which plan the subscription is on; null/absent when the worker does not know. */
+  plan?: PawtrolPlan | null;
+  /** Paddle's customer portal URL, when known. Prefer guardianManageSubscription. */
   management_url?: string | null;
 }
 
@@ -631,8 +635,8 @@ export async function guardianGetDeviceId(): Promise<string> {
   return invoke<string>("guardian_get_device_id");
 }
 
-export async function guardianCheckoutCreate(email: string): Promise<CheckoutSession> {
-  return invoke<CheckoutSession>("guardian_checkout_create", { email });
+export async function guardianCheckoutCreate(email: string, plan: PawtrolPlan): Promise<CheckoutSession> {
+  return invoke<CheckoutSession>("guardian_checkout_create", { email, plan });
 }
 
 export async function guardianRestoreStart(email: string): Promise<void> {

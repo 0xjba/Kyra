@@ -22,6 +22,7 @@ const SERVER_DOWN: &str = "Pawtrol's server had a hiccup. Try again in a minute.
 const BAD_REPLY: &str = "Got an unexpected reply from Pawtrol. Try again.";
 const GENERIC: &str = "Something went wrong. Try again.";
 const BAD_EMAIL: &str = "Enter a valid email address.";
+const BAD_PLAN: &str = "Pick the monthly or yearly plan.";
 const BAD_CODE: &str = "That code didn't work. Check it and try again.";
 const EXPIRED_CODE: &str = "That code expired. Send a new one.";
 const CODE_FORMAT: &str = "Enter the 6-digit code from your email.";
@@ -43,6 +44,14 @@ fn normalize_email(email: &str) -> Result<String, String> {
         Ok(email)
     } else {
         Err(BAD_EMAIL.into())
+    }
+}
+
+fn normalize_plan(plan: &str) -> Result<&'static str, String> {
+    match plan {
+        "monthly" => Ok("monthly"),
+        "yearly" => Ok("yearly"),
+        _ => Err(BAD_PLAN.into()),
     }
 }
 
@@ -109,12 +118,14 @@ pub(crate) async fn checkout_create_with(
     base_url: &str,
     device_id: &str,
     email: &str,
+    plan: &str,
 ) -> Result<CheckoutSession, String> {
     let email = normalize_email(email)?;
+    let plan = normalize_plan(plan)?;
     let (status, body) = send(
         client
             .post(format!("{}/checkout/create", base_url))
-            .json(&json!({ "device_id": device_id, "email": email })),
+            .json(&json!({ "device_id": device_id, "email": email, "plan": plan })),
     )
     .await?;
     let session: CheckoutSession = parse(Call::Checkout, status, &body)?;
@@ -228,39 +239,52 @@ mod tests {
         serde_json::from_str(&req.body).unwrap()
     }
 
-    const ACCOUNT: &str = r#"{"email":"j***@gmail.com","status":"active","current_end":1932854400,"cancel_at_period_end":false,"devices_count":2,"management_url":"https://billing.revenuecat.com/m/app1"}"#;
+    const ACCOUNT: &str = r#"{"email":"j***@gmail.com","status":"active","current_end":1932854400,"cancel_at_period_end":false,"devices_count":2,"plan":"yearly","management_url":"https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t"}"#;
 
     #[test]
     fn checkout_posts_device_and_normalized_email() {
         let (base, server) = serve_once(
             200,
-            r#"{"short_url":"https://pay.rev.cat/tok/kyra-abc?email=me%40example.com","app_user_id":"kyra-abc"}"#,
+            r#"{"short_url":"https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc","app_user_id":"kyra-abc"}"#,
         );
         let session =
-            block_on(checkout_create_with(&client(), &base, "dev-1", "  Me@Example.COM ")).unwrap();
+            block_on(checkout_create_with(&client(), &base, "dev-1", "  Me@Example.COM ", "yearly")).unwrap();
         let req = server.join().unwrap();
 
-        assert_eq!(session.short_url, "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
+        assert_eq!(session.short_url, "https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc");
         assert_eq!(req.request_line, "POST /checkout/create HTTP/1.1");
         assert!(req.header("content-type").unwrap().contains("application/json"));
         assert_eq!(
             body_json(&req),
-            json!({ "device_id": "dev-1", "email": "me@example.com" })
+            json!({ "device_id": "dev-1", "email": "me@example.com", "plan": "yearly" })
         );
     }
 
     #[test]
     fn checkout_rejects_invalid_email_without_a_request() {
         for email in ["", "me", "me@", "@x.com", "me@x", "me@@x.com", "m e@x.com", "me@x."] {
-            let err = block_on(checkout_create_with(&client(), &dead_url(), "d", email)).unwrap_err();
+            let err = block_on(checkout_create_with(&client(), &dead_url(), "d", email, "monthly")).unwrap_err();
             assert_eq!(err, BAD_EMAIL, "{email}");
+        }
+    }
+
+    #[test]
+    fn checkout_sends_monthly_and_rejects_unknown_plans_without_a_request() {
+        let (base, server) = serve_once(200, r#"{"short_url":"https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc"}"#);
+        block_on(checkout_create_with(&client(), &base, "dev-1", "me@example.com", "monthly")).unwrap();
+        let req = server.join().unwrap();
+        assert_eq!(body_json(&req)["plan"], "monthly");
+
+        for plan in ["", "weekly", "Yearly", "monthly ", "lifetime"] {
+            let err = block_on(checkout_create_with(&client(), &dead_url(), "d", "me@example.com", plan)).unwrap_err();
+            assert_eq!(err, BAD_PLAN, "{plan:?}");
         }
     }
 
     #[test]
     fn checkout_refuses_non_https_urls() {
         let (base, server) = serve_once(200, r#"{"short_url":"file:///etc/passwd"}"#);
-        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co")).unwrap_err();
+        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", "monthly")).unwrap_err();
         server.join().unwrap();
         assert_eq!(err, BAD_REPLY);
     }
@@ -275,7 +299,7 @@ mod tests {
         ];
         for (status, body, want) in cases {
             let (base, server) = serve_once(status, body);
-            let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co")).unwrap_err();
+            let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", "monthly")).unwrap_err();
             server.join().unwrap();
             assert_eq!(err, want, "{status}");
         }
@@ -283,7 +307,7 @@ mod tests {
 
     #[test]
     fn unreachable_worker_is_a_connection_message() {
-        let err = block_on(checkout_create_with(&client(), &dead_url(), "d", "a@b.co")).unwrap_err();
+        let err = block_on(checkout_create_with(&client(), &dead_url(), "d", "a@b.co", "monthly")).unwrap_err();
         assert_eq!(err, UNREACHABLE);
         let err = block_on(account_with(&client(), &dead_url(), "d")).unwrap_err();
         assert_eq!(err, UNREACHABLE);
@@ -292,7 +316,7 @@ mod tests {
     #[test]
     fn malformed_success_body_is_an_unexpected_reply() {
         let (base, server) = serve_once(200, "<html>");
-        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co")).unwrap_err();
+        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", "monthly")).unwrap_err();
         server.join().unwrap();
         assert_eq!(err, BAD_REPLY);
     }
@@ -407,7 +431,8 @@ mod tests {
                 current_end: Some(1_932_854_400),
                 cancel_at_period_end: false,
                 devices_count: 2,
-                management_url: Some("https://billing.revenuecat.com/m/app1".into()),
+                plan: Some("yearly".into()),
+                management_url: Some("https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t".into()),
             }
         );
     }
@@ -437,12 +462,12 @@ mod tests {
     #[test]
     fn manage_posts_device_and_returns_the_portal_link() {
         let (base, server) =
-            serve_once(200, r#"{"url":"https://billing.revenuecat.com/app1/sub1?token=t"}"#);
+            serve_once(200, r#"{"url":"https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t"}"#);
         let link = block_on(manage_link_with(&client(), &base, "dev-1")).unwrap();
         let req = server.join().unwrap();
         assert_eq!(req.request_line, "POST /account/manage HTTP/1.1");
         assert_eq!(body_json(&req), json!({ "device_id": "dev-1" }));
-        assert_eq!(link.url, "https://billing.revenuecat.com/app1/sub1?token=t");
+        assert_eq!(link.url, "https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t");
         assert!(!link.opened_by_app);
     }
 

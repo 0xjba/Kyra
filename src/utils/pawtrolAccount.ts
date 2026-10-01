@@ -23,7 +23,8 @@ export function planLine(account: Account | null, licenseExpires: number | null)
   const end = account?.current_end ?? licenseExpires;
   if (account?.status === "billing_issue") return "Payment failed · update your card under Manage";
   if (account?.cancel_at_period_end) return end ? `Ends ${formatPlanDate(end)}` : "Ends at the end of this period";
-  return end ? `$0.99/month · renews ${formatPlanDate(end)}` : "$0.99/month";
+  const plan = account?.plan === "yearly" ? "Yearly plan" : account?.plan === "monthly" ? "Monthly plan" : "$0.99/month";
+  return end ? `${plan} · renews ${formatPlanDate(end)}` : plan;
 }
 
 export function devicesLine(account: Account): string {

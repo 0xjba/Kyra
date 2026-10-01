@@ -234,7 +234,7 @@ describe("subscribe", () => {
   beforeEach(() => {
     onInvoke("guardian_get_device_id", () => "dev-1");
     onInvoke("get_device_name", () => "Mac");
-    onInvoke("guardian_checkout_create", () => ({ short_url: "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com" }));
+    onInvoke("guardian_checkout_create", () => ({ short_url: "https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc" }));
   });
 
   afterEach(() => {
@@ -246,9 +246,9 @@ describe("subscribe", () => {
     let active = false;
     onInvoke("guardian_check_license", () => ({ active, expires: null }));
 
-    await expect(useGuardianStore.getState().subscribe("  me@example.com ")).resolves.toBe(true);
-    expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com" }]);
-    expect(openUrl).toHaveBeenCalledWith("https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
+    await expect(useGuardianStore.getState().subscribe("  me@example.com ", "yearly")).resolves.toBe(true);
+    expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com", plan: "yearly" }]);
+    expect(openUrl).toHaveBeenCalledWith("https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc");
     expect(useGuardianStore.getState().checkoutPolling).toBe(true);
 
     await vi.advanceTimersByTimeAsync(4_999);
@@ -269,7 +269,7 @@ describe("subscribe", () => {
   it("gives up polling after 10 minutes", async () => {
     vi.useFakeTimers();
     onInvoke("guardian_check_license", () => ({ active: false, expires: null }));
-    await useGuardianStore.getState().subscribe("me@example.com");
+    await useGuardianStore.getState().subscribe("me@example.com", "monthly");
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
     expect(invokedWith("guardian_check_license")).toHaveLength(120);
     expect(useGuardianStore.getState().checkoutPolling).toBe(false);
@@ -281,7 +281,7 @@ describe("subscribe", () => {
     onInvoke("guardian_checkout_create", () => {
       throw "Enter a valid email address.";
     });
-    await expect(useGuardianStore.getState().subscribe("x@y.co")).resolves.toBe(false);
+    await expect(useGuardianStore.getState().subscribe("x@y.co", "monthly")).resolves.toBe(false);
     expect(useGuardianStore.getState().subscribeError).toBe("Enter a valid email address.");
     expect(openUrl).not.toHaveBeenCalled();
     expect(useGuardianStore.getState().checkoutPolling).toBe(false);
@@ -289,11 +289,11 @@ describe("subscribe", () => {
 
   it("flags an error when the browser can't open, and clears it on retry", async () => {
     vi.mocked(openUrl).mockRejectedValueOnce(new Error("no browser"));
-    await expect(useGuardianStore.getState().subscribe("x@y.co")).resolves.toBe(false);
+    await expect(useGuardianStore.getState().subscribe("x@y.co", "monthly")).resolves.toBe(false);
     expect(useGuardianStore.getState().subscribeError).toMatch(/Couldn't open checkout/);
     expect(useGuardianStore.getState().checkoutPolling).toBe(false);
 
-    await useGuardianStore.getState().subscribe("x@y.co");
+    await useGuardianStore.getState().subscribe("x@y.co", "monthly");
     expect(useGuardianStore.getState().subscribeError).toBeNull();
   });
 });
@@ -329,9 +329,9 @@ describe("restore and account", () => {
   });
 
   it("manageSubscription opens the portal link unless the app already did", async () => {
-    onInvoke("guardian_manage_subscription", () => ({ url: "https://billing.revenuecat.com/app1/sub1?token=t" }));
+    onInvoke("guardian_manage_subscription", () => ({ url: "https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t" }));
     await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(true);
-    expect(openUrl).toHaveBeenCalledWith("https://billing.revenuecat.com/app1/sub1?token=t");
+    expect(openUrl).toHaveBeenCalledWith("https://customer-portal.paddle.com/cpl_01abc?action=overview&token=t");
 
     vi.mocked(openUrl).mockClear();
     onInvoke("guardian_manage_subscription", () => ({ url: "http://127.0.0.1:8787/dev/mock-manage", opened_by_app: true }));
@@ -346,7 +346,7 @@ describe("restore and account", () => {
     await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(false);
     expect(useGuardianStore.getState().accountError).toMatch(/hiccup/);
 
-    onInvoke("guardian_manage_subscription", () => ({ url: "https://billing.revenuecat.com/x" }));
+    onInvoke("guardian_manage_subscription", () => ({ url: "https://customer-portal.paddle.com/cpl_01abc?action=overview" }));
     vi.mocked(openUrl).mockRejectedValueOnce("not allowed");
     await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(false);
     expect(useGuardianStore.getState().accountError).toBe(

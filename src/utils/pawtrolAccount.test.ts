@@ -35,6 +35,8 @@ describe("sanitizeCode", () => {
 describe("planLine", () => {
   it("shows price and renewal, or the end date once cancelled", () => {
     expect(planLine(account(), null)).toBe("$0.99/month · renews Oct 29, 2026");
+    expect(planLine(account({ plan: "yearly" }), null)).toBe("Yearly plan · renews Oct 29, 2026");
+    expect(planLine(account({ plan: "monthly" }), null)).toBe("Monthly plan · renews Oct 29, 2026");
     expect(planLine(account({ cancel_at_period_end: true }), null)).toBe("Ends Oct 29, 2026");
   });
 

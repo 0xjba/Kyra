@@ -13,7 +13,7 @@ beforeEach(() => {
   onInvoke("guardian_get_device_id", () => "dev-1");
   onInvoke("get_device_name", () => "Mac");
   onInvoke("guardian_check_license", () => ({ active: false, expires: null }));
-  onInvoke("guardian_checkout_create", () => ({ short_url: "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com" }));
+  onInvoke("guardian_checkout_create", () => ({ short_url: "https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc" }));
 });
 
 afterEach(() => {
@@ -37,6 +37,30 @@ describe("SubscribeSheet", () => {
     expect(screen.getByText("We'll send your receipt here and use it to restore Pawtrol on another Mac.")).toBeTruthy();
   });
 
+  it("offers yearly (selected) and monthly, and the button shows the chosen price", () => {
+    render(<SubscribeSheet open onClose={() => {}} />);
+    const yearly = screen.getByRole("radio", { name: /\$9\.99\/year/ });
+    const monthly = screen.getByRole("radio", { name: "$0.99/month" });
+    expect(yearly.getAttribute("aria-checked")).toBe("true");
+    expect(monthly.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("Save 16%")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Continue · $9.99/year" })).toBeTruthy();
+
+    fireEvent.click(monthly);
+    expect(monthly.getAttribute("aria-checked")).toBe("true");
+    expect(yearly.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("button", { name: "Continue · $0.99/month" })).toBeTruthy();
+  });
+
+  it("sends monthly when the monthly plan is picked", async () => {
+    render(<SubscribeSheet open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: "$0.99/month" }));
+    typeEmail("me@example.com");
+    submit();
+    await act(flush);
+    expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com", plan: "monthly" }]);
+  });
+
   it("validates the email before creating a checkout", async () => {
     render(<SubscribeSheet open onClose={() => {}} />);
     submit();
@@ -57,8 +81,8 @@ describe("SubscribeSheet", () => {
     submit();
     await act(flush);
 
-    expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com" }]);
-    expect(openUrl).toHaveBeenCalledWith("https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
+    expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com", plan: "yearly" }]);
+    expect(openUrl).toHaveBeenCalledWith("https://kyra-guardian.flashbacks.workers.dev/pay?_ptxn=txn_01abc");
     expect(screen.getByText("Finish checkout in your browser")).toBeTruthy();
     expect(screen.getByText("Waiting for payment…")).toBeTruthy();
 
