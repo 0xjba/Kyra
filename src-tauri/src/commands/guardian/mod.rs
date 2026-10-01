@@ -85,15 +85,20 @@ pub async fn guardian_checkout_create(email: String) -> Result<CheckoutSession, 
     let device_id = license::get_or_create_device_id();
     let base = worker_url();
     let mut session = account::checkout_create_with(http(), &base, &device_id, &email).await?;
-    // The shipped opener allowlist has no loopback entry, so the app opens local dev checkouts itself.
-    if !session.short_url.starts_with("https://") && account::is_local_dev(&base) {
-        std::process::Command::new("open")
-            .arg(&session.short_url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        session.opened_by_app = true;
-    }
+    session.opened_by_app = open_local_dev_page(&base, &session.short_url)?;
     Ok(session)
+}
+
+// The shipped opener allowlist has no loopback entry, so the app opens local dev mock pages itself.
+fn open_local_dev_page(base: &str, url: &str) -> Result<bool, String> {
+    if url.starts_with("https://") || !account::is_local_dev(base) {
+        return Ok(false);
+    }
+    std::process::Command::new("open")
+        .arg(url)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -122,9 +127,12 @@ pub async fn guardian_account() -> Result<Option<Account>, String> {
 }
 
 #[tauri::command]
-pub async fn guardian_cancel_subscription() -> Result<Account, String> {
+pub async fn guardian_manage_subscription() -> Result<ManageLink, String> {
     let device_id = license::get_or_create_device_id();
-    account::cancel_subscription_with(http(), &worker_url(), &device_id).await
+    let base = worker_url();
+    let mut link = account::manage_link_with(http(), &base, &device_id).await?;
+    link.opened_by_app = open_local_dev_page(&base, &link.url)?;
+    Ok(link)
 }
 
 #[tauri::command]

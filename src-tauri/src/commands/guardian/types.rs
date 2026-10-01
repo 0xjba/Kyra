@@ -78,6 +78,15 @@ pub struct CheckoutSession {
     pub opened_by_app: bool,
 }
 
+/// RevenueCat's customer portal, where the buyer cancels, resumes or changes card.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManageLink {
+    pub url: String,
+    /// Set when the app already opened the page itself (local dev only).
+    #[serde(default)]
+    pub opened_by_app: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Account {
     pub email: String,
@@ -88,6 +97,8 @@ pub struct Account {
     pub cancel_at_period_end: bool,
     #[serde(default)]
     pub devices_count: u32,
+    #[serde(default)]
+    pub management_url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

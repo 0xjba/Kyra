@@ -1,5 +1,5 @@
 use super::license::cache_license;
-use super::types::{Account, CheckoutSession, LicenseStatus};
+use super::types::{Account, CheckoutSession, LicenseStatus, ManageLink};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::path::Path;
@@ -13,7 +13,7 @@ enum Call {
     RestoreStart,
     RestoreVerify,
     Account,
-    Cancel,
+    Manage,
 }
 
 const UNREACHABLE: &str = "Couldn't reach Pawtrol. Check your connection and try again.";
@@ -73,8 +73,8 @@ fn friendly_error(call: Call, status: u16, body: &str) -> String {
         (Call::RestoreVerify, 410) => EXPIRED_CODE,
         (Call::Checkout | Call::RestoreStart, 400 | 422) => BAD_EMAIL,
         (Call::Checkout, 409) => "Pawtrol is already active on this Mac.",
-        (Call::Cancel, 404) => "No subscription found for this Mac.",
-        (Call::Cancel, 409) => "This subscription is already cancelled.",
+        (Call::Manage, 404) => "No subscription found for this Mac.",
+        (Call::Manage, 409) => "There's no subscription to manage yet.",
         (_, s) if s >= 500 => SERVER_DOWN,
         _ => GENERIC,
     };
@@ -118,15 +118,18 @@ pub(crate) async fn checkout_create_with(
     )
     .await?;
     let session: CheckoutSession = parse(Call::Checkout, status, &body)?;
-    // Only ever hand a hosted https checkout page to the system opener. The one exception is a
-    // debug build talking to a local worker in mock mode, whose fake checkout lives on loopback.
-    if !session.short_url.starts_with("https://") {
-        if is_local_dev(base_url) && is_loopback_http(&session.short_url) {
-            return Ok(session);
-        }
-        return Err(BAD_REPLY.into());
-    }
+    ensure_openable(base_url, &session.short_url)?;
     Ok(session)
+}
+
+// Only ever hand a hosted https page to the system opener. The one exception is a debug build
+// talking to a local worker in mock mode, whose fake checkout and portal live on loopback.
+fn ensure_openable(base_url: &str, url: &str) -> Result<(), String> {
+    if url.starts_with("https://") || (is_local_dev(base_url) && is_loopback_http(url)) {
+        Ok(())
+    } else {
+        Err(BAD_REPLY.into())
+    }
 }
 
 fn is_loopback_http(url: &str) -> bool {
@@ -197,18 +200,20 @@ pub(crate) async fn account_with(
     parse(Call::Account, status, &body).map(Some)
 }
 
-pub(crate) async fn cancel_subscription_with(
+pub(crate) async fn manage_link_with(
     client: &reqwest::Client,
     base_url: &str,
     device_id: &str,
-) -> Result<Account, String> {
+) -> Result<ManageLink, String> {
     let (status, body) = send(
         client
-            .post(format!("{}/subscription/cancel", base_url))
+            .post(format!("{}/account/manage", base_url))
             .json(&json!({ "device_id": device_id })),
     )
     .await?;
-    parse(Call::Cancel, status, &body)
+    let link: ManageLink = parse(Call::Manage, status, &body)?;
+    ensure_openable(base_url, &link.url)?;
+    Ok(link)
 }
 
 #[cfg(test)]
@@ -223,19 +228,19 @@ mod tests {
         serde_json::from_str(&req.body).unwrap()
     }
 
-    const ACCOUNT: &str = r#"{"email":"j***@gmail.com","status":"active","current_end":1932854400,"cancel_at_period_end":false,"devices_count":2}"#;
+    const ACCOUNT: &str = r#"{"email":"j***@gmail.com","status":"active","current_end":1932854400,"cancel_at_period_end":false,"devices_count":2,"management_url":"https://billing.revenuecat.com/m/app1"}"#;
 
     #[test]
     fn checkout_posts_device_and_normalized_email() {
         let (base, server) = serve_once(
             200,
-            r#"{"short_url":"https://rzp.io/i/abc123","subscription_id":"sub_1"}"#,
+            r#"{"short_url":"https://pay.rev.cat/tok/kyra-abc?email=me%40example.com","app_user_id":"kyra-abc"}"#,
         );
         let session =
             block_on(checkout_create_with(&client(), &base, "dev-1", "  Me@Example.COM ")).unwrap();
         let req = server.join().unwrap();
 
-        assert_eq!(session.short_url, "https://rzp.io/i/abc123");
+        assert_eq!(session.short_url, "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
         assert_eq!(req.request_line, "POST /checkout/create HTTP/1.1");
         assert!(req.header("content-type").unwrap().contains("application/json"));
         assert_eq!(
@@ -265,7 +270,7 @@ mod tests {
         let cases = [
             (400, r#"{"error":"Invalid email"}"#, BAD_EMAIL),
             (429, r#"{"error":"slow down"}"#, "Too many tries. Wait a minute and try again."),
-            (502, r#"{"error":"Razorpay error"}"#, SERVER_DOWN),
+            (502, r#"{"error":"Could not start checkout"}"#, SERVER_DOWN),
             (418, "teapot", GENERIC),
         ];
         for (status, body, want) in cases {
@@ -313,7 +318,8 @@ mod tests {
     fn restore_verify_sends_code_and_device_and_caches_license() {
         let dir = TestDir::new("restore-ok");
         assert!(!cached_license_active_in(dir.path(), 0));
-        let (base, server) = serve_once(200, r#"{"active":true,"expires":1932854400}"#);
+        let (base, server) =
+            serve_once(200, r#"{"active":true,"expires":1932854400,"app_user_id":"kyra-abc"}"#);
         let status = block_on(restore_verify_with(
             &client(),
             &base,
@@ -401,6 +407,7 @@ mod tests {
                 current_end: Some(1_932_854_400),
                 cancel_at_period_end: false,
                 devices_count: 2,
+                management_url: Some("https://billing.revenuecat.com/m/app1".into()),
             }
         );
     }
@@ -424,24 +431,41 @@ mod tests {
         assert_eq!(account.current_end, None);
         assert!(!account.cancel_at_period_end);
         assert_eq!(account.devices_count, 0);
+        assert_eq!(account.management_url, None);
     }
 
     #[test]
-    fn cancel_posts_device_and_returns_account() {
-        let body = ACCOUNT.replace(r#""cancel_at_period_end":false"#, r#""cancel_at_period_end":true"#);
-        let (base, server) = serve_once(200, &body);
-        let account = block_on(cancel_subscription_with(&client(), &base, "dev-1")).unwrap();
+    fn manage_posts_device_and_returns_the_portal_link() {
+        let (base, server) =
+            serve_once(200, r#"{"url":"https://billing.revenuecat.com/app1/sub1?token=t"}"#);
+        let link = block_on(manage_link_with(&client(), &base, "dev-1")).unwrap();
         let req = server.join().unwrap();
-        assert_eq!(req.request_line, "POST /subscription/cancel HTTP/1.1");
+        assert_eq!(req.request_line, "POST /account/manage HTTP/1.1");
         assert_eq!(body_json(&req), json!({ "device_id": "dev-1" }));
-        assert!(account.cancel_at_period_end);
+        assert_eq!(link.url, "https://billing.revenuecat.com/app1/sub1?token=t");
+        assert!(!link.opened_by_app);
     }
 
     #[test]
-    fn cancel_maps_errors() {
-        let (base, server) = serve_once(404, r#"{"error":"No subscription"}"#);
-        let err = block_on(cancel_subscription_with(&client(), &base, "d")).unwrap_err();
+    fn manage_refuses_non_https_urls() {
+        let (base, server) = serve_once(200, r#"{"url":"javascript:alert(1)"}"#);
+        let err = block_on(manage_link_with(&client(), &base, "d")).unwrap_err();
         server.join().unwrap();
-        assert_eq!(err, "No subscription found for this Mac.");
+        assert_eq!(err, BAD_REPLY);
+    }
+
+    #[test]
+    fn manage_maps_errors() {
+        let cases = [
+            (404, "No subscription found for this Mac."),
+            (409, "There's no subscription to manage yet."),
+            (502, SERVER_DOWN),
+        ];
+        for (status, want) in cases {
+            let (base, server) = serve_once(status, r#"{"error":"x"}"#);
+            let err = block_on(manage_link_with(&client(), &base, "d")).unwrap_err();
+            server.join().unwrap();
+            assert_eq!(err, want, "{status}");
+        }
     }
 }

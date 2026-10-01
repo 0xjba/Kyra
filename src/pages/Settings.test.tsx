@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { flush, invokedWith, onInvoke } from "../test/tauri";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useGuardianStore } from "../stores/guardianStore";
@@ -91,49 +92,37 @@ describe("Pawtrol account", () => {
     onInvoke("guardian_account", () => ACCOUNT);
   });
 
-  it("shows account, plan and devices instead of a manage link", async () => {
+  it("shows account, plan, devices and a manage link", async () => {
     renderSettings();
     await act(flush);
     expect(rowDesc("Account")).toBe("j***@gmail.com");
     expect(rowDesc("Plan")).toBe("$0.99/month · renews Oct 29, 2026");
     expect(rowDesc("Devices")).toBe("2 of 3 Macs");
-    expect(screen.queryByText("Manage subscription")).toBeNull();
+    expect(rowDesc("Manage subscription")).toBe("Change card or cancel on RevenueCat's secure page");
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
-  it("cancels only after confirmation, then shows the end date", async () => {
-    onInvoke("guardian_cancel_subscription", () => ({ ...ACCOUNT, cancel_at_period_end: true }));
+  it("opens the subscription portal from Manage", async () => {
+    onInvoke("guardian_manage_subscription", () => ({ url: "https://billing.revenuecat.com/app1/sub1?token=t" }));
     renderSettings();
     await act(flush);
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    const dialog = screen.getByRole("alertdialog", { name: "Cancel Pawtrol?" });
-    expect(within(dialog).getByText("It stays on until Oct 29, 2026. You can resubscribe any time.")).toBeTruthy();
-    expect(invokedWith("guardian_cancel_subscription")).toHaveLength(0);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Keep Pawtrol" }));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(invokedWith("guardian_cancel_subscription")).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel subscription" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
     await act(flush);
-
-    expect(invokedWith("guardian_cancel_subscription")).toHaveLength(1);
-    expect(rowDesc("Plan")).toBe("Ends Oct 29, 2026");
-    expect((screen.getByRole("button", { name: "Cancelled" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(invokedWith("guardian_manage_subscription")).toHaveLength(1);
+    expect(openUrl).toHaveBeenCalledWith("https://billing.revenuecat.com/app1/sub1?token=t");
   });
 
-  it("shows a cancel failure inline", async () => {
-    onInvoke("guardian_cancel_subscription", () => {
+  it("shows the end date once cancelled and a manage failure inline", async () => {
+    onInvoke("guardian_account", () => ({ ...ACCOUNT, status: "cancelled", cancel_at_period_end: true }));
+    onInvoke("guardian_manage_subscription", () => {
       throw "Pawtrol's server had a hiccup. Try again in a minute.";
     });
     renderSettings();
     await act(flush);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel subscription" }));
+    expect(rowDesc("Plan")).toBe("Ends Oct 29, 2026");
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
     await act(flush);
-    expect(rowDesc("Cancel subscription")).toBe("Pawtrol's server had a hiccup. Try again in a minute.");
-    expect(rowDesc("Plan")).toBe("$0.99/month · renews Oct 29, 2026");
+    expect(rowDesc("Manage subscription")).toBe("Pawtrol's server had a hiccup. Try again in a minute.");
   });
 });
 

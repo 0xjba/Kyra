@@ -17,10 +17,9 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
 import { formatSize } from "../utils/format";
-import { devicesLine, formatPlanDate, planLine } from "../utils/pawtrolAccount";
+import { devicesLine, planLine } from "../utils/pawtrolAccount";
 import SubscribeSheet from "../components/SubscribeSheet";
 import RestoreSheet from "../components/RestoreSheet";
-import DeleteConfirmDialog from "../components/DeleteConfirmDialog";
 import cat1 from "../assets/cat-tail/cat1.png";
 import cat2 from "../assets/cat-tail/cat2.png";
 import cat3 from "../assets/cat-tail/cat3.png";
@@ -134,7 +133,7 @@ export default function Settings() {
   const account = useGuardianStore((s) => s.account);
   const accountError = useGuardianStore((s) => s.accountError);
   const loadAccount = useGuardianStore((s) => s.loadAccount);
-  const cancelSubscription = useGuardianStore((s) => s.cancelSubscription);
+  const manageSubscription = useGuardianStore((s) => s.manageSubscription);
   const setPawtrolTab = useGuardianStore((s) => s.setPawtrolTab);
 
   const [active, setActive] = useState<SectionId>("general");
@@ -145,8 +144,7 @@ export default function Settings() {
   const [totalFreed, setTotalFreed] = useState(0);
   const [statsReset, setStatsReset] = useState(false);
   const [sheet, setSheet] = useState<"subscribe" | "restore" | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  const [openingManage, setOpeningManage] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date">("idle");
   const [autoStartSynced, setAutoStartSynced] = useState(false);
   const [appVersion, setAppVersion] = useState("");
@@ -170,7 +168,6 @@ export default function Settings() {
   }, [license.active, loadAccount]);
 
   const closeSheet = useCallback(() => setSheet(null), []);
-  const closeCancel = useCallback(() => setConfirmCancel(false), []);
 
   useEffect(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % CAT_FRAMES.length), 220);
@@ -230,11 +227,10 @@ export default function Settings() {
     } catch {}
   };
 
-  const handleCancelSubscription = async () => {
-    setConfirmCancel(false);
-    setCancelling(true);
-    await cancelSubscription();
-    setCancelling(false);
+  const handleManageSubscription = async () => {
+    setOpeningManage(true);
+    await manageSubscription();
+    setOpeningManage(false);
   };
 
   const handleCheckForUpdate = async () => {
@@ -321,10 +317,6 @@ export default function Settings() {
     openUrl(url).catch(console.error);
   };
 
-  const periodEnd = account?.current_end ?? license.expires;
-  const cancelDesc = periodEnd
-    ? `It stays on until ${formatPlanDate(periodEnd)}. You can resubscribe any time.`
-    : "It stays on until the end of this billing period. You can resubscribe any time.";
   const versionLabel = appVersion ? `Kyra ${appVersion}` : "Kyra";
   const largeLabel = settings.large_file_threshold_mb >= 1000
     ? `${settings.large_file_threshold_mb / 1000} GB`
@@ -389,19 +381,13 @@ export default function Settings() {
               </Row>
               {account && (
                 <Row
-                  name="Cancel subscription"
+                  name="Manage subscription"
                   desc={accountError
                     ? <span className="st-row-error">{accountError}</span>
-                    : account.cancel_at_period_end
-                      ? "Cancelled. Pawtrol stays on until the period ends."
-                      : "Pawtrol stays on until the end of this billing period"}
+                    : "Change card or cancel on RevenueCat's secure page"}
                 >
-                  <Pill
-                    variant="danger"
-                    onClick={() => setConfirmCancel(true)}
-                    disabled={cancelling || account.cancel_at_period_end}
-                  >
-                    {account.cancel_at_period_end ? "Cancelled" : cancelling ? "Cancelling…" : "Cancel"}
+                  <Pill onClick={handleManageSubscription} disabled={openingManage}>
+                    {openingManage ? "Opening…" : "Manage"}
                   </Pill>
                 </Row>
               )}
@@ -541,16 +527,6 @@ export default function Settings() {
 
       <SubscribeSheet open={sheet === "subscribe"} onClose={closeSheet} />
       <RestoreSheet open={sheet === "restore"} onClose={closeSheet} />
-      <DeleteConfirmDialog
-        visible={confirmCancel}
-        title="Cancel Pawtrol?"
-        description={cancelDesc}
-        confirmLabel="Cancel subscription"
-        cancelLabel="Keep Pawtrol"
-        destructive
-        onConfirm={handleCancelSubscription}
-        onCancel={closeCancel}
-      />
     </div>
   );
 }

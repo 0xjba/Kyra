@@ -1,18 +1,9 @@
 import type { Env } from "./env";
-import { DAY, getJson, putJson } from "./kv";
+import { getJson, putJson } from "./kv";
 import { deleteLicense, writeLicense } from "./license";
 import { maskEmail } from "./validate";
 
-export type SubStatus =
-  | "created"
-  | "authenticated"
-  | "active"
-  | "pending"
-  | "halted"
-  | "cancelled"
-  | "completed"
-  | "paused"
-  | "expired";
+export type SubStatus = "active" | "cancelled" | "billing_issue" | "expired" | "refunded";
 
 export interface Device {
   device_id: string;
@@ -21,32 +12,34 @@ export interface Device {
 
 export interface Account {
   email: string;
-  subscription_id: string;
+  app_user_id: string;
   status: SubStatus;
+  /** Epoch seconds the current paid period ends. */
   current_end: number | null;
+  /** Epoch seconds a billing-issue grace period ends, when one is configured. */
+  grace_end: number | null;
   cancel_at_period_end: boolean;
+  management_url: string | null;
   devices: Device[];
+  /** RevenueCat `event_timestamp_ms` of the newest applied event. */
   last_event_at: number | null;
 }
 
-export type SubState = Pick<Account, "status" | "current_end" | "cancel_at_period_end">;
+export type SubState = Pick<Account, "status" | "current_end" | "grace_end">;
 
 export const MAX_DEVICES = 3;
-export const PENDING_GRACE_SECONDS = 3 * DAY;
-export const LIVE_STATUSES: ReadonlySet<SubStatus> = new Set(["authenticated", "active", "pending"]);
 
 const accountKey = (email: string) => `account:${email}`;
 const deviceKey = (deviceId: string) => `device:${deviceId}`;
+export const customerKey = (appUserId: string) => `rcuser:${appUserId}`;
 
 export function entitlementExpiry(s: SubState): number | null {
-  if (s.current_end == null) return null;
   switch (s.status) {
     case "active":
-      return s.current_end;
-    case "pending":
-      return s.current_end + PENDING_GRACE_SECONDS;
     case "cancelled":
-      return s.cancel_at_period_end ? s.current_end : null;
+      return s.current_end;
+    case "billing_issue":
+      return s.grace_end ?? s.current_end;
     default:
       return null;
   }
@@ -61,8 +54,16 @@ export function getAccount(env: Env, email: string): Promise<Account | null> {
   return getJson<Account>(env.LICENSES, accountKey(email));
 }
 
-export function putAccount(env: Env, account: Account): Promise<void> {
-  return putJson(env.LICENSES, accountKey(account.email), account);
+export async function putAccount(env: Env, account: Account): Promise<void> {
+  await putJson(env.LICENSES, accountKey(account.email), account);
+  await env.LICENSES.put(customerKey(account.app_user_id), account.email);
+}
+
+export async function accountForCustomer(env: Env, appUserId: string): Promise<Account | null> {
+  const email = await env.LICENSES.get(customerKey(appUserId));
+  if (!email) return null;
+  const account = await getAccount(env, email);
+  return account?.app_user_id === appUserId ? account : null;
 }
 
 export async function accountForDevice(env: Env, deviceId: string): Promise<Account | null> {
@@ -98,27 +99,13 @@ export async function bindDevice(env: Env, account: Account, deviceId: string, n
   await env.LICENSES.put(deviceKey(deviceId), account.email);
 }
 
-export async function applyLicenses(
-  env: Env,
-  subscriptionId: string,
-  state: SubState,
-  deviceIds: string[]
-): Promise<number | null> {
-  const expires = entitlementExpiry(state);
-  for (const id of deviceIds) {
-    if (expires == null) await deleteLicense(env, id);
-    else await writeLicense(env, id, expires, subscriptionId);
+export async function syncLicenses(env: Env, account: Account): Promise<number | null> {
+  const expires = entitlementExpiry(account);
+  for (const { device_id } of account.devices) {
+    if (expires == null) await deleteLicense(env, device_id);
+    else await writeLicense(env, device_id, expires, account.app_user_id);
   }
   return expires;
-}
-
-export function syncLicenses(env: Env, account: Account): Promise<number | null> {
-  return applyLicenses(
-    env,
-    account.subscription_id,
-    account,
-    account.devices.map((d) => d.device_id)
-  );
 }
 
 export function accountView(account: Account) {
@@ -128,5 +115,6 @@ export function accountView(account: Account) {
     current_end: account.current_end,
     cancel_at_period_end: account.cancel_at_period_end,
     devices_count: account.devices.length,
+    management_url: account.management_url,
   };
 }

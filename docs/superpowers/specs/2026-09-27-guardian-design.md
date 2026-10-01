@@ -6,6 +6,20 @@
 
 ---
 
+## Branch `revcat`: RevenueCat Web Billing variant
+
+This branch replaces Razorpay with RevenueCat Billing (hosted checkout through a Web Purchase Link, cards processed by Stripe under the RevenueCat Billing engine). `main` keeps Razorpay. Everything else (licenses in KV, restore by email code, 3-device cap, Pawtrol rules, scoring proxy) is unchanged. Details and doc links: `worker/README.md`.
+
+- **Identity:** the RevenueCat `app_user_id` for a Mac's first purchase is `kyra-` + SHA-256(`pawtrol-rc:` + device_id), derived so the bearer device id never appears in the checkout URL. A bound Mac that buys again reuses its account's `app_user_id`. The worker resolves it from its KV binding; the app never stores or sends it.
+- **Checkout:** `POST /checkout/create` returns `https://pay.rev.cat/<token>/<app_user_id>?email=<email>` (email preset, not editable) and records `pending:{app_user_id}`. 409 `already_active` if the Mac is already entitled.
+- **Webhook:** `POST /webhook/revenuecat`, authorised by a shared `Authorization` header (constant-time). Handles `INITIAL_PURCHASE`, `RENEWAL`, `CANCELLATION` (refunds end access now, `BILLING_ERROR` is a retry), `UNCANCELLATION`, `EXPIRATION`, `BILLING_ISSUE` (grace period), `PRODUCT_CHANGE`, `TRANSFER`; ordered by `event_timestamp_ms`; sandbox events ignored unless `REVENUECAT_ALLOW_SANDBOX=1`.
+- **License:** `GET /license` keeps `{active, expires}`; when KV has no valid license it asks RevenueCat's REST API v2 (entitlement `pawtrol`), at most every 10 minutes per device, never for a device outside an existing account.
+- **Manage instead of cancel:** `POST /account/manage {device_id}` returns a single-use link to RevenueCat's customer portal (cancel, resume, change card, invoices). `GET /account` adds `management_url`. `POST /subscription/cancel` answers 410 `use_management_url`. App: `guardian_cancel_subscription` became `guardian_manage_subscription`; Settings shows "Manage subscription".
+- **Restore:** unchanged; `/restore/verify` also returns `app_user_id` (informational).
+- **Secrets:** `REVENUECAT_SECRET_API_KEY` (v2), `REVENUECAT_PROJECT_ID`, `REVENUECAT_WEBHOOK_AUTH`, `REVENUECAT_WEB_PURCHASE_LINK`, `RESEND_API_KEY`, `MAIL_FROM`, `JEV_API_KEY`. Local mock: `DEV_MOCK_REVENUECAT=1` (loopback only).
+- **Opener allowlist:** `https://pay.rev.cat/*`, `https://billing.revenuecat.com/*` instead of the Razorpay hosts.
+- **Caveats:** RevenueCat Billing does not support customers based in India; Stripe is invite-only for new Indian businesses (since May 2024). Paddle Billing also works with Web Purchase Links (Paddle as merchant of record) and would need its portal host added to the allowlist.
+
 ## Overview
 
 Guardian is an intelligent background auto-cleaning feature for Kyra. It monitors disk usage passively, detects when free space drops below a threshold, probes software-specific waste categories using the Jev AI decision model, and notifies the user with a scored cleanup summary and one-tap "Clean Now" button. Guardian is a paid feature at $0.99/month.

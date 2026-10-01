@@ -1,48 +1,31 @@
 import {
   type Account,
-  type SubStatus,
-  LIVE_STATUSES,
-  applyLicenses,
+  accountForCustomer,
   bindDevice,
-  entitlementExpiry,
   getAccount,
   isEntitled,
   putAccount,
   syncLicenses,
 } from "./account";
-import { verifyRazorpaySignature } from "./crypto";
+import { secretsEqual } from "./crypto";
 import type { Env } from "./env";
 import { legacyError, legacyJson } from "./http";
 import { getJson, nowSecs } from "./kv";
-import { LICENSE_TTL_SECONDS } from "./license";
+import { sandboxAllowed } from "./revenuecat";
 import { normalizeEmail } from "./validate";
 
-const EVENT_STATUS: Record<string, SubStatus> = {
-  "subscription.authenticated": "authenticated",
-  "subscription.activated": "active",
-  "subscription.charged": "active",
-  "subscription.resumed": "active",
-  "subscription.pending": "pending",
-  "subscription.halted": "halted",
-  "subscription.cancelled": "cancelled",
-  "subscription.completed": "completed",
-  "subscription.paused": "paused",
-};
-
-interface SubscriptionEntity {
-  id: string;
-  status?: string;
-  notes?: { device_id?: string; email?: string } | unknown[];
-  current_end?: number | null;
-}
-
-interface WebhookEvent {
-  event?: string;
-  created_at?: number;
-  payload?: {
-    subscription?: { entity?: SubscriptionEntity };
-    payment?: { entity?: { email?: string } };
-  };
+export interface RcEvent {
+  type?: string;
+  id?: string;
+  app_user_id?: string;
+  environment?: string;
+  event_timestamp_ms?: number;
+  expiration_at_ms?: number | null;
+  grace_period_expiration_at_ms?: number | null;
+  cancel_reason?: string;
+  subscriber_attributes?: Record<string, { value?: unknown } | undefined>;
+  transferred_from?: unknown;
+  transferred_to?: unknown;
 }
 
 export interface PendingCheckout {
@@ -50,102 +33,152 @@ export interface PendingCheckout {
   email: string;
 }
 
-export const pendingKey = (subscriptionId: string) => `pending:${subscriptionId}`;
+export const pendingKey = (appUserId: string) => `pending:${appUserId}`;
 
-function outcome(status: SubStatus, expires: number | null): Response {
-  if (status === "authenticated") return legacyJson({ ok: true, action: "recorded" });
-  if (expires == null) return legacyJson({ ok: true, action: "deactivated" });
-  if (status === "pending") return legacyJson({ ok: true, action: "grace", expires });
-  if (status === "cancelled") return legacyJson({ ok: true, action: "active_until_period_end", expires });
-  return legacyJson({ ok: true, action: "activated" });
+const GRANTING = new Set(["INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "PRODUCT_CHANGE"]);
+const HANDLED = new Set([...GRANTING, "CANCELLATION", "EXPIRATION", "BILLING_ISSUE", "TRANSFER"]);
+
+const ok = (body: Record<string, unknown>) => legacyJson({ ok: true, ...body });
+const secs = (ms: unknown) => (typeof ms === "number" ? Math.floor(ms / 1000) : null);
+const isStale = (account: Account, ts: number | null) =>
+  ts != null && account.last_event_at != null && ts < account.last_event_at;
+
+function applyEvent(account: Account, event: RcEvent, type: string): void {
+  const expires = secs(event.expiration_at_ms);
+  if (GRANTING.has(type)) {
+    account.status = "active";
+    account.current_end = expires ?? account.current_end;
+    account.grace_end = null;
+    account.cancel_at_period_end = false;
+    return;
+  }
+  switch (type) {
+    case "CANCELLATION":
+      if (event.cancel_reason === "CUSTOMER_SUPPORT") {
+        // A refund ends access immediately.
+        account.status = "refunded";
+        account.cancel_at_period_end = false;
+      } else if (event.cancel_reason === "BILLING_ERROR") {
+        // Sent alongside BILLING_ISSUE; the subscription is still being retried, not cancelled.
+        account.status = "billing_issue";
+        account.current_end = expires ?? account.current_end;
+      } else {
+        account.status = "cancelled";
+        account.cancel_at_period_end = true;
+        account.current_end = expires ?? account.current_end;
+      }
+      return;
+    case "BILLING_ISSUE":
+      account.status = "billing_issue";
+      account.grace_end = secs(event.grace_period_expiration_at_ms);
+      account.current_end = expires ?? account.current_end;
+      return;
+    case "EXPIRATION":
+      account.status = "expired";
+      account.grace_end = null;
+      account.cancel_at_period_end = false;
+      return;
+  }
 }
 
-export async function handleRazorpayWebhook(request: Request, env: Env): Promise<Response> {
-  const body = await request.text();
-  const signature = request.headers.get("X-Razorpay-Signature") || "";
-  if (!(await verifyRazorpaySignature(body, signature, env.RAZORPAY_WEBHOOK_SECRET))) {
-    return legacyError("Invalid signature", 401);
+function outcome(account: Account, expires: number | null): Response {
+  if (expires == null) return ok({ action: "deactivated" });
+  if (account.status === "billing_issue") return ok({ action: "grace", expires });
+  if (account.status === "cancelled") return ok({ action: "active_until_period_end", expires });
+  return ok({ action: "activated", expires });
+}
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+
+// The webhook carries no app_user_id for TRANSFER; the purchases move from the
+// `transferred_from` customers to the first `transferred_to` one, and so does the account.
+async function handleTransfer(env: Env, event: RcEvent, ts: number | null): Promise<Response> {
+  const to = strings(event.transferred_to)[0];
+  if (!to) return ok({ message: "Transfer without destination, skipped" });
+  let moved = 0;
+  for (const from of strings(event.transferred_from)) {
+    const account = await accountForCustomer(env, from);
+    if (!account || isStale(account, ts)) continue;
+    account.app_user_id = to;
+    if (ts != null) account.last_event_at = ts;
+    await putAccount(env, account);
+    await syncLicenses(env, account);
+    moved++;
+  }
+  return ok({ action: "transferred", accounts: moved });
+}
+
+export async function handleRevenueCatWebhook(request: Request, env: Env): Promise<Response> {
+  if (!(await secretsEqual(request.headers.get("Authorization") || "", env.REVENUECAT_WEBHOOK_AUTH))) {
+    return legacyError("Unauthorized", 401);
   }
 
-  let event: WebhookEvent;
+  let event: RcEvent;
   try {
-    event = JSON.parse(body);
+    event = ((await request.json()) as { event?: RcEvent })?.event as RcEvent;
   } catch {
     return legacyError("Invalid JSON body", 400);
   }
+  if (!event || typeof event !== "object") return ok({ message: "No event, skipped" });
 
-  const sub = event?.payload?.subscription?.entity;
-  if (!sub || typeof sub.id !== "string") {
-    return legacyJson({ ok: true, message: "No device_id in notes, skipped" });
-  }
+  const type = typeof event.type === "string" ? event.type : "";
+  if (!HANDLED.has(type)) return ok({ message: "Event ignored" });
+  if (event.environment === "SANDBOX" && !sandboxAllowed(env)) return ok({ message: "Sandbox event ignored" });
 
-  // Razorpay sends empty notes as [] rather than {}.
-  const notes = sub.notes && !Array.isArray(sub.notes) ? sub.notes : {};
-  const pending = await getJson<PendingCheckout>(env.LICENSES, pendingKey(sub.id));
-  const deviceId = typeof notes.device_id === "string" && notes.device_id ? notes.device_id : pending?.device_id;
-  const email = normalizeEmail(notes.email ?? pending?.email ?? event.payload?.payment?.entity?.email);
+  // Retries reuse event_timestamp_ms, so ordering on it makes redelivery harmless.
+  const ts = typeof event.event_timestamp_ms === "number" ? event.event_timestamp_ms : null;
+  if (type === "TRANSFER") return handleTransfer(env, event, ts);
 
-  if (!deviceId && !email) {
-    return legacyJson({ ok: true, message: "No device_id in notes, skipped" });
-  }
-
-  const status = EVENT_STATUS[event.event ?? ""];
-  if (!status) return legacyJson({ ok: true, message: "Event ignored" });
+  const appUserId = typeof event.app_user_id === "string" && event.app_user_id ? event.app_user_id : null;
+  if (!appUserId) return ok({ message: "No app_user_id, skipped" });
 
   const now = nowSecs();
-  const createdAt = typeof event.created_at === "number" ? event.created_at : null;
-  const currentEnd =
-    typeof sub.current_end === "number" ? sub.current_end : null;
+  const known = await accountForCustomer(env, appUserId);
+  const pending = await getJson<PendingCheckout>(env.LICENSES, pendingKey(appUserId));
+  const email =
+    known?.email ?? pending?.email ?? normalizeEmail(event.subscriber_attributes?.["$email"]?.value);
+  if (!email) return ok({ message: "Unknown customer, skipped" });
 
-  if (!email) {
-    // Pre-account subscriptions (no email in notes): license only, no ordering data.
-    if (status === "authenticated") return legacyJson({ ok: true, message: "Event ignored" });
-    const state = {
-      status,
-      current_end: currentEnd ?? (status === "active" ? now + LICENSE_TTL_SECONDS : null),
-      cancel_at_period_end: false,
-    };
-    return outcome(status, await applyLicenses(env, sub.id, state, deviceId ? [deviceId] : []));
-  }
-
-  let account = await getAccount(env, email);
+  let account = known ?? (await getAccount(env, email));
   let firstSighting = false;
 
-  if (account && account.subscription_id !== sub.id) {
-    if (isEntitled(account, now) && !LIVE_STATUSES.has(status)) {
-      return legacyJson({ ok: true, message: "Superseded subscription ignored" });
+  if (account && account.app_user_id !== appUserId) {
+    // Late events for a previous customer id must not override a newer live subscription.
+    if (isEntitled(account, now) && !GRANTING.has(type)) {
+      return ok({ message: "Superseded customer ignored" });
     }
-    account.subscription_id = sub.id;
-    account.cancel_at_period_end = false;
-    account.last_event_at = null;
+    account.app_user_id = appUserId;
     account.current_end = null;
+    account.grace_end = null;
+    account.cancel_at_period_end = false;
+    account.management_url = null;
+    account.last_event_at = null;
     firstSighting = true;
   }
 
-  if (account && createdAt != null && account.last_event_at != null && createdAt < account.last_event_at) {
-    return legacyJson({ ok: true, message: "Stale event ignored" });
-  }
+  if (account && isStale(account, ts)) return ok({ message: "Stale event ignored" });
 
   if (!account) {
     account = {
       email,
-      subscription_id: sub.id,
-      status,
+      app_user_id: appUserId,
+      status: "expired",
       current_end: null,
+      grace_end: null,
       cancel_at_period_end: false,
+      management_url: null,
       devices: [],
       last_event_at: null,
-    } satisfies Account;
+    };
     firstSighting = true;
   }
 
-  account.status = status;
-  account.current_end =
-    currentEnd ?? account.current_end ?? (status === "active" ? now + LICENSE_TTL_SECONDS : null);
-  if (createdAt != null) account.last_event_at = Math.max(createdAt, account.last_event_at ?? 0);
-  if (firstSighting && deviceId) await bindDevice(env, account, deviceId, now);
+  applyEvent(account, event, type);
+  if (ts != null) account.last_event_at = Math.max(ts, account.last_event_at ?? 0);
+  // Bind the purchasing Mac only once, so a device evicted later is not re-added on renewal.
+  if (firstSighting && pending?.device_id) await bindDevice(env, account, pending.device_id, now);
 
   await putAccount(env, account);
-  if (status === "authenticated") return outcome(status, entitlementExpiry(account));
-  return outcome(status, await syncLicenses(env, account));
+  return outcome(account, await syncLicenses(env, account));
 }

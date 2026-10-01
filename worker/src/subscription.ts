@@ -1,9 +1,12 @@
-import { LIVE_STATUSES, type SubStatus, accountForDevice, accountView, putAccount, syncLicenses } from "./account";
+import { accountForDevice, accountView, putAccount } from "./account";
 import type { Env } from "./env";
-import { fail, invalidJson, json, readJson } from "./http";
-import { mockEnabled } from "./mock";
-import { ProviderError, type RazorpaySubscription, cancelSubscriptionAtCycleEnd } from "./razorpay";
+import { clientIp, fail, invalidJson, json, readJson } from "./http";
+import { rateLimit } from "./kv";
+import { mockEnabled, mockManageLink } from "./mock";
+import { ProviderError, managementLinks } from "./revenuecat";
 import { isDeviceId } from "./validate";
+
+const MANAGE_LIMIT_PER_IP = 20;
 
 export async function handleAccount(request: Request, env: Env): Promise<Response> {
   const deviceId = new URL(request.url).searchParams.get("device_id");
@@ -14,36 +17,36 @@ export async function handleAccount(request: Request, env: Env): Promise<Respons
   return json(accountView(account));
 }
 
-export async function handleCancel(request: Request, env: Env): Promise<Response> {
+// Cancelling, resuming and card changes all happen in RevenueCat's customer portal.
+export async function handleManage(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   if (!body) return invalidJson();
   if (!isDeviceId(body.device_id)) return fail(400, "invalid_device_id", "A valid device_id is required");
 
+  if (!(await rateLimit(env.LICENSES, `rl:manage:${clientIp(request)}`, MANAGE_LIMIT_PER_IP, 3600))) {
+    return fail(429, "rate_limited", "Too many requests, try again later");
+  }
+
   const account = await accountForDevice(env, body.device_id);
   if (!account) return fail(404, "not_found", "No account for this device");
-  if (account.cancel_at_period_end) return json(accountView(account));
-  if (!LIVE_STATUSES.has(account.status)) {
-    return fail(409, "no_active_subscription", "There is no active subscription to cancel");
-  }
 
-  let sub: RazorpaySubscription;
-  if (mockEnabled(env, request)) {
-    sub = { id: account.subscription_id, status: account.status };
-  } else {
-    try {
-      sub = await cancelSubscriptionAtCycleEnd(env, account.subscription_id);
-    } catch (err) {
-      console.error(`cancel failed: ${err instanceof ProviderError ? err.message : "unexpected error"}`);
-      return fail(502, "payment_provider_error", "Could not cancel right now, try again later");
-    }
-  }
+  if (mockEnabled(env, request)) return json({ url: mockManageLink(request, account.app_user_id) });
 
-  account.cancel_at_period_end = true;
-  if (sub.status === "cancelled" || LIVE_STATUSES.has(sub.status as SubStatus)) {
-    account.status = sub.status as SubStatus;
+  let links;
+  try {
+    links = await managementLinks(env, account.app_user_id);
+  } catch (err) {
+    console.error(`manage link failed: ${err instanceof ProviderError ? err.message : "unexpected error"}`);
+    return fail(502, "payment_provider_error", "Could not open subscription management, try again later");
   }
-  if (typeof sub.current_end === "number") account.current_end = sub.current_end;
-  await putAccount(env, account);
-  await syncLicenses(env, account);
-  return json(accountView(account));
+  if (links.stable && links.stable !== account.management_url) {
+    account.management_url = links.stable;
+    await putAccount(env, account);
+  }
+  if (!links.url) return fail(409, "no_active_subscription", "There is no subscription to manage");
+  return json({ url: links.url });
+}
+
+export async function handleCancelGone(): Promise<Response> {
+  return fail(410, "use_management_url", "Cancel from the subscription management page");
 }

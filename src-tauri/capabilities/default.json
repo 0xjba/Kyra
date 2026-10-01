@@ -22,8 +22,8 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://kyra.app/*" },
-        { "url": "https://rzp.io/*" },
-        { "url": "https://*.razorpay.com/*" },
+        { "url": "https://pay.rev.cat/*" },
+        { "url": "https://billing.revenuecat.com/*" },
         { "url": "https://github.com/*" },
         { "url": "https://chat.openai.com/*" },
         { "url": "https://chatgpt.com/*" }

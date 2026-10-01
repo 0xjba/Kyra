@@ -38,6 +38,12 @@ describe("planLine", () => {
     expect(planLine(account({ cancel_at_period_end: true }), null)).toBe("Ends Oct 29, 2026");
   });
 
+  it("asks for a new card after a failed renewal", () => {
+    expect(planLine(account({ status: "billing_issue" }), null)).toBe(
+      "Payment failed · update your card under Manage",
+    );
+  });
+
   it("falls back to the license expiry without an account", () => {
     expect(planLine(null, OCT_29_2026)).toBe("$0.99/month · renews Oct 29, 2026");
     expect(planLine(null, null)).toBe("$0.99/month");

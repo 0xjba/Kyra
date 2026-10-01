@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   guardianAccount,
-  guardianCancelSubscription,
+  guardianManageSubscription,
   guardianCheckoutCreate,
   guardianRestoreStart,
   guardianRestoreVerify,
@@ -20,6 +20,7 @@ import {
   type GuardianCleanResult,
   type LicenseStatus,
   type CheckoutSession,
+  type ManageLink,
   type PatrolRules,
   type PatrolRun,
   type PatrolStatus,
@@ -33,6 +34,7 @@ const HISTORY_LIMIT = 20;
 export const CHECKOUT_POLL_MS = 5_000;
 const CHECKOUT_POLL_LIMIT = (10 * 60 * 1000) / CHECKOUT_POLL_MS;
 const OPEN_FAILED = "Couldn't open checkout in your browser. Try again.";
+const MANAGE_OPEN_FAILED = "Couldn't open the subscription page in your browser. Try again.";
 
 function isLicenseError(msg: string): boolean {
   return msg.includes("No active license") || msg.includes("License expired") || msg.includes("403");
@@ -82,7 +84,8 @@ interface GuardianStore {
   /** Resolves with whether this Mac is now licensed; rejects with a friendly message. */
   restoreVerify: (email: string, code: string) => Promise<boolean>;
   loadAccount: () => Promise<void>;
-  cancelSubscription: () => Promise<boolean>;
+  /** Opens the payment provider's page to cancel, resume or change card. */
+  manageSubscription: () => Promise<boolean>;
 
   subscribePatrol: () => Promise<void>;
   unsubscribePatrol: () => void;
@@ -240,15 +243,23 @@ export const useGuardianStore = create<GuardianStore>((set, get) => {
       }
     },
 
-    cancelSubscription: async () => {
+    manageSubscription: async () => {
       set({ accountError: null });
+      let link: ManageLink;
       try {
-        set({ account: await guardianCancelSubscription() });
+        link = await guardianManageSubscription();
       } catch (e) {
         set({ accountError: errorText(e) });
         return false;
       }
-      await get().checkLicense();
+      if (!link.opened_by_app) {
+        try {
+          await openUrl(link.url);
+        } catch {
+          set({ accountError: MANAGE_OPEN_FAILED });
+          return false;
+        }
+      }
       return true;
     },
 

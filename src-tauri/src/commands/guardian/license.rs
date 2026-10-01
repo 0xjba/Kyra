@@ -14,7 +14,7 @@ fn license_cache_path(dir: &Path) -> PathBuf {
 }
 
 // v2: ids used to be derived from the hardware UUID, which any local process can recompute.
-// The worker treats the id as a bearer secret for account/cancel, so it must be random.
+// The worker treats the id as a bearer secret for its account endpoints, so it must be random.
 const DEVICE_ID_FILE: &str = "device_id.v2";
 
 fn device_id_path(dir: &Path) -> PathBuf {

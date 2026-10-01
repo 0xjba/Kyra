@@ -2,12 +2,11 @@ import { handleCheckoutCreate } from "./checkout";
 import type { Ctx, Env } from "./env";
 import { corsHeaders, fail, legacyError } from "./http";
 import { handleJevScore, handleLicenseCheck } from "./license";
-import { handleMockPay, mockEnabled } from "./mock";
+import { handleMockManage, handleMockPay, mockEnabled } from "./mock";
 import { handleRestoreStart, handleRestoreVerify } from "./restore";
-import { handleAccount, handleCancel } from "./subscription";
-import { handleRazorpayWebhook } from "./webhook";
+import { handleAccount, handleCancelGone, handleManage } from "./subscription";
+import { handleRevenueCatWebhook } from "./webhook";
 
-export { verifyRazorpaySignature } from "./crypto";
 export type { Env } from "./env";
 
 type Handler = (request: Request, env: Env, ctx?: Ctx) => Promise<Response>;
@@ -15,12 +14,13 @@ type Handler = (request: Request, env: Env, ctx?: Ctx) => Promise<Response>;
 const routes: Record<string, Handler> = {
   "GET /license": handleLicenseCheck,
   "POST /jev/score": handleJevScore,
-  "POST /webhook/razorpay": handleRazorpayWebhook,
+  "POST /webhook/revenuecat": handleRevenueCatWebhook,
   "POST /checkout/create": handleCheckoutCreate,
   "POST /restore/start": handleRestoreStart,
   "POST /restore/verify": handleRestoreVerify,
   "GET /account": handleAccount,
-  "POST /subscription/cancel": handleCancel,
+  "POST /account/manage": handleManage,
+  "POST /subscription/cancel": handleCancelGone,
 };
 
 export default {
@@ -40,8 +40,9 @@ export default {
       }
     }
 
-    if (pathname === "/dev/mock-pay" && request.method === "GET" && mockEnabled(env, request)) {
-      return handleMockPay(request, env);
+    if (request.method === "GET" && mockEnabled(env, request)) {
+      if (pathname === "/dev/mock-pay") return handleMockPay(request, env);
+      if (pathname === "/dev/mock-manage") return handleMockManage(request);
     }
 
     return legacyError("Not found", 404);

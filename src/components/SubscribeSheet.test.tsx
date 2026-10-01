@@ -13,7 +13,7 @@ beforeEach(() => {
   onInvoke("guardian_get_device_id", () => "dev-1");
   onInvoke("get_device_name", () => "Mac");
   onInvoke("guardian_check_license", () => ({ active: false, expires: null }));
-  onInvoke("guardian_checkout_create", () => ({ short_url: "https://rzp.io/i/abc" }));
+  onInvoke("guardian_checkout_create", () => ({ short_url: "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com" }));
 });
 
 afterEach(() => {
@@ -58,7 +58,7 @@ describe("SubscribeSheet", () => {
     await act(flush);
 
     expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com" }]);
-    expect(openUrl).toHaveBeenCalledWith("https://rzp.io/i/abc");
+    expect(openUrl).toHaveBeenCalledWith("https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
     expect(screen.getByText("Finish checkout in your browser")).toBeTruthy();
     expect(screen.getByText("Waiting for payment…")).toBeTruthy();
 

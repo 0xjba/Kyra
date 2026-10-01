@@ -234,7 +234,7 @@ describe("subscribe", () => {
   beforeEach(() => {
     onInvoke("guardian_get_device_id", () => "dev-1");
     onInvoke("get_device_name", () => "Mac");
-    onInvoke("guardian_checkout_create", () => ({ short_url: "https://rzp.io/i/abc" }));
+    onInvoke("guardian_checkout_create", () => ({ short_url: "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com" }));
   });
 
   afterEach(() => {
@@ -248,7 +248,7 @@ describe("subscribe", () => {
 
     await expect(useGuardianStore.getState().subscribe("  me@example.com ")).resolves.toBe(true);
     expect(invokedWith("guardian_checkout_create")).toEqual([{ email: "me@example.com" }]);
-    expect(openUrl).toHaveBeenCalledWith("https://rzp.io/i/abc");
+    expect(openUrl).toHaveBeenCalledWith("https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
     expect(useGuardianStore.getState().checkoutPolling).toBe(true);
 
     await vi.advanceTimersByTimeAsync(4_999);
@@ -328,19 +328,29 @@ describe("restore and account", () => {
     expect(useGuardianStore.getState().account).toBeNull();
   });
 
-  it("cancelSubscription stores the returned account and refreshes the license", async () => {
-    onInvoke("guardian_get_device_id", () => "dev-1");
-    onInvoke("get_device_name", () => "Mac");
-    onInvoke("guardian_check_license", () => ({ active: true, expires: 1_932_854_400 }));
-    onInvoke("guardian_cancel_subscription", () => ({ ...ACCOUNT, cancel_at_period_end: true }));
-    await expect(useGuardianStore.getState().cancelSubscription()).resolves.toBe(true);
-    expect(useGuardianStore.getState().account?.cancel_at_period_end).toBe(true);
-    expect(invokedWith("guardian_check_license")).toHaveLength(1);
+  it("manageSubscription opens the portal link unless the app already did", async () => {
+    onInvoke("guardian_manage_subscription", () => ({ url: "https://billing.revenuecat.com/app1/sub1?token=t" }));
+    await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(true);
+    expect(openUrl).toHaveBeenCalledWith("https://billing.revenuecat.com/app1/sub1?token=t");
 
-    onInvoke("guardian_cancel_subscription", () => {
+    vi.mocked(openUrl).mockClear();
+    onInvoke("guardian_manage_subscription", () => ({ url: "http://127.0.0.1:8787/dev/mock-manage", opened_by_app: true }));
+    await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(true);
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("manageSubscription reports worker and opener failures", async () => {
+    onInvoke("guardian_manage_subscription", () => {
       throw "Pawtrol's server had a hiccup. Try again in a minute.";
     });
-    await expect(useGuardianStore.getState().cancelSubscription()).resolves.toBe(false);
+    await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(false);
     expect(useGuardianStore.getState().accountError).toMatch(/hiccup/);
+
+    onInvoke("guardian_manage_subscription", () => ({ url: "https://billing.revenuecat.com/x" }));
+    vi.mocked(openUrl).mockRejectedValueOnce("not allowed");
+    await expect(useGuardianStore.getState().manageSubscription()).resolves.toBe(false);
+    expect(useGuardianStore.getState().accountError).toBe(
+      "Couldn't open the subscription page in your browser. Try again.",
+    );
   });
 });

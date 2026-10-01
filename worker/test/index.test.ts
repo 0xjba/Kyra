@@ -1,6 +1,5 @@
-import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import worker, { verifyRazorpaySignature } from "../src/index";
+import worker from "../src/index";
 
 class MemoryKV {
   store = new Map<string, { value: string; ttl?: number }>();
@@ -26,7 +25,6 @@ class MemoryKV {
   }
 }
 
-const SECRET = "whsec_test";
 const NOW = 1_800_000_000;
 const DAY = 86_400;
 
@@ -40,7 +38,7 @@ function call(path: string, init?: RequestInit): Promise<Response> {
 
 function seedLicense(deviceId: string, active: boolean, expires: number) {
   kv.store.set(`license:${deviceId}`, {
-    value: JSON.stringify({ active, expires, subscription_id: "sub_1" }),
+    value: JSON.stringify({ active, expires, app_user_id: "kyra-1" }),
   });
 }
 
@@ -52,19 +50,6 @@ function score(deviceId: string, questions = ["q1", "q2"]) {
   });
 }
 
-function sign(body: string, secret = SECRET): string {
-  return createHmac("sha256", secret).update(body).digest("hex");
-}
-
-function webhook(event: string, entity: Record<string, unknown>, sig?: string) {
-  const body = JSON.stringify({ event, payload: { subscription: { entity } } });
-  return call("/webhook/razorpay", {
-    method: "POST",
-    headers: { "X-Razorpay-Signature": sig ?? sign(body) },
-    body,
-  });
-}
-
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW * 1000);
@@ -73,7 +58,6 @@ beforeEach(() => {
     LICENSES: kv,
     JEV_API_KEY: "jev-key",
     JEV_API_URL: "https://jev.upstream/score",
-    RAZORPAY_WEBHOOK_SECRET: SECRET,
   };
   upstream = vi.fn(async () =>
     Response.json({ scores: [{ score: 80, confidence: 0.9 }, { score: 20, confidence: 0.5 }] })
@@ -222,127 +206,6 @@ describe("POST /jev/score", () => {
   });
 });
 
-describe("POST /webhook/razorpay", () => {
-  const entity = {
-    id: "sub_123",
-    status: "active",
-    notes: { device_id: "dev1" },
-    current_end: NOW + 30 * DAY,
-  };
-
-  it("activates a license on subscription.activated", async () => {
-    const res = await webhook("subscription.activated", entity);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, action: "activated" });
-
-    const stored = kv.store.get("license:dev1")!;
-    expect(JSON.parse(stored.value)).toEqual({
-      active: true,
-      expires: NOW + 30 * DAY,
-      subscription_id: "sub_123",
-    });
-    expect(stored.ttl).toBe(35 * DAY);
-
-    expect(await (await call("/license?device_id=dev1")).json()).toEqual({
-      active: true,
-      expires: NOW + 30 * DAY,
-    });
-  });
-
-  it("extends the license on subscription.charged", async () => {
-    await webhook("subscription.activated", entity);
-    await webhook("subscription.charged", { ...entity, current_end: NOW + 60 * DAY });
-    expect(JSON.parse(kv.store.get("license:dev1")!.value).expires).toBe(NOW + 60 * DAY);
-  });
-
-  it("keeps annual licenses in KV until the period ends", async () => {
-    await webhook("subscription.activated", { ...entity, current_end: NOW + 365 * DAY });
-    expect(kv.store.get("license:dev1")!.ttl).toBeGreaterThanOrEqual(365 * DAY);
-  });
-
-  it("defaults the expiry when current_end is missing", async () => {
-    const { current_end, ...noEnd } = entity;
-    await webhook("subscription.activated", noEnd);
-    expect(JSON.parse(kv.store.get("license:dev1")!.value).expires).toBe(NOW + 35 * DAY);
-  });
-
-  it("rejects an invalid signature without writing", async () => {
-    for (const sig of ["", "deadbeef", sign("other body"), sign("x", "wrong-secret"), "z".repeat(64)]) {
-      const res = await webhook("subscription.activated", entity, sig);
-      expect(res.status).toBe(401);
-      expect(await res.json()).toEqual({ error: "Invalid signature" });
-    }
-    expect(kv.store.size).toBe(0);
-  });
-
-  it("rejects a signature made with the right secret over a tampered body", async () => {
-    const body = JSON.stringify({ event: "subscription.activated", payload: { subscription: { entity } } });
-    const tampered = body.replace("dev1", "attacker");
-    const res = await call("/webhook/razorpay", {
-      method: "POST",
-      headers: { "X-Razorpay-Signature": sign(body) },
-      body: tampered,
-    });
-    expect(res.status).toBe(401);
-    expect(kv.store.size).toBe(0);
-  });
-
-  it("removes the license on subscription.cancelled and subscription.halted", async () => {
-    for (const ev of ["subscription.cancelled", "subscription.halted"]) {
-      await webhook("subscription.activated", entity);
-      expect(kv.store.has("license:dev1")).toBe(true);
-      const res = await webhook(ev, entity);
-      expect(await res.json()).toEqual({ ok: true, action: "deactivated" });
-      expect(kv.store.has("license:dev1")).toBe(false);
-      expect((await (await call("/license?device_id=dev1")).json()).active).toBe(false);
-    }
-  });
-
-  it("skips events without a device_id in notes", async () => {
-    for (const e of [{ ...entity, notes: {} }, { ...entity, notes: undefined }]) {
-      const res = await webhook("subscription.activated", e);
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true, message: "No device_id in notes, skipped" });
-    }
-    expect(kv.store.size).toBe(0);
-  });
-
-  it("skips signed payloads with no subscription entity", async () => {
-    const body = JSON.stringify({ event: "payment.captured", payload: {} });
-    const res = await call("/webhook/razorpay", {
-      method: "POST",
-      headers: { "X-Razorpay-Signature": sign(body) },
-      body,
-    });
-    expect(res.status).toBe(200);
-    expect(kv.store.size).toBe(0);
-  });
-
-  it("ignores unrelated events", async () => {
-    const res = await webhook("subscription.updated", entity);
-    expect(await res.json()).toEqual({ ok: true, message: "Event ignored" });
-    expect(kv.store.size).toBe(0);
-  });
-
-  it("rejects signed but malformed JSON with 400", async () => {
-    const body = "{not json";
-    const res = await call("/webhook/razorpay", {
-      method: "POST",
-      headers: { "X-Razorpay-Signature": sign(body) },
-      body,
-    });
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("verifyRazorpaySignature", () => {
-  it("accepts upper-case hex and rejects an empty secret", async () => {
-    const sig = sign("payload");
-    expect(await verifyRazorpaySignature("payload", sig.toUpperCase(), SECRET)).toBe(true);
-    expect(await verifyRazorpaySignature("payload", sign("payload", ""), "")).toBe(false);
-  });
-});
-
 describe("routing", () => {
   it("answers CORS preflight", async () => {
     const res = await call("/jev/score", { method: "OPTIONS" });
@@ -353,7 +216,8 @@ describe("routing", () => {
   it.each([
     ["GET", "/jev/score"],
     ["POST", "/license"],
-    ["GET", "/webhook/razorpay"],
+    ["GET", "/webhook/revenuecat"],
+    ["POST", "/webhook/razorpay"],
     ["GET", "/"],
     ["POST", "/jev/score/extra"],
     ["DELETE", "/license"],

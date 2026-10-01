@@ -138,7 +138,7 @@ pub fn run() {
             commands::guardian::guardian_restore_start,
             commands::guardian::guardian_restore_verify,
             commands::guardian::guardian_account,
-            commands::guardian::guardian_cancel_subscription,
+            commands::guardian::guardian_manage_subscription,
             commands::guardian::guardian_patrol_status,
             commands::guardian::guardian_patrol_now,
             commands::guardian::guardian_review_clean,

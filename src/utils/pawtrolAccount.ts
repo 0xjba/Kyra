@@ -21,6 +21,7 @@ export function formatPlanDate(secs: number): string {
 
 export function planLine(account: Account | null, licenseExpires: number | null): string {
   const end = account?.current_end ?? licenseExpires;
+  if (account?.status === "billing_issue") return "Payment failed · update your card under Manage";
   if (account?.cancel_at_period_end) return end ? `Ends ${formatPlanDate(end)}` : "Ends at the end of this period";
   return end ? `$0.99/month · renews ${formatPlanDate(end)}` : "$0.99/month";
 }

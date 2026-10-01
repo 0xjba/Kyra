@@ -4,15 +4,6 @@ export function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function hexToBytes(hex: string, length: number): Uint8Array | null {
-  if (hex.length !== length * 2 || !/^[0-9a-fA-F]+$/.test(hex)) return null;
-  const out = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
-
 export function randomHex(bytes: number): string {
   return bytesToHex(crypto.getRandomValues(new Uint8Array(bytes)));
 }
@@ -39,28 +30,8 @@ export function timingSafeEqualHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
-async function hmacKey(secret: string, usage: "sign" | "verify"): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    [usage]
-  );
-}
-
-export async function hmacHex(body: string, secret: string): Promise<string> {
-  const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"), encoder.encode(body));
-  return bytesToHex(new Uint8Array(sig));
-}
-
-export async function verifyRazorpaySignature(
-  body: string,
-  signature: string,
-  secret: string
-): Promise<boolean> {
-  const sig = hexToBytes(signature, 32);
-  if (!sig || !secret) return false;
-  // subtle.verify compares in constant time.
-  return crypto.subtle.verify("HMAC", await hmacKey(secret, "verify"), sig, encoder.encode(body));
+// Hashing first makes the comparison independent of where (or whether) the lengths differ.
+export async function secretsEqual(given: string, expected: string): Promise<boolean> {
+  if (!expected) return false;
+  return timingSafeEqualHex(await sha256Hex(given), await sha256Hex(expected));
 }

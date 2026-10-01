@@ -452,13 +452,15 @@ mod tests {
         assert!(out.is_empty());
     }
 
-    // Needs a local `wrangler dev` + mock JEV with a license seeded for "e2e-dev"; see worker/README.md.
+    const E2E_DEVICE: &str = "e2e0000000000000000000000000000000000000000000000000000000000000";
+
+    // Needs a local `wrangler dev` + mock JEV with a license seeded for E2E_DEVICE; see worker/README.md.
     #[test]
     #[ignore]
     fn e2e_against_local_worker() {
         let base = std::env::var("KYRA_WORKER_URL").unwrap_or("http://127.0.0.1:8787".into());
         let probes = [probe("node", 2 * GB, None), probe("rust", 5 * MB, None)];
-        let out = block_on(score_probes_with(&client(), &base, &probes, "e2e-dev")).unwrap();
+        let out = block_on(score_probes_with(&client(), &base, &probes, E2E_DEVICE)).unwrap();
         assert_ne!(
             out[0].confidence, 0.6,
             "fell back to heuristic; is the worker up and seeded?"
@@ -478,7 +480,7 @@ mod tests {
         let lic = block_on(crate::commands::guardian::license::check_license_with(
             &client(),
             &base,
-            "e2e-dev",
+            E2E_DEVICE,
             dir.path(),
         ))
         .unwrap();

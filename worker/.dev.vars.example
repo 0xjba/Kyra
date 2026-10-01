@@ -1,12 +1,12 @@
 # Local-only overrides for `wrangler dev`. Copy to .dev.vars (gitignored); never deployed.
 JEV_API_URL=http://127.0.0.1:8788/score
 JEV_API_KEY=local-dev-key
-RAZORPAY_WEBHOOK_SECRET=local-dev-webhook-secret
-RAZORPAY_KEY_ID=rzp_test_dummy
-RAZORPAY_KEY_SECRET=dummy-key-secret
-RAZORPAY_PLAN_ID=plan_dummy
+REVENUECAT_SECRET_API_KEY=sk_dummy
+REVENUECAT_PROJECT_ID=proj_dummy
+REVENUECAT_WEBHOOK_AUTH=Bearer local-dev-webhook-secret
+REVENUECAT_WEB_PURCHASE_LINK=https://pay.rev.cat/dummy
 RESEND_API_KEY=re_dummy
 MAIL_FROM=Kyra <hello@example.com>
-# Fakes checkout, payment, cancel and restore email. Only honoured for requests to
-# 127.0.0.1/localhost; never put it in wrangler.toml.
-DEV_MOCK_RAZORPAY=1
+# Fakes checkout, payment webhooks, the management page and the restore email. Only honoured
+# for requests to 127.0.0.1/localhost; never put it in wrangler.toml.
+DEV_MOCK_REVENUECAT=1

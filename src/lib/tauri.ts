@@ -559,6 +559,14 @@ export interface Account {
   current_end: number | null;
   cancel_at_period_end: boolean;
   devices_count: number;
+  /** RevenueCat's long-lived management URL, when known. Prefer guardianManageSubscription. */
+  management_url?: string | null;
+}
+
+export interface ManageLink {
+  /** Customer portal (cancel, resume, change card); usually a single-use link. */
+  url: string;
+  opened_by_app?: boolean;
 }
 
 export type PatrolTrigger = "schedule" | "low_disk" | "critical" | "manual";
@@ -639,8 +647,8 @@ export async function guardianAccount(): Promise<Account | null> {
   return invoke<Account | null>("guardian_account");
 }
 
-export async function guardianCancelSubscription(): Promise<Account> {
-  return invoke<Account>("guardian_cancel_subscription");
+export async function guardianManageSubscription(): Promise<ManageLink> {
+  return invoke<ManageLink>("guardian_manage_subscription");
 }
 
 export async function getDeviceName(): Promise<string> {
