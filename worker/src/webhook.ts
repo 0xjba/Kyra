@@ -5,6 +5,7 @@ import {
   accountForRef,
   accountForSubscription,
   bindDevice,
+  entitlementExpiry,
   getAccount,
   isEntitled,
   putAccount,
@@ -18,7 +19,10 @@ import {
   type PaddleSubscription,
   type PaddleTransaction,
   type Plan,
+  ProviderError,
   epochSecs,
+  getSubscription,
+  pastDueWindow,
   planFrom,
   refFrom,
   subscriptionState,
@@ -58,6 +62,11 @@ const SUBSCRIPTION_EVENTS = new Set([
 const ADJUSTMENT_EVENTS = new Set(["adjustment.created", "adjustment.updated"]);
 // Money taken back in full: an approved full refund, or a chargeback (Paddle refunds the amount).
 const REFUND_ACTIONS = new Set(["refund", "chargeback", "chargeback_warning"]);
+// A dispute Paddle won (or a warning withdrawn) undoes the refund state that action caused.
+const REVERSED_BY: Record<string, string> = {
+  chargeback_reverse: "chargeback",
+  chargeback_warning_reverse: "chargeback_warning",
+};
 // One-off charges and payment-method updates do not say anything about the paid period.
 const IGNORED_TXN_ORIGINS = new Set(["subscription_charge", "subscription_payment_method_change"]);
 
@@ -74,6 +83,7 @@ interface Update {
   grace_end: number | null;
   /** undefined keeps the account's current value. */
   cancel_at_period_end?: boolean;
+  /** Null when no item uses one of Pawtrol's configured prices: such events are ignored. */
   plan: Plan | null;
   /** A completed payment; only a payment lifts a refund on the same subscription. */
   payment: boolean;
@@ -128,12 +138,19 @@ async function applyUpdate(env: Env, u: Update, ts: number | null): Promise<Resp
   const email = account?.email ?? pending?.email;
   if (!email) return ok({ message: "Unknown subscription, skipped" });
 
+  // Ordering is checked against the account as it is, before any subscription switch.
+  if (account && isStale(account, ts)) return ok({ message: "Stale event ignored" });
+
   let firstSighting = false;
   if (account && account.subscription_id !== u.subscription_id) {
-    // Late events for a previous subscription must not override a newer live one.
-    if (isEntitled(account, now) && u.status !== "active") {
-      return ok({ message: "Superseded subscription ignored" });
-    }
+    // Another subscription takes the account over only with a payment, or with a newer event that
+    // also pays further ahead than what the account has now, so a late event for a superseded
+    // subscription cannot hijack it.
+    const newer = ts != null && (account.last_event_at == null || ts > account.last_event_at);
+    const current = isEntitled(account, now) ? entitlementExpiry(account) : null;
+    const offered = entitlementExpiry(u);
+    const later = offered != null && (current == null || offered > current);
+    if (!u.payment && !(newer && later)) return ok({ message: "Superseded subscription ignored" });
     account.subscription_id = u.subscription_id;
     if (u.ref) account.ref = u.ref;
     account.status = "expired";
@@ -141,11 +158,9 @@ async function applyUpdate(env: Env, u: Update, ts: number | null): Promise<Resp
     account.grace_end = null;
     account.cancel_at_period_end = false;
     account.management_url = null;
-    account.last_event_at = null;
+    delete account.refunded_by;
     firstSighting = true;
   }
-
-  if (account && isStale(account, ts)) return ok({ message: "Stale event ignored" });
 
   if (!account) {
     account = {
@@ -165,10 +180,16 @@ async function applyUpdate(env: Env, u: Update, ts: number | null): Promise<Resp
     firstSighting = true;
   }
 
+  if (u.status === "billing_issue") {
+    // Grace counts from the later of the unpaid period's start and the end already known to be paid.
+    u = { ...u, ...pastDueWindow(u.current_end, account.current_end) };
+  }
+
   const cancelAtPeriodEnd = u.cancel_at_period_end ?? account.cancel_at_period_end;
   if (account.status === "refunded" && !u.payment) {
     // A refunded subscription stays refunded (e.g. through the cancellation that follows) until paid again.
   } else {
+    delete account.refunded_by;
     account.status = u.status === "active" && cancelAtPeriodEnd ? "cancelled" : u.status;
     account.current_end = u.current_end ?? account.current_end;
     account.grace_end = u.grace_end;
@@ -184,10 +205,47 @@ async function applyUpdate(env: Env, u: Update, ts: number | null): Promise<Resp
   return outcome(account, await syncLicenses(env, account));
 }
 
-async function applyAdjustment(env: Env, adj: PaddleAdjustment, ts: number | null): Promise<Response> {
-  if (!REFUND_ACTIONS.has(adj.action ?? "") || adj.type !== "full" || adj.status !== "approved") {
-    return ok({ message: "Adjustment ignored" });
+// The refund-causing action an adjustment reverses: a `chargeback_reverse` /
+// `chargeback_warning_reverse` adjustment, or the original chargeback once Paddle marks it `reversed`.
+function reversedAction(adj: PaddleAdjustment): string | null {
+  const action = adj.action ?? "";
+  if (adj.type === "partial") return null;
+  if (REVERSED_BY[action] && adj.status === "approved") return REVERSED_BY[action];
+  if ((action === "chargeback" || action === "chargeback_warning") && adj.status === "reversed") return action;
+  return null;
+}
+
+// Lifts a refund state after a won dispute: the subscription as Paddle has it now, else the paid
+// period already recorded if it has not ended.
+async function liftRefund(env: Env, account: Account, now: number): Promise<void> {
+  let sub: PaddleSubscription | null = null;
+  try {
+    if (account.subscription_id) sub = await getSubscription(env, account.subscription_id);
+  } catch (err) {
+    console.error(`reversal lookup failed: ${err instanceof ProviderError ? err.message : "unexpected error"}`);
   }
+  delete account.refunded_by;
+  const state = sub ? subscriptionState(env, sub, account.current_end) : null;
+  if (state?.plan) {
+    account.status = state.status;
+    account.current_end = state.current_end ?? account.current_end;
+    account.grace_end = state.grace_end;
+    account.cancel_at_period_end = state.cancel_at_period_end;
+    account.plan = state.plan;
+  } else if (!state && account.current_end != null && account.current_end > now) {
+    account.status = "active";
+    account.grace_end = null;
+  } else {
+    account.status = "expired";
+    account.grace_end = null;
+    account.cancel_at_period_end = false;
+  }
+}
+
+async function applyAdjustment(env: Env, adj: PaddleAdjustment, ts: number | null): Promise<Response> {
+  const reverses = reversedAction(adj);
+  const refunds = REFUND_ACTIONS.has(adj.action ?? "") && adj.type === "full" && adj.status === "approved";
+  if (!refunds && !reverses) return ok({ message: "Adjustment ignored" });
   if (typeof adj.subscription_id !== "string" || !adj.subscription_id) {
     return ok({ message: "Adjustment without subscription, skipped" });
   }
@@ -195,10 +253,19 @@ async function applyAdjustment(env: Env, adj: PaddleAdjustment, ts: number | nul
   if (!account) return ok({ message: "Unknown subscription, skipped" });
   if (isStale(account, ts)) return ok({ message: "Stale event ignored" });
 
-  // A full refund ends access immediately.
-  account.status = "refunded";
-  account.grace_end = null;
-  account.cancel_at_period_end = false;
+  if (reverses) {
+    // Only undoes the refund state that this kind of dispute caused, never a genuine refund.
+    if (account.status !== "refunded" || account.refunded_by !== reverses) {
+      return ok({ message: "Reversal without matching refund, skipped" });
+    }
+    await liftRefund(env, account, nowSecs());
+  } else {
+    // A full refund ends access immediately.
+    account.status = "refunded";
+    account.refunded_by = adj.action;
+    account.grace_end = null;
+    account.cancel_at_period_end = false;
+  }
   if (ts != null) account.last_event_at = Math.max(ts, account.last_event_at ?? 0);
   await putAccount(env, account);
   return outcome(account, await syncLicenses(env, account));
@@ -240,7 +307,11 @@ export async function handlePaddleWebhook(request: Request, env: Env): Promise<R
       type === "transaction.completed"
         ? fromTransaction(env, event.data as PaddleTransaction)
         : fromSubscription(env, event.data as PaddleSubscription);
-    response = update ? await applyUpdate(env, update, ts) : ok({ message: "Not a subscription event, skipped" });
+    response = !update
+      ? ok({ message: "Not a subscription event, skipped" })
+      : !update.plan
+        ? ok({ message: "Unknown price, ignored" })
+        : await applyUpdate(env, update, ts);
   }
 
   if (eventId) await putJson(env.LICENSES, eventKey(eventId), 1, EVENT_SEEN_TTL_SECONDS);

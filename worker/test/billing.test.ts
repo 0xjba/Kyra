@@ -514,7 +514,7 @@ describe("webhook lifecycle", () => {
     const res = await purchase();
     expect(await res.json()).toEqual({ ok: true, action: "activated", expires: NOW + 30 * DAY });
     expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
-    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, ref: R1 });
+    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, ref: R1, paddle_env: "sandbox" });
     expect(kv.json(`account:${EMAIL}`)).toEqual({
       email: EMAIL,
       ref: R1,
@@ -528,6 +528,7 @@ describe("webhook lifecycle", () => {
       management_url: null,
       devices: [{ device_id: D1, bound_at: NOW }],
       last_event_at: NOW * 1000,
+      paddle_env: "sandbox",
     });
     expect(await kv.get(`device:${D1}`)).toBe(EMAIL);
     expect(await kv.get(`pdlref:${R1}`)).toBe(EMAIL);
@@ -553,10 +554,37 @@ describe("webhook lifecycle", () => {
     expect((await (await call(`/account?device_id=${D1}`)).json()).plan).toBe("yearly");
   });
 
-  it("derives the plan from the billing interval when the price id is unknown", async () => {
+  it("grants only for the configured prices and ignores events for any other price", async () => {
     await checkout();
-    await send("subscription.created", sub({ items: [{ price: { id: "pri_legacy", billing_cycle: { interval: "year", frequency: 1 } } }], billing_cycle: { interval: "year", frequency: 1 } }));
-    expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
+    const other = [{ price: { id: "pri_other", billing_cycle: { interval: "year", frequency: 1 } } }];
+    for (const [type, data] of [
+      ["transaction.completed", txn({ items: other })],
+      ["subscription.created", sub({ items: other })],
+      ["subscription.activated", sub({ items: [] })],
+    ] as const) {
+      const res = await send(type, data);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, message: "Unknown price, ignored" });
+    }
+    expect(kv.store.has(`account:${EMAIL}`)).toBe(false);
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+
+    // A configured price, even next to another item, grants; the plan is the price that matched.
+    await send("transaction.completed", txn({ items: [...other, { price: { id: PRICE_Y } }], billing_period: { starts_at: iso(NOW), ends_at: iso(NOW + 365 * DAY) } }));
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "active", plan: "yearly", current_end: NOW + 365 * DAY });
+    expect((await license(D1)).active).toBe(true);
+
+    // Renewals or extensions for another price never extend access.
+    await send("transaction.completed", txn({ origin: "subscription_recurring", items: other, billing_period: { starts_at: iso(NOW), ends_at: iso(NOW + 900 * DAY) } }), NOW + 10);
+    expect(kv.json(`account:${EMAIL}`).current_end).toBe(NOW + 365 * DAY);
+  });
+
+  it("the license fallback ignores a subscription for another price", async () => {
+    await purchase();
+    subscriptions.set(SUB1, sub({ items: [{ price: { id: "pri_other" } }], current_billing_period: { starts_at: iso(NOW + 30 * DAY), ends_at: iso(NOW + 60 * DAY) } }));
+    setTime(NOW + 30 * DAY + 5);
+    expect((await license(D1)).active).toBe(false);
+    expect(paddleCalls.map((c) => c.path)).toContain(`/subscriptions/${SUB1}`);
   });
 
   it("skips subscriptions it cannot tie to a checkout", async () => {
@@ -778,7 +806,7 @@ describe("GET /license Paddle fallback", () => {
     paddleCalls = [];
     expect(await license(D1)).toEqual({ active: true, expires: NOW + 60 * DAY });
     expect(paddleCalls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET /subscriptions/${SUB1}`]);
-    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 60 * DAY, ref: R1 });
+    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 60 * DAY, ref: R1, paddle_env: "sandbox" });
 
     kv.store.delete(`license:${D1}`);
     expect(await license(D1)).toEqual({ active: false, expires: null });
@@ -857,6 +885,176 @@ describe("GET /license Paddle fallback", () => {
   it("does nothing for unknown devices without a checkout", async () => {
     expect(await license(dev(9))).toEqual({ active: false, expires: null });
     expect(paddleCalls).toEqual([]);
+  });
+});
+
+describe("review regressions", () => {
+  const canceled = () => sub({ status: "canceled", current_billing_period: null });
+  const fullRefund = { id: "adj_1", action: "refund", type: "full", status: "approved", customer_id: CUS1, subscription_id: SUB1, transaction_id: "txn_1" };
+
+  it("a refund is not undone by the license fallback while Paddle keeps the subscription active", async () => {
+    await purchase();
+    await send("adjustment.updated", fullRefund, NOW + 10);
+    subscriptions.set(SUB1, sub());
+    paddleCalls = [];
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    setTime(NOW + 700);
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    expect(paddleCalls).toEqual([]);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("refunded");
+
+    // Nor through a pending checkout of another Mac on the refunded account.
+    const D2 = dev(2);
+    const { short_url } = await checkout(D2);
+    const t = transactions.get(new URL(short_url).searchParams.get("_ptxn")!)!;
+    Object.assign(t, { status: "completed", subscription_id: SUB2 });
+    subscriptions.set(SUB2, sub({ id: SUB2 }, { ref: refOf(D2) }));
+    paddleCalls = [];
+    expect(await license(D2)).toEqual({ active: false, expires: null });
+    expect(paddleCalls.map((c) => c.path)).not.toContain(`/subscriptions/${SUB2}`);
+
+    // A new payment still restores access through the webhook.
+    await send("transaction.completed", txn({ origin: "subscription_recurring" }), NOW + 800);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("active");
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+  });
+
+  it("sandbox records are absent once PADDLE_ENV is production", async () => {
+    await purchase();
+    expect(kv.json(`account:${EMAIL}`).paddle_env).toBe("sandbox");
+    // Records written before the field existed count as sandbox.
+    const legacy = kv.json(`license:${D1}`);
+    delete legacy.paddle_env;
+    kv.store.set(`license:${D1}`, { value: JSON.stringify(legacy) });
+    expect((await license(D1)).active).toBe(true);
+
+    env.PADDLE_ENV = "production";
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    const scored = await post("/jev/score", { device_id: D1, questions: ["q"] });
+    expect(scored.status).toBe(403);
+    expect((await call(`/account?device_id=${D1}`)).status).toBe(404);
+    expect((await post("/account/manage", { device_id: D1 })).status).toBe(404);
+    await post("/restore/start", { email: EMAIL });
+    expect(resend).not.toHaveBeenCalled();
+    // The email can buy for real; the new records are production ones.
+    const res = await post("/checkout/create", { device_id: D1, email: EMAIL });
+    expect(res.status).toBe(200);
+    await send("transaction.completed", txn({ subscription_id: SUB2 }), NOW + 10);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ subscription_id: SUB2, paddle_env: "production", status: "active" });
+    expect(kv.json(`license:${D1}`).paddle_env).toBe("production");
+    expect((await license(D1)).active).toBe(true);
+
+    env.PADDLE_ENV = "sandbox";
+    expect((await call(`/account?device_id=${D1}`)).status).toBe(404);
+  });
+
+  it("a late event for a superseded subscription does not take the account back", async () => {
+    await purchase();
+    await send("subscription.canceled", canceled(), NOW + 100);
+    await checkout(D1);
+    const period = { starts_at: iso(NOW + 200), ends_at: iso(NOW + 40 * DAY) };
+    await send("transaction.completed", txn({ subscription_id: SUB2, billing_period: period }), NOW + 200);
+    await send("subscription.activated", sub({ id: SUB2, current_billing_period: period }), NOW + 200);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ subscription_id: SUB2, current_end: NOW + 40 * DAY });
+
+    // A retried delivery of an old `active` snapshot for A.
+    const late = await send("subscription.updated", sub(), NOW + 50);
+    expect(await late.json()).toEqual({ ok: true, message: "Stale event ignored" });
+    // Newer, but A pays no further ahead than B.
+    const newer = await send("subscription.updated", sub(), NOW + 300);
+    expect(await newer.json()).toEqual({ ok: true, message: "Superseded subscription ignored" });
+
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ subscription_id: SUB2, status: "active", current_end: NOW + 40 * DAY });
+    expect(await kv.get(`pdlsub:${SUB2}`)).toBe(EMAIL);
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 40 * DAY });
+  });
+
+  it("refuses checkout on a new Mac for an email that is still entitled", async () => {
+    await purchase();
+    const D2 = dev(2);
+    const attempt = async (email = EMAIL) => {
+      paddleCalls = [];
+      const res = await post("/checkout/create", { device_id: D2, email }, { ip: `198.51.100.${++eventSeq % 250}` });
+      return { status: res.status, code: (await res.json()).code };
+    };
+    expect(await attempt(" JANE@gmail.com ")).toEqual({ status: 409, code: "already_active" });
+    expect(paddleCalls).toEqual([]);
+    expect(kv.store.has(`pending:${refOf(D2)}`)).toBe(false);
+
+    await send("subscription.updated", sub({ scheduled_change: { action: "cancel", effective_at: iso(NOW + 30 * DAY) } }), NOW + 10);
+    expect(await attempt()).toEqual({ status: 409, code: "already_active" });
+
+    setTime(NOW + 30 * DAY);
+    await send("subscription.past_due", sub({ status: "past_due", current_billing_period: { starts_at: iso(NOW + 30 * DAY), ends_at: iso(NOW + 60 * DAY) } }));
+    expect(await attempt()).toEqual({ status: 409, code: "already_active" });
+
+    setTime(NOW + 38 * DAY);
+    expect((await attempt()).status).toBe(200);
+  });
+
+  it("a chargeback Paddle wins restores access from the subscription", async () => {
+    await purchase();
+    const cb = { ...fullRefund, id: "adj_cb", action: "chargeback" };
+    await send("adjustment.created", cb, NOW + 10);
+    expect((await license(D1)).active).toBe(false);
+
+    subscriptions.set(SUB1, sub());
+    const res = await send("adjustment.created", { ...cb, id: "adj_cbr", action: "chargeback_reverse" }, NOW + 20);
+    expect(await res.json()).toEqual({ ok: true, action: "activated", expires: NOW + 30 * DAY });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "active", current_end: NOW + 30 * DAY });
+    expect(kv.json(`account:${EMAIL}`).refunded_by).toBeUndefined();
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+  });
+
+  it("a reversal never lifts a genuine refund, and follows Paddle when the subscription ended", async () => {
+    await purchase();
+    await send("adjustment.updated", fullRefund, NOW + 10);
+    subscriptions.set(SUB1, sub());
+    const res = await send("adjustment.created", { ...fullRefund, id: "adj_r", action: "chargeback_reverse" }, NOW + 20);
+    expect(await res.json()).toEqual({ ok: true, message: "Reversal without matching refund, skipped" });
+    expect(kv.json(`account:${EMAIL}`).status).toBe("refunded");
+
+    await send("transaction.completed", txn({ origin: "subscription_recurring" }), NOW + 30);
+    await send("adjustment.created", { ...fullRefund, id: "adj_cb", action: "chargeback" }, NOW + 40);
+    subscriptions.set(SUB1, canceled());
+    await send("adjustment.created", { ...fullRefund, id: "adj_cbr", action: "chargeback_reverse" }, NOW + 50);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("expired");
+    expect((await license(D1)).active).toBe(false);
+  });
+
+  it("a withdrawn chargeback warning restores the stored period when Paddle is unreachable", async () => {
+    await purchase();
+    const warning = { ...fullRefund, id: "adj_w", action: "chargeback_warning" };
+    await send("adjustment.created", warning, NOW + 10);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "refunded", refunded_by: "chargeback_warning" });
+
+    paddle.mockRejectedValueOnce(new TypeError("fetch failed"));
+    // Paddle marks the original warning `reversed` when it creates the reversal.
+    await send("adjustment.updated", { ...warning, status: "reversed" }, NOW + 20);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("active");
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+  });
+
+  it("past-due grace counts from the known paid end when Paddle's period starts earlier", async () => {
+    await purchase();
+    const end = NOW + 30 * DAY;
+    const unpaid = { starts_at: iso(NOW + 10 * DAY), ends_at: iso(NOW + 40 * DAY) };
+    setTime(end - DAY);
+    const res = await send("subscription.past_due", sub({ status: "past_due", current_billing_period: unpaid }));
+    expect(await res.json()).toEqual({ ok: true, action: "grace", expires: end + 7 * DAY });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "billing_issue", current_end: end, grace_end: end + 7 * DAY });
+    setTime(end + 3 * DAY);
+    await send("subscription.past_due", sub({ status: "past_due", current_billing_period: unpaid }));
+    expect(kv.json(`account:${EMAIL}`).grace_end).toBe(end + 7 * DAY);
+    expect((await license(D1)).active).toBe(true);
+  });
+
+  it("the license fallback counts past-due grace from the known paid end too", async () => {
+    await purchase();
+    const end = NOW + 30 * DAY;
+    subscriptions.set(SUB1, sub({ status: "past_due", current_billing_period: { starts_at: iso(NOW + 10 * DAY), ends_at: iso(NOW + 40 * DAY) } }));
+    setTime(end + DAY);
+    expect(await license(D1)).toEqual({ active: true, expires: end + 7 * DAY });
   });
 });
 

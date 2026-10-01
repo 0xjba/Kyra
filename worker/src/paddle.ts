@@ -24,6 +24,15 @@ export function paddleEnvironment(env: Env): PaddleEnvironment {
   return env.PADDLE_ENV === "production" ? "production" : "sandbox";
 }
 
+/**
+ * Whether a stored record belongs to the Paddle environment this worker runs in. Records written
+ * before the field existed were all sandbox. Records of the other environment count as absent, so
+ * sandbox purchases never carry into production.
+ */
+export function sameEnvironment(env: Env, record: { paddle_env?: string | null }): boolean {
+  return (record.paddle_env ?? "sandbox") === paddleEnvironment(env);
+}
+
 export function apiBase(env: Env): string {
   return paddleEnvironment(env) === "production" ? "https://api.paddle.com" : "https://sandbox-api.paddle.com";
 }
@@ -95,7 +104,6 @@ interface Period {
 
 interface PriceRef {
   id?: string;
-  billing_cycle?: { interval?: string; frequency?: number } | null;
 }
 
 export interface PaddleSubscription {
@@ -104,7 +112,6 @@ export interface PaddleSubscription {
   customer_id?: string;
   custom_data?: Record<string, unknown> | null;
   current_billing_period?: Period | null;
-  billing_cycle?: { interval?: string; frequency?: number } | null;
   scheduled_change?: { action?: string; effective_at?: string } | null;
   items?: { price?: PriceRef }[];
 }
@@ -143,19 +150,16 @@ export function refFrom(customData: unknown): string | null {
   return typeof ref === "string" && /^kyra-[0-9a-f]{64}$/.test(ref) ? ref : null;
 }
 
-export function planFrom(
-  env: Env,
-  items: { price?: PriceRef }[] | undefined,
-  cycle?: { interval?: string } | null
-): Plan | null {
-  const prices = (items ?? []).map((i) => i?.price).filter((p): p is PriceRef => !!p);
-  for (const p of prices) {
-    if (p.id && p.id === env.PADDLE_PRICE_ID_YEARLY) return "yearly";
-    if (p.id && p.id === env.PADDLE_PRICE_ID_MONTHLY) return "monthly";
+// Only Pawtrol's two configured prices grant access; the plan is whichever of them matched.
+export function planFrom(env: Env, items: { price?: PriceRef }[] | undefined): Plan | null {
+  const monthly = env.PADDLE_PRICE_ID_MONTHLY?.trim();
+  const yearly = env.PADDLE_PRICE_ID_YEARLY?.trim();
+  for (const item of items ?? []) {
+    const id = item?.price?.id;
+    if (typeof id !== "string" || !id) continue;
+    if (yearly && id === yearly) return "yearly";
+    if (monthly && id === monthly) return "monthly";
   }
-  const interval = cycle?.interval ?? prices.find((p) => p.billing_cycle)?.billing_cycle?.interval;
-  if (interval === "year") return "yearly";
-  if (interval === "month") return "monthly";
   return null;
 }
 
@@ -167,9 +171,19 @@ export interface SubscriptionState {
   plan: Plan | null;
 }
 
-// Maps a subscription snapshot (webhook `data` or API entity) to the account state.
-export function subscriptionState(env: Env, sub: PaddleSubscription): SubscriptionState {
-  const plan = planFrom(env, sub.items, sub.billing_cycle);
+/**
+ * Past-due access: paid up to the later of the unpaid period's start and the end the account
+ * already knew was paid, then a fixed grace period. Repeated past-due events cannot extend it.
+ */
+export function pastDueWindow(startsAt: number | null, knownEnd: number | null | undefined) {
+  const paidUntil = startsAt == null ? (knownEnd ?? null) : Math.max(startsAt, knownEnd ?? startsAt);
+  return { current_end: paidUntil, grace_end: paidUntil == null ? null : paidUntil + PAST_DUE_GRACE_SECONDS };
+}
+
+// Maps a subscription snapshot (webhook `data` or API entity) to the account state. `knownEnd` is
+// the paid period end already recorded for this same subscription, if any.
+export function subscriptionState(env: Env, sub: PaddleSubscription, knownEnd?: number | null): SubscriptionState {
+  const plan = planFrom(env, sub.items);
   const periodEnd = epochSecs(sub.current_billing_period?.ends_at);
   const change = sub.scheduled_change;
   switch (sub.status) {
@@ -186,18 +200,15 @@ export function subscriptionState(env: Env, sub: PaddleSubscription): Subscripti
         };
       }
       return { status: "active", current_end: periodEnd, grace_end: null, cancel_at_period_end: false, plan };
-    case "past_due": {
+    case "past_due":
       // Paddle has already moved the billing period on to the unpaid one, so access is paid up to
-      // its start; the grace period is counted from there so repeated events cannot extend it.
-      const paidUntil = epochSecs(sub.current_billing_period?.starts_at) ?? periodEnd;
+      // its start (or the end already known to be paid, if later); grace is counted from there.
       return {
         status: "billing_issue",
-        current_end: paidUntil,
-        grace_end: paidUntil == null ? null : paidUntil + PAST_DUE_GRACE_SECONDS,
+        ...pastDueWindow(epochSecs(sub.current_billing_period?.starts_at) ?? periodEnd, knownEnd),
         cancel_at_period_end: false,
         plan,
       };
-    }
     default:
       // canceled, paused, or anything unknown: no access.
       return { status: "expired", current_end: null, grace_end: null, cancel_at_period_end: false, plan };
@@ -239,7 +250,12 @@ async function api(env: Env, method: string, path: string, payload?: unknown): P
 }
 
 function data<T>(result: ApiResult, what: string): T {
-  if (!result.ok) throw new ProviderError(`Paddle ${what} responded ${result.status}`);
+  if (!result.ok) {
+    // Paddle's error code (e.g. `transaction_default_checkout_url_not_set`) is a fixed identifier, safe to log.
+    const code = result.body?.error?.code;
+    const suffix = typeof code === "string" && /^[a-z_]{1,80}$/.test(code) ? ` (${code})` : "";
+    throw new ProviderError(`Paddle ${what} responded ${result.status}${suffix}`);
+  }
   const value = result.body?.data;
   if (!value || typeof value !== "object") throw new ProviderError(`Paddle ${what} returned no data`);
   return value as T;

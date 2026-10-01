@@ -1,4 +1,4 @@
-import { accountForDevice, isEntitled } from "./account";
+import { accountForDevice, getAccount, isEntitled } from "./account";
 import type { Env } from "./env";
 import { clientIp, fail, invalidJson, json, readJson } from "./http";
 import { DAY, nowSecs, putJson, rateLimit } from "./kv";
@@ -49,9 +49,15 @@ export async function handleCheckoutCreate(request: Request, env: Env): Promise<
   }
 
   // A Mac already on an account resubscribes under the account's reference.
+  const now = nowSecs();
   const account = await accountForDevice(env, deviceId);
-  if (account && isEntitled(account, nowSecs())) {
+  if (account && isEntitled(account, now)) {
     return fail(409, "already_active", "Pawtrol is already active on this Mac");
+  }
+  // One live subscription per email: an entitled email restores onto this Mac instead of buying again.
+  const emailAccount = account?.email === email ? account : await getAccount(env, email);
+  if (emailAccount && isEntitled(emailAccount, now)) {
+    return fail(409, "already_active", "This email already has an active Pawtrol subscription, restore it instead");
   }
   const ref = account?.ref ?? (await refForDevice(deviceId));
 

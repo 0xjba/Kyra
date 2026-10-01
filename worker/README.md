@@ -51,8 +51,8 @@ always null: Paddle's portal links are temporary and must not be stored, so the 
 
 | Key | Value | TTL |
 | --- | --- | --- |
-| `license:{device_id}` | `{active, expires, ref}` | max(35 d, period + 5 d) |
-| `account:{email}` | `{email, ref, customer_id, subscription_id, plan, status, current_end, grace_end, cancel_at_period_end, management_url, devices: [{device_id, bound_at}], last_event_at}` | none |
+| `license:{device_id}` | `{active, expires, ref, paddle_env}` | max(35 d, period + 5 d) |
+| `account:{email}` | `{email, ref, customer_id, subscription_id, plan, status, current_end, grace_end, cancel_at_period_end, management_url, devices: [{device_id, bound_at}], last_event_at, refunded_by?, paddle_env}` | none |
 | `device:{device_id}` | email (reverse index) | none |
 | `pdlref:{ref}`, `pdlsub:{subscription_id}`, `pdlcus:{customer_id}` | email (reverse indexes) | none |
 | `pending:{ref}` | `{device_id, email, customer_id, transaction_id, plan}` from checkout | 7 d |
@@ -64,11 +64,20 @@ always null: Paddle's portal links are temporary and must not be stored, so the 
 Emails are trimmed and lower-cased before use as keys. Reverse indexes are hints: the
 account must still hold the id, so stale entries are harmless.
 
+`paddle_env` is the `PADDLE_ENV` (`sandbox` | `production`) the record was written under. A
+license or account whose `paddle_env` differs from the worker's current `PADDLE_ENV` is treated
+as absent everywhere (`/license`, the `/jev/score` license gate, restore, `/account`, manage,
+checkout and webhooks), so sandbox purchases never unlock a production worker. Records without
+the field were written before it existed and count as `sandbox`.
+
 ### Checkout
 
-`POST /checkout/create` creates (or, on Paddle's 409 `customer_already_exists`, reuses) the
-Paddle customer for the email, then creates a transaction with the plan's price, that
-customer, `custom_data.kyra_ref` and `checkout.url` set to the checkout page. Paddle returns
+`POST /checkout/create` answers 409 `already_active` when the Mac's account, or the account of
+the requested email, is still entitled (`active`, `cancelled` before `current_end`, or
+`billing_issue` within its grace period): one email has one live subscription, and a second
+Mac joins it through restore instead of buying again. Otherwise it creates (or, on Paddle's 409
+`customer_already_exists`, reuses) the Paddle customer for the email, then creates a
+transaction with the plan's price, that customer, `custom_data.kyra_ref` and `checkout.url` set to the checkout page. Paddle returns
 the transaction's `checkout.url` (`<page>?_ptxn=txn_…`), which the app opens in the browser.
 The page is `PADDLE_CHECKOUT_URL` when set, else this worker's own `/pay`. `/pay` loads
 Paddle.js from Paddle's CDN, initialises it with `PADDLE_CLIENT_TOKEN` (sandbox environment
@@ -90,22 +99,33 @@ webhook.
   - `active` with `scheduled_change.action` `cancel` (or `pause`): `cancelled`, access until
     `scheduled_change.effective_at`.
   - `past_due`: Paddle has already moved the period on to the unpaid one, so access is paid
-    up to `current_billing_period.starts_at`; `billing_issue` keeps access for 7 days after
-    that while Paddle retries the payment. Repeated past-due events cannot extend it; a
-    successful retry (`transaction.completed`) makes it `active` again.
+    up to the later of `current_billing_period.starts_at` and the `current_end` the account
+    already knew was paid; `billing_issue` keeps access for 7 days after that while Paddle
+    retries the payment. Repeated past-due events cannot extend it; a successful retry
+    (`transaction.completed`) makes it `active` again.
   - `canceled` / `paused`: `expired`, access ends.
 - `transaction.completed` for a subscription grants access until the transaction's
   `billing_period.ends_at` (first payment and renewals). One-off charges and payment-method
   updates (`origin` `subscription_charge`, `subscription_payment_method_change`) and
   transactions without a subscription are skipped.
+- Prices: only events with an item whose `price.id` is `PADDLE_PRICE_ID_MONTHLY` or
+  `PADDLE_PRICE_ID_YEARLY` grant or extend access, and `plan` is whichever of the two matched.
+  Subscription and transaction events for any other price are acknowledged with 200 and
+  ignored, and the license fallback grants nothing for them. Replacing a price id therefore
+  stops recognising subscribers still on the old price.
 - Refunds: an `adjustment.*` with `action` `refund`, `chargeback` or `chargeback_warning`,
-  `type` `full` and `status` `approved` makes the account `refunded` (access ends now).
-  Live refunds start as `pending_approval` and arrive as `adjustment.updated` once Paddle
-  approves them. Partial refunds and credits are ignored. A refunded subscription stays
-  `refunded` (including through the cancellation that usually follows) until a new payment
+  `type` `full` and `status` `approved` makes the account `refunded` (access ends now) and
+  records the action as `refunded_by`. Live refunds start as `pending_approval` and arrive as
+  `adjustment.updated` once Paddle approves them. Partial refunds and credits are ignored. A
+  refunded subscription stays `refunded` (including through the cancellation that usually
+  follows, and even while Paddle still reports the subscription active) until a new payment
   completes.
-- `plan` comes from the price id (`PADDLE_PRICE_ID_MONTHLY` / `_YEARLY`), else from the
-  billing interval (`month` / `year`).
+- Won disputes: a `chargeback_reverse` / `chargeback_warning_reverse` adjustment (`status`
+  `approved`), or the original `chargeback` / `chargeback_warning` updated to `status`
+  `reversed`, lifts the refund only when `refunded_by` is that same action, so it never undoes
+  a genuine refund. The state is then re-read from Paddle's subscription; if Paddle cannot be
+  reached it is `active` until the stored `current_end` when that is still in the future, else
+  `expired`.
 - Accounts are found by subscription id; events tagged with a `kyra_ref` are also matched by
   reference, by the pending checkout's email and by Paddle customer. Events for a subscription
   that is neither known nor tagged are acknowledged and skipped, so purchases made outside
@@ -113,8 +133,12 @@ webhook.
 - Every event updates the licenses of all devices bound to the account.
 - Ordering: events older than the account's `last_event_at` (Paddle `occurred_at`) are
   ignored, and each `event_id` is processed once (Paddle delivers at least once and in no
-  guaranteed order). Late non-granting events for a previous subscription never override a
-  newer live one.
+  guaranteed order). This check runs against the account as stored, before anything else.
+  An event for a subscription other than the account's current one switches the account to it
+  only when it is a payment (`transaction.completed` with a subscription), or when it is newer
+  than `last_event_at` and grants access ending later than the account's current entitlement.
+  Anything else for another subscription is acknowledged as superseded, so a late or retried
+  event for an old subscription cannot take the account back.
 - The purchasing device (from the pending checkout) is bound only the first time a
   subscription is seen, so a device evicted later is not re-added on renewal.
 - An account holds at most 3 devices; binding a 4th evicts the oldest and deletes its
@@ -124,12 +148,20 @@ webhook.
   the app polls right after checkout: the account's subscription for a bound device, else the
   subscription of the pending checkout transaction this same device started (its `kyra_ref`
   must match). It never does this for a device whose derived reference belongs to an account
-  it is not bound to, so the device cap cannot be bypassed.
+  it is not bound to, so the device cap cannot be bypassed, and never for a `refunded` account
+  (bound, or the pending checkout's), because Paddle may keep a subscription active after a
+  full refund; a new payment restores access through the webhook.
 - Cancel, resume, payment method changes and invoices happen in Paddle's customer portal
   (`POST /account/manage`, which creates a customer portal session and returns the
   subscription's `view_subscription` link, else the portal overview). Paddle's own emails
   also link to the portal. The API can cancel subscriptions server-side
   (`POST /subscriptions/{id}/cancel`) if an in-app cancel button is wanted again.
+
+### Known limitations
+
+- A Mac already bound to an account that subscribes again with a different email is credited
+  to the account it is bound to: the checkout reuses that account's reference, and webhooks
+  match by reference before email. The new email gets no account of its own.
 
 ### Security notes
 
@@ -161,8 +193,16 @@ webhook.
 - KV is eventually consistent and not transactional, so rate limits, the attempt counter and
   near-simultaneous webhooks for one account can race slightly. With 3 codes/hour and 5
   attempts per code, brute force stays near 15 guesses/hour against 1,000,000 codes.
-- Upstream errors are logged as status codes only; responses never echo provider bodies
-  or secrets.
+- Environments: every license and account carries the `PADDLE_ENV` it was written under and
+  is ignored by a worker running in the other one, so test-card purchases cannot unlock
+  production even if the KV namespace were shared. Use a separate namespace anyway (see
+  Switching to production).
+- Only the two configured price ids grant access; a subscription for any other price in the
+  same Paddle account (created in the dashboard, or another product) cannot unlock Pawtrol.
+- A refund cannot be undone by the license fallback asking Paddle, and a won dispute only
+  reverses a refund state that the same dispute caused.
+- Upstream errors are logged as status codes and Paddle's fixed error code only; responses
+  never echo provider bodies or secrets.
 
 ### Paddle references
 
@@ -204,8 +244,10 @@ What this worker relies on, as documented on 2026-10-01:
 - Signature verification (`Paddle-Signature: ts=…;h1=…`, HMAC-SHA256 of `ts:rawBody`, more
   than one `h1` during secret rotation, SDKs reject after 5 s by default):
   https://developer.paddle.com/webhooks/about/signature-verification
-- Adjustments (refund/chargeback actions, `type` full/partial, `pending_approval` →
-  `approved`/`rejected`, chargebacks are refunded automatically):
+- Adjustments (actions `refund`, `credit`, `chargeback`, `chargeback_warning`,
+  `chargeback_reverse`, `chargeback_warning_reverse`, `credit_reverse`; `type` full/partial;
+  `pending_approval` → `approved`/`rejected`, and `reversed` on the original when Paddle
+  creates its reversal; chargebacks are refunded automatically):
   https://developer.paddle.com/build/transactions/create-transaction-adjustments,
   https://developer.paddle.com/webhooks/adjustments/adjustment-updated
 - Paddle.js: load from `https://cdn.paddle.com/paddle/v2/paddle.js`,
@@ -345,6 +387,10 @@ live account: the two share no data, keys or settings.
    that loads Paddle.js. Approval reviews the site for product, pricing, terms, refund and
    privacy pages; a bare `workers.dev` host may not pass, so plan for the custom domain or
    the approved site.
+   The app opens the checkout link with the opener plugin, which only opens allowlisted
+   URLs: any custom checkout host (a custom domain routed to this worker, or the host of
+   `PADDLE_CHECKOUT_URL`) must also be added to the `opener:allow-open-url` list in
+   `src-tauri/capabilities/default.json`, or the app cannot open the checkout.
 5. **Notification destination** (Developer tools > Notifications > New destination): type
    URL (webhook), URL `https://kyra-guardian.flashbacks.workers.dev/webhook/paddle`, API version 1,
    usage type "Platform and simulation" in sandbox ("Platform only" in live), subscribed events:
@@ -401,13 +447,27 @@ skipped, because they do not carry a `kyra_ref` from Kyra's checkout.
 
 ### Switching to production
 
-1. Repeat steps 2 to 7 of the dashboard setup in the live account (prices, client token,
-   approved domain and default payment link, notification destination, API key, branding).
-2. In `wrangler.toml` set `PADDLE_ENV = "production"`, the live `PADDLE_PRICE_ID_MONTHLY` and
-   `PADDLE_PRICE_ID_YEARLY`, and `PADDLE_CHECKOUT_URL` if the checkout page is not this
-   worker's `/pay`.
-3. Replace the secrets with live values: `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`,
-   `PADDLE_CLIENT_TOKEN`.
-4. `npx wrangler deploy`. Sandbox accounts in KV keep their sandbox subscription ids; the
-   live API does not know them, so they lapse at their period end. Clear the sandbox test
-   data from KV first if it should not linger.
+Every step is required. Sandbox and live share nothing in Paddle, and the worker must not
+carry sandbox state, keys or ids into production.
+
+1. **Fresh KV.** Create a new KV namespace for production
+   (`npx wrangler kv namespace create LICENSES_PROD`) and put its id in the `LICENSES`
+   binding in `wrangler.toml`, or purge every key from the current namespace. Sandbox
+   licenses and accounts are already ignored by a production worker (`paddle_env`), but
+   reverse indexes, pending checkouts and processed event ids would linger.
+2. **Live account setup.** Repeat steps 2 to 7 of the dashboard setup in the live account
+   (prices, client token, approved domain and default payment link, API key, branding).
+3. **Production notification destination.** Create it in the live account (step 5, usage
+   type "Platform only", the same event list) pointing at the production worker's
+   `/webhook/paddle`.
+4. **Replace every Paddle value.** In `wrangler.toml`: `PADDLE_ENV = "production"`, the live
+   `PADDLE_PRICE_ID_MONTHLY` and `PADDLE_PRICE_ID_YEARLY`, and `PADDLE_CHECKOUT_URL` if the
+   checkout page is not this worker's `/pay`. Secrets, with live values:
+   `PADDLE_WEBHOOK_SECRET` (the live destination's key), `PADDLE_API_KEY` (`pdl_live_apikey_…`)
+   and `PADDLE_CLIENT_TOKEN` (`live_…`).
+5. **App allowlist.** Add any custom checkout host or `PADDLE_CHECKOUT_URL` host to the opener
+   allowlist in `src-tauri/capabilities/default.json`.
+6. `npx wrangler deploy`, then make one real purchase and refund it to check the flow.
+
+Never ship a release build of the app while the worker it points at is in sandbox: test
+cards would unlock Pawtrol for real users.

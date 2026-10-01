@@ -1,15 +1,18 @@
-import { accountForDevice, accountForRef } from "./account";
+import { accountForDevice, accountForRef, getAccount } from "./account";
 import type { Env } from "./env";
 import { legacyError, legacyJson } from "./http";
 import { DAY, getJson, nowSecs, putJson, rateLimit } from "./kv";
 import { mockEnabled } from "./mock";
 import {
+  type PaddleEnvironment,
   ProviderError,
   type PaddleSubscription,
   getSubscription,
   getTransaction,
+  paddleEnvironment,
   refForDevice,
   refFrom,
+  sameEnvironment,
   subscriptionState,
 } from "./paddle";
 import { isDeviceId } from "./validate";
@@ -19,6 +22,8 @@ export interface LicenseRecord {
   active: boolean;
   expires: number;
   ref: string;
+  /** Paddle environment the license was granted in; missing means sandbox. */
+  paddle_env?: PaddleEnvironment;
 }
 
 export const LICENSE_TTL_SECONDS = 35 * DAY;
@@ -30,10 +35,16 @@ const REFRESH_INTERVAL_SECONDS = 600;
 export const licenseKey = (deviceId: string) => `license:${deviceId}`;
 
 export async function writeLicense(env: Env, deviceId: string, expires: number, ref: string): Promise<void> {
-  const record: LicenseRecord = { active: true, expires, ref };
+  const record: LicenseRecord = { active: true, expires, ref, paddle_env: paddleEnvironment(env) };
   // Keep the record at least until the paid period ends (yearly plans exceed 35 days).
   const ttl = Math.max(LICENSE_TTL_SECONDS, expires - nowSecs() + LICENSE_KV_GRACE_SECONDS);
   await putJson(env.LICENSES, licenseKey(deviceId), record, ttl);
+}
+
+// A license granted in the other Paddle environment (sandbox vs production) does not exist here.
+export async function readLicense(env: Env, deviceId: string): Promise<LicenseRecord | null> {
+  const license = await getJson<LicenseRecord>(env.LICENSES, licenseKey(deviceId));
+  return license && sameEnvironment(env, license) ? license : null;
 }
 
 export async function deleteLicense(env: Env, deviceId: string): Promise<void> {
@@ -45,7 +56,7 @@ export async function handleLicenseCheck(request: Request, env: Env): Promise<Re
   if (!deviceId) return legacyError("Missing device_id", 400);
 
   const now = nowSecs();
-  const license = await getJson<LicenseRecord>(env.LICENSES, licenseKey(deviceId));
+  const license = await readLicense(env, deviceId);
   if (license?.active && license.expires >= now) {
     return legacyJson({ active: true, expires: license.expires });
   }
@@ -57,9 +68,11 @@ export async function handleLicenseCheck(request: Request, env: Env): Promise<Re
   return legacyJson({ active: license.active && license.expires >= now, expires: license.expires });
 }
 
-function accessUntil(env: Env, sub: PaddleSubscription | null, now: number): number | null {
+function accessUntil(env: Env, sub: PaddleSubscription | null, now: number, knownEnd?: number | null): number | null {
   if (!sub) return null;
-  const state = subscriptionState(env, sub);
+  const state = subscriptionState(env, sub, knownEnd);
+  // Only Pawtrol's own prices grant access.
+  if (state.plan == null) return null;
   const expires = state.status === "billing_issue" ? state.grace_end : state.current_end;
   return state.status !== "expired" && expires != null && expires > now ? expires : null;
 }
@@ -74,6 +87,8 @@ async function refreshFromPaddle(request: Request, env: Env, deviceId: string, n
   await putJson(env.LICENSES, throttleKey, now, REFRESH_INTERVAL_SECONDS);
 
   const account = await accountForDevice(env, deviceId);
+  // Paddle may keep a subscription active after a full refund; only a new payment (webhook) lifts it.
+  if (account?.status === "refunded") return null;
   let ref = account?.ref;
   if (!ref) {
     ref = await refForDevice(deviceId);
@@ -83,12 +98,17 @@ async function refreshFromPaddle(request: Request, env: Env, deviceId: string, n
 
   try {
     let expires = account?.subscription_id
-      ? accessUntil(env, await getSubscription(env, account.subscription_id), now)
+      ? accessUntil(env, await getSubscription(env, account.subscription_id), now, account.current_end)
       : null;
 
-    // A checkout this very Mac started whose webhooks have not arrived yet.
+    // A checkout this very Mac started whose webhooks have not arrived yet, unless its account is refunded.
     const pending = await getJson<PendingCheckout>(env.LICENSES, pendingKey(ref));
-    if (expires == null && pending?.device_id === deviceId && pending.transaction_id) {
+    if (
+      expires == null &&
+      pending?.device_id === deviceId &&
+      pending.transaction_id &&
+      (await getAccount(env, pending.email))?.status !== "refunded"
+    ) {
       const txn = await getTransaction(env, pending.transaction_id);
       const subId = txn?.subscription_id;
       if (txn && refFrom(txn.custom_data) === ref && typeof subId === "string" && subId !== account?.subscription_id) {
@@ -116,7 +136,7 @@ export async function handleJevScore(request: Request, env: Env): Promise<Respon
     return legacyError("Missing device_id or questions", 400);
   }
 
-  const license = await getJson<LicenseRecord>(env.LICENSES, licenseKey(body.device_id));
+  const license = await readLicense(env, body.device_id);
   if (!license) return legacyError("No active license", 403);
   if (!license.active || license.expires < nowSecs()) return legacyError("License expired", 403);
 

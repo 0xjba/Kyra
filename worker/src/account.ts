@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 import { getJson, putJson } from "./kv";
 import { deleteLicense, writeLicense } from "./license";
-import type { Plan } from "./paddle";
+import { type PaddleEnvironment, type Plan, paddleEnvironment, sameEnvironment } from "./paddle";
 import { maskEmail } from "./validate";
 
 export type SubStatus = "active" | "cancelled" | "billing_issue" | "expired" | "refunded";
@@ -30,6 +30,10 @@ export interface Account {
   devices: Device[];
   /** Paddle `occurred_at` (epoch ms) of the newest applied event. */
   last_event_at: number | null;
+  /** Adjustment action that made the account `refunded` (`refund`, `chargeback`, `chargeback_warning`). */
+  refunded_by?: string;
+  /** Paddle environment the account was written in; missing means sandbox. */
+  paddle_env?: PaddleEnvironment;
 }
 
 export type SubState = Pick<Account, "status" | "current_end" | "grace_end">;
@@ -59,11 +63,14 @@ export function isEntitled(s: SubState, now: number): boolean {
   return expires != null && expires > now;
 }
 
-export function getAccount(env: Env, email: string): Promise<Account | null> {
-  return getJson<Account>(env.LICENSES, accountKey(email));
+// An account written in the other Paddle environment (sandbox vs production) does not exist here.
+export async function getAccount(env: Env, email: string): Promise<Account | null> {
+  const account = await getJson<Account>(env.LICENSES, accountKey(email));
+  return account && sameEnvironment(env, account) ? account : null;
 }
 
 export async function putAccount(env: Env, account: Account): Promise<void> {
+  account.paddle_env = paddleEnvironment(env);
   await putJson(env.LICENSES, accountKey(account.email), account);
   await env.LICENSES.put(refKey(account.ref), account.email);
   if (account.subscription_id) await env.LICENSES.put(subscriptionKey(account.subscription_id), account.email);
