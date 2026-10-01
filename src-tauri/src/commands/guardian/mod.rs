@@ -11,8 +11,7 @@ pub(crate) mod test_support;
 
 use types::*;
 
-// TODO(deploy): set to the deployed worker URL
-const PROD_WORKER_URL: &str = "https://kyra-guardian.workers.dev";
+const PROD_WORKER_URL: &str = "https://kyra-guardian.flashbacks.workers.dev";
 
 pub fn worker_url() -> String {
     let override_url = if cfg!(debug_assertions) {

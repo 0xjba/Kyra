@@ -7,6 +7,6 @@ JEV_API_URL = "https://api.typesafe.ai/v1/score"
 
 [[kv_namespaces]]
 binding = "LICENSES"
-id = "placeholder-kv-id"
+id = "b8f22213e10147128dd0f71548cb98ca"
 
 # Secrets are set with `wrangler secret put` (see README). DEV_MOCK_REVENUECAT belongs only in .dev.vars.
