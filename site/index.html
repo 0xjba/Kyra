@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kyra - Nine lives for your storage</title>
-  <meta name="description" content="Free, open-source macOS app that hunts down the junk hoarding your disk space. 270+ apps cleaned, 56 dev artifact types, 24 optimization tasks. Built for Apple Silicon." />
+  <meta name="description" content="Free, open-source macOS app that hunts down the junk hoarding your disk space, and never touches what matters. 330+ cleanup rules, 50+ dev artifact types, 24 optimization tasks. Optional Pawtrol keeps your Mac clean on its own." />
   <meta property="og:title" content="Kyra - Nine lives for your storage" />
   <meta property="og:description" content="Free, open-source macOS app that hunts down the junk hoarding your disk space. Built for Apple Silicon." />
-  <meta property="og:image" content="https://raw.githubusercontent.com/0xjba/Kyra/main/src/assets/screenshot.jpg" />
+  <meta property="og:image" content="https://raw.githubusercontent.com/0xjba/Kyra/main/site/assets/home.png" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="icon" href="https://raw.githubusercontent.com/0xjba/Kyra/main/AppIcon.png" />
@@ -356,6 +356,96 @@
     .f-cyan::before { background: linear-gradient(180deg, #22B8F0, transparent); }
     .f-cyan .f-icon { background: rgba(34, 184, 240, 0.12); color: #22B8F0; }
 
+    /* ── Pawtrol ── */
+    .pawtrol {
+      padding: 0 0 120px;
+    }
+    .paw-card {
+      position: relative;
+      overflow: hidden;
+      padding: 48px 44px;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      background:
+        radial-gradient(120% 140% at 0% 0%, rgba(58, 123, 255, 0.14), transparent 55%),
+        radial-gradient(120% 140% at 100% 100%, rgba(253, 72, 65, 0.10), transparent 55%),
+        rgba(255, 255, 255, 0.03);
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+    .paw-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 16px;
+    }
+    .paw-pro {
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #fff;
+      background: linear-gradient(90deg, #FD4841, #FD8C34 40%, #2AC852 75%, #22B8F0);
+    }
+    .paw-card h2 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 14px;
+    }
+    .paw-card .paw-lead {
+      font-size: 15px;
+      color: var(--text-2);
+      line-height: 1.6;
+      margin-bottom: 22px;
+    }
+    .paw-price {
+      font-size: 14px;
+      color: var(--text-2);
+    }
+    .paw-price strong {
+      font-size: 22px;
+      color: var(--text-1);
+      letter-spacing: -0.02em;
+    }
+    .paw-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .paw-list li {
+      display: flex;
+      gap: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-2);
+    }
+    .paw-list li strong {
+      color: var(--text-1);
+      font-weight: 600;
+    }
+    .paw-dot {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+    .paw-dot svg { width: 13px; height: 13px; }
+
     /* ── FAQ ── */
     .faq {
       padding: 80px 0 100px;
@@ -467,6 +557,7 @@
       .f-grid { grid-template-columns: 1fr; }
       .f-hero { grid-column: span 1; }
       .faq-grid { grid-template-columns: 1fr; }
+      .paw-card { grid-template-columns: 1fr; padding: 32px 24px; }
       .nav-right a:not(.nav-cta) { display: none; }
       .footer-top { flex-direction: column; gap: 16px; align-items: center; }
       .footer-nav { gap: 20px; }
@@ -505,7 +596,7 @@
       <p class="hero-meta">Free and open source &middot; macOS 11+ &middot; Apple Silicon (M1/M2/M3/M4/M5)</p>
 
       <div class="shot">
-        <img src="https://raw.githubusercontent.com/0xjba/Kyra/main/src/assets/screenshot.jpg" alt="Kyra dashboard" />
+        <img src="assets/home.png" alt="Kyra home screen showing reclaimable space per module" width="800" height="640" />
       </div>
     </div>
   </section>
@@ -522,11 +613,11 @@
     <div class="wrap">
       <div class="pillars-grid">
         <div class="pillar">
-          <div class="pillar-num">270+</div>
-          <div class="pillar-label">Apps and services cleaned</div>
+          <div class="pillar-num">330+</div>
+          <div class="pillar-label">Cleanup rules</div>
         </div>
         <div class="pillar">
-          <div class="pillar-num">56</div>
+          <div class="pillar-num">50+</div>
           <div class="pillar-label">Developer artifact types</div>
         </div>
         <div class="pillar">
@@ -552,14 +643,14 @@
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </div>
           <h3>Clean</h3>
-          <p>System and browser caches, logs, orphaned app data. 270+ apps and services covered, 16 browsers supported.</p>
+          <p>System and browser caches, logs and leftovers from apps you removed. Your browser tabs, passwords, extensions and history are never touched, only their caches.</p>
         </div>
         <div class="f-card f-blue">
           <div class="f-icon">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3h6m-6 0v3m6-3v3M4 21h16a1 1 0 001-1V8a1 1 0 00-1-1H4a1 1 0 00-1 1v12a1 1 0 001 1zm5-7h6"/></svg>
           </div>
           <h3>Uninstall</h3>
-          <p>Remove apps and all their hidden support files. Cleaner than dragging to Trash.</p>
+          <p>Remove apps and their hidden support files. Data that outlives an app, like wallets, message history or backups, is kept and shown to you.</p>
         </div>
 
         <!-- Row 2: Three equal cards -->
@@ -568,14 +659,14 @@
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
           </div>
           <h3>Prune</h3>
-          <p>Developer? 56 artifact types across 15+ languages. node_modules, target, __pycache__, .build. Bulk-delete in seconds.</p>
+          <p>Developer? 50+ artifact types across 15+ languages: node_modules, target, __pycache__, .build. See how long each project has been idle. Only real build output, never your source.</p>
         </div>
         <div class="f-card f-green">
           <div class="f-icon">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3"/></svg>
           </div>
           <h3>Installers</h3>
-          <p>Leftover .dmg, .pkg, and .iso files piling up in Downloads. Stop forgetting about them.</p>
+          <p>Leftover .dmg, .pkg, .iso and .xip files in Downloads, Desktop, Mail and iCloud. Only installers you downloaded, never ones you made.</p>
         </div>
         <div class="f-card f-yellow">
           <div class="f-icon">
@@ -591,7 +682,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
           </div>
           <h3>Analyze</h3>
-          <p>Treemap visualizer, large file finder. See exactly where your space goes.</p>
+          <p>A disk map and a large-file finder. See exactly where your space goes, drill in, reveal or remove.</p>
         </div>
         <div class="f-card f-teal">
           <div class="f-icon">
@@ -611,6 +702,38 @@
     </div>
   </section>
 
+  <!-- Pawtrol -->
+  <section class="pawtrol" id="pawtrol">
+    <div class="wrap">
+      <div class="paw-card">
+        <div>
+          <div class="paw-tag">Pawtrol <span class="paw-pro">PRO</span></div>
+          <h2>Storage that looks<br />after itself.</h2>
+          <p class="paw-lead">Pawtrol runs in the background and keeps your Mac clean without you opening Kyra. It clears what's safe on its own and asks before touching anything that matters.</p>
+          <p class="paw-price"><strong>$0.99</strong> / month &middot; cancel anytime</p>
+        </div>
+        <ul class="paw-list">
+          <li>
+            <span class="paw-dot" style="background: rgba(58,123,255,0.14); color: #3A7BFF;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></span>
+            <span><strong>Runs on its own.</strong> Every 6 hours, daily or weekly, and right away when space runs low. You set the rules.</span>
+          </li>
+          <li>
+            <span class="paw-dot" style="background: rgba(42,200,82,0.14); color: #2AC852;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>
+            <span><strong>Clears safe caches.</strong> Things your apps rebuild on their own, automatically or after you say so.</span>
+          </li>
+          <li>
+            <span class="paw-dot" style="background: rgba(253,210,37,0.14); color: #FDD225;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg></span>
+            <span><strong>Asks before your data.</strong> Docker volumes, AI models, Xcode archives and Trash wait for your OK, every time.</span>
+          </li>
+          <li>
+            <span class="paw-dot" style="background: rgba(253,72,65,0.14); color: #FD4841;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.66V5a2 2 0 10-4 0v.34A6 6 0 006 11v3.2c0 .53-.21 1.04-.59 1.41L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg></span>
+            <span><strong>Speaks up when it's urgent.</strong> When space gets critical, it frees what it safely can and shows you the biggest things to review.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
   <!-- FAQ -->
   <section class="faq">
     <div class="wrap">
@@ -618,11 +741,11 @@
       <div class="faq-grid">
         <div class="faq-item">
           <h3>Is it really free?</h3>
-          <p>Yes. Kyra is free and open source under the MIT license. No trials, no subscriptions, no "premium" tier.</p>
+          <p>Every cleaning tool is free and open source under the MIT license, with no trials or limits. Pawtrol, the optional autopilot, is $0.99 a month.</p>
         </div>
         <div class="faq-item">
           <h3>Is it safe?</h3>
-          <p>Kyra uses comprehensive cleaning rules with built-in guardrails, continuously updated to support more apps. For extra caution, there's a Move to Trash option too.</p>
+          <p>Kyra will not delete browser profiles, passwords, crypto wallets, message history, device backups, virtual machines, databases or anything synced to iCloud. Only the caches inside them. Every cleanup path is checked by automated tests, and Move to Trash gives you an undo.</p>
         </div>
         <div class="faq-item">
           <h3>What Macs does it support?</h3>
@@ -630,7 +753,7 @@
         </div>
         <div class="faq-item">
           <h3>Does it phone home?</h3>
-          <p>No. Everything runs locally on your machine. No accounts, no analytics, no network calls except optional update checks.</p>
+          <p>The free tools run on your Mac, with no analytics. Ask AI shares a scan summary with ChatGPT only when you click it. Pawtrol checks your subscription and sends category names and sizes (like "npm cache, 955 MB") to score what's safe. Never your files or file names.</p>
         </div>
       </div>
     </div>
