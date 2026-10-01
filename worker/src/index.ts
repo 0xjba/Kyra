@@ -3,9 +3,10 @@ import type { Ctx, Env } from "./env";
 import { corsHeaders, fail, legacyError } from "./http";
 import { handleJevScore, handleLicenseCheck } from "./license";
 import { handleMockManage, handleMockPay, mockEnabled } from "./mock";
+import { handlePayPage } from "./pay";
 import { handleRestoreStart, handleRestoreVerify } from "./restore";
 import { handleAccount, handleCancelGone, handleManage } from "./subscription";
-import { handleRevenueCatWebhook } from "./webhook";
+import { handlePaddleWebhook } from "./webhook";
 
 export type { Env } from "./env";
 
@@ -14,13 +15,14 @@ type Handler = (request: Request, env: Env, ctx?: Ctx) => Promise<Response>;
 const routes: Record<string, Handler> = {
   "GET /license": handleLicenseCheck,
   "POST /jev/score": handleJevScore,
-  "POST /webhook/revenuecat": handleRevenueCatWebhook,
+  "POST /webhook/paddle": handlePaddleWebhook,
   "POST /checkout/create": handleCheckoutCreate,
   "POST /restore/start": handleRestoreStart,
   "POST /restore/verify": handleRestoreVerify,
   "GET /account": handleAccount,
   "POST /account/manage": handleManage,
   "POST /subscription/cancel": handleCancelGone,
+  "GET /pay": handlePayPage,
 };
 
 export default {

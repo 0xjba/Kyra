@@ -1,15 +1,24 @@
-import { accountForCustomer, accountForDevice, putAccount } from "./account";
+import { accountForDevice, accountForRef } from "./account";
 import type { Env } from "./env";
 import { legacyError, legacyJson } from "./http";
 import { DAY, getJson, nowSecs, putJson, rateLimit } from "./kv";
 import { mockEnabled } from "./mock";
-import { ProviderError, appUserIdForDevice, fetchEntitlement } from "./revenuecat";
+import {
+  ProviderError,
+  type PaddleSubscription,
+  getSubscription,
+  getTransaction,
+  refForDevice,
+  refFrom,
+  subscriptionState,
+} from "./paddle";
 import { isDeviceId } from "./validate";
+import { type PendingCheckout, pendingKey } from "./webhook";
 
 export interface LicenseRecord {
   active: boolean;
   expires: number;
-  app_user_id: string;
+  ref: string;
 }
 
 export const LICENSE_TTL_SECONDS = 35 * DAY;
@@ -20,14 +29,9 @@ const REFRESH_INTERVAL_SECONDS = 600;
 
 export const licenseKey = (deviceId: string) => `license:${deviceId}`;
 
-export async function writeLicense(
-  env: Env,
-  deviceId: string,
-  expires: number,
-  appUserId: string
-): Promise<void> {
-  const record: LicenseRecord = { active: true, expires, app_user_id: appUserId };
-  // Keep the record at least until the paid period ends (annual plans exceed 35 days).
+export async function writeLicense(env: Env, deviceId: string, expires: number, ref: string): Promise<void> {
+  const record: LicenseRecord = { active: true, expires, ref };
+  // Keep the record at least until the paid period ends (yearly plans exceed 35 days).
   const ttl = Math.max(LICENSE_TTL_SECONDS, expires - nowSecs() + LICENSE_KV_GRACE_SECONDS);
   await putJson(env.LICENSES, licenseKey(deviceId), record, ttl);
 }
@@ -46,44 +50,55 @@ export async function handleLicenseCheck(request: Request, env: Env): Promise<Re
     return legacyJson({ active: true, expires: license.expires });
   }
 
-  const refreshed = await refreshFromRevenueCat(request, env, deviceId, now);
+  const refreshed = await refreshFromPaddle(request, env, deviceId, now);
   if (refreshed != null) return legacyJson({ active: true, expires: refreshed });
 
   if (!license) return legacyJson({ active: false, expires: null });
   return legacyJson({ active: license.active && license.expires >= now, expires: license.expires });
 }
 
-// Webhooks are the source of truth; this covers a missed or delayed one (e.g. the app polling
-// right after checkout) by asking RevenueCat directly, at most once per device per 10 minutes.
-async function refreshFromRevenueCat(
-  request: Request,
-  env: Env,
-  deviceId: string,
-  now: number
-): Promise<number | null> {
-  if (!isDeviceId(deviceId) || !env.REVENUECAT_SECRET_API_KEY || mockEnabled(env, request)) return null;
+function accessUntil(env: Env, sub: PaddleSubscription | null, now: number): number | null {
+  if (!sub) return null;
+  const state = subscriptionState(env, sub);
+  const expires = state.status === "billing_issue" ? state.grace_end : state.current_end;
+  return state.status !== "expired" && expires != null && expires > now ? expires : null;
+}
 
-  const throttleKey = `rcsync:${deviceId}`;
+// Webhooks are the source of truth; this covers a missed or delayed one (e.g. the app polling
+// right after checkout) by asking Paddle directly, at most once per device per 10 minutes.
+async function refreshFromPaddle(request: Request, env: Env, deviceId: string, now: number): Promise<number | null> {
+  if (!isDeviceId(deviceId) || !env.PADDLE_API_KEY || mockEnabled(env, request)) return null;
+
+  const throttleKey = `pdlsync:${deviceId}`;
   if (await env.LICENSES.get(throttleKey)) return null;
   await putJson(env.LICENSES, throttleKey, now, REFRESH_INTERVAL_SECONDS);
 
   const account = await accountForDevice(env, deviceId);
-  let appUserId = account?.app_user_id;
-  if (!appUserId) {
-    appUserId = await appUserIdForDevice(deviceId);
+  let ref = account?.ref;
+  if (!ref) {
+    ref = await refForDevice(deviceId);
     // A known customer this device is not bound to (e.g. evicted by the device cap) gets nothing.
-    if (await accountForCustomer(env, appUserId)) return null;
+    if (await accountForRef(env, ref)) return null;
   }
 
   try {
-    const state = await fetchEntitlement(env, appUserId);
-    if (account && state.management_url && state.management_url !== account.management_url) {
-      account.management_url = state.management_url;
-      await putAccount(env, account);
+    let expires = account?.subscription_id
+      ? accessUntil(env, await getSubscription(env, account.subscription_id), now)
+      : null;
+
+    // A checkout this very Mac started whose webhooks have not arrived yet.
+    const pending = await getJson<PendingCheckout>(env.LICENSES, pendingKey(ref));
+    if (expires == null && pending?.device_id === deviceId && pending.transaction_id) {
+      const txn = await getTransaction(env, pending.transaction_id);
+      const subId = txn?.subscription_id;
+      if (txn && refFrom(txn.custom_data) === ref && typeof subId === "string" && subId !== account?.subscription_id) {
+        expires = accessUntil(env, await getSubscription(env, subId), now);
+      }
     }
-    if (!state.active || state.expires == null || state.expires <= now) return null;
-    await writeLicense(env, deviceId, state.expires, appUserId);
-    return state.expires;
+
+    if (expires == null) return null;
+    await writeLicense(env, deviceId, expires, ref);
+    return expires;
   } catch (err) {
     console.error(`license refresh failed: ${err instanceof ProviderError ? err.message : "unexpected error"}`);
     return null;

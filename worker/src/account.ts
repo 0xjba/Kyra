@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { getJson, putJson } from "./kv";
 import { deleteLicense, writeLicense } from "./license";
+import type { Plan } from "./paddle";
 import { maskEmail } from "./validate";
 
 export type SubStatus = "active" | "cancelled" | "billing_issue" | "expired" | "refunded";
@@ -12,7 +13,13 @@ export interface Device {
 
 export interface Account {
   email: string;
-  app_user_id: string;
+  /** Derived customer reference (`kyra-…`), carried in Paddle `custom_data`. Returned to the app as `app_user_id`. */
+  ref: string;
+  /** Paddle customer (`ctm_…`); emails are unique per Paddle customer. */
+  customer_id: string | null;
+  /** Paddle subscription (`sub_…`) currently backing the account. */
+  subscription_id: string | null;
+  plan: Plan | null;
   status: SubStatus;
   /** Epoch seconds the current paid period ends. */
   current_end: number | null;
@@ -21,7 +28,7 @@ export interface Account {
   cancel_at_period_end: boolean;
   management_url: string | null;
   devices: Device[];
-  /** RevenueCat `event_timestamp_ms` of the newest applied event. */
+  /** Paddle `occurred_at` (epoch ms) of the newest applied event. */
   last_event_at: number | null;
 }
 
@@ -31,7 +38,9 @@ export const MAX_DEVICES = 3;
 
 const accountKey = (email: string) => `account:${email}`;
 const deviceKey = (deviceId: string) => `device:${deviceId}`;
-export const customerKey = (appUserId: string) => `rcuser:${appUserId}`;
+export const refKey = (ref: string) => `pdlref:${ref}`;
+export const subscriptionKey = (subscriptionId: string) => `pdlsub:${subscriptionId}`;
+export const customerKey = (customerId: string) => `pdlcus:${customerId}`;
 
 export function entitlementExpiry(s: SubState): number | null {
   switch (s.status) {
@@ -56,15 +65,30 @@ export function getAccount(env: Env, email: string): Promise<Account | null> {
 
 export async function putAccount(env: Env, account: Account): Promise<void> {
   await putJson(env.LICENSES, accountKey(account.email), account);
-  await env.LICENSES.put(customerKey(account.app_user_id), account.email);
+  await env.LICENSES.put(refKey(account.ref), account.email);
+  if (account.subscription_id) await env.LICENSES.put(subscriptionKey(account.subscription_id), account.email);
+  if (account.customer_id) await env.LICENSES.put(customerKey(account.customer_id), account.email);
 }
 
-export async function accountForCustomer(env: Env, appUserId: string): Promise<Account | null> {
-  const email = await env.LICENSES.get(customerKey(appUserId));
+// Reverse indexes are only hints: the account must still hold the id, so stale entries are harmless.
+async function accountVia(
+  env: Env,
+  key: string,
+  matches: (account: Account) => boolean
+): Promise<Account | null> {
+  const email = await env.LICENSES.get(key);
   if (!email) return null;
   const account = await getAccount(env, email);
-  return account?.app_user_id === appUserId ? account : null;
+  return account && matches(account) ? account : null;
 }
+
+export const accountForRef = (env: Env, ref: string) => accountVia(env, refKey(ref), (a) => a.ref === ref);
+
+export const accountForSubscription = (env: Env, subscriptionId: string) =>
+  accountVia(env, subscriptionKey(subscriptionId), (a) => a.subscription_id === subscriptionId);
+
+export const accountForCustomer = (env: Env, customerId: string) =>
+  accountVia(env, customerKey(customerId), (a) => a.customer_id === customerId);
 
 export async function accountForDevice(env: Env, deviceId: string): Promise<Account | null> {
   const email = await env.LICENSES.get(deviceKey(deviceId));
@@ -103,7 +127,7 @@ export async function syncLicenses(env: Env, account: Account): Promise<number |
   const expires = entitlementExpiry(account);
   for (const { device_id } of account.devices) {
     if (expires == null) await deleteLicense(env, device_id);
-    else await writeLicense(env, device_id, expires, account.app_user_id);
+    else await writeLicense(env, device_id, expires, account.ref);
   }
   return expires;
 }
@@ -112,6 +136,7 @@ export function accountView(account: Account) {
   return {
     email: maskEmail(account.email),
     status: account.status,
+    plan: account.plan ?? null,
     current_end: account.current_end,
     cancel_at_period_end: account.cancel_at_period_end,
     devices_count: account.devices.length,

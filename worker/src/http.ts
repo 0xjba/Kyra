@@ -44,3 +44,19 @@ export function clientIp(request: Request): string {
 }
 
 export const invalidJson = () => fail(400, "invalid_json", "Invalid JSON body");
+
+const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
+// JSON that is safe inside an inline <script>: no `</script>`, comment or line-terminator breakouts.
+export function scriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}

@@ -1,9 +1,9 @@
-import { accountForDevice, accountView, putAccount } from "./account";
+import { accountForDevice, accountView } from "./account";
 import type { Env } from "./env";
 import { clientIp, fail, invalidJson, json, readJson } from "./http";
 import { rateLimit } from "./kv";
 import { mockEnabled, mockManageLink } from "./mock";
-import { ProviderError, managementLinks } from "./revenuecat";
+import { ProviderError, portalLink } from "./paddle";
 import { isDeviceId } from "./validate";
 
 const MANAGE_LIMIT_PER_IP = 20;
@@ -17,7 +17,7 @@ export async function handleAccount(request: Request, env: Env): Promise<Respons
   return json(accountView(account));
 }
 
-// Cancelling, resuming and card changes all happen in RevenueCat's customer portal.
+// Cancelling, resuming and payment method changes all happen in Paddle's customer portal.
 export async function handleManage(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   if (!body) return invalidJson();
@@ -30,21 +30,18 @@ export async function handleManage(request: Request, env: Env): Promise<Response
   const account = await accountForDevice(env, body.device_id);
   if (!account) return fail(404, "not_found", "No account for this device");
 
-  if (mockEnabled(env, request)) return json({ url: mockManageLink(request, account.app_user_id) });
+  if (mockEnabled(env, request)) return json({ url: mockManageLink(request, account.ref) });
+  if (!account.customer_id) return fail(409, "no_active_subscription", "There is no subscription to manage");
 
-  let links;
+  let url: string | null;
   try {
-    links = await managementLinks(env, account.app_user_id);
+    url = await portalLink(env, account.customer_id, account.subscription_id);
   } catch (err) {
     console.error(`manage link failed: ${err instanceof ProviderError ? err.message : "unexpected error"}`);
     return fail(502, "payment_provider_error", "Could not open subscription management, try again later");
   }
-  if (links.stable && links.stable !== account.management_url) {
-    account.management_url = links.stable;
-    await putAccount(env, account);
-  }
-  if (!links.url) return fail(409, "no_active_subscription", "There is no subscription to manage");
-  return json({ url: links.url });
+  if (!url) return fail(409, "no_active_subscription", "There is no subscription to manage");
+  return json({ url });
 }
 
 export async function handleCancelGone(): Promise<Response> {

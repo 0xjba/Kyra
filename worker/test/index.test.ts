@@ -38,7 +38,7 @@ function call(path: string, init?: RequestInit): Promise<Response> {
 
 function seedLicense(deviceId: string, active: boolean, expires: number) {
   kv.store.set(`license:${deviceId}`, {
-    value: JSON.stringify({ active, expires, app_user_id: "kyra-1" }),
+    value: JSON.stringify({ active, expires, ref: "kyra-1" }),
   });
 }
 
@@ -216,7 +216,10 @@ describe("routing", () => {
   it.each([
     ["GET", "/jev/score"],
     ["POST", "/license"],
-    ["GET", "/webhook/revenuecat"],
+    ["GET", "/webhook/paddle"],
+    ["POST", "/webhook/revenuecat"],
+    ["POST", "/pay"],
+    ["GET", "/dev/mock-pay"],
     ["POST", "/webhook/razorpay"],
     ["GET", "/"],
     ["POST", "/jev/score/extra"],

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 
@@ -25,30 +25,42 @@ class MemoryKV {
   }
 }
 
-const AUTH = "Bearer whk_test_secret";
+const SECRET = "pdl_ntfset_01test_webhooksecret";
 const NOW = 1_800_000_000;
 const DAY = 86_400;
 const EMAIL = "jane@gmail.com";
-const LINK = "https://pay.rev.cat/tok123";
-const RC_API = "https://api.revenuecat.com/v2/projects/proj_test";
-const PORTAL = "https://billing.revenuecat.com/app1/sub1?token=abc";
+const SANDBOX_API = "https://sandbox-api.paddle.com";
+const PRICE_M = "pri_monthly000000000000000000";
+const PRICE_Y = "pri_yearly0000000000000000000";
+const CUS1 = "ctm_01hv6y1jedq4p1n0yqn5ba3ky4";
+const SUB1 = "sub_01hv8x29kz0t586xy6zn1a62ny";
+const SUB2 = "sub_02hv8x29kz0t586xy6zn1a62ny";
+const PORTAL_SUB = "https://sandbox-customer-portal.paddle.com/cpl_1?action=view_subscription&subscription_id=sub&token=pga_x";
+const PORTAL_OVERVIEW = "https://sandbox-customer-portal.paddle.com/cpl_1?action=overview&token=pga_x";
 const dev = (n: number) => createHash("sha256").update(`device-${n}`).digest("hex");
-const rcId = (deviceId: string) =>
-  `kyra-${createHash("sha256").update(`pawtrol-rc:${deviceId}`).digest("hex")}`;
+const refOf = (deviceId: string) =>
+  `kyra-${createHash("sha256").update(`pawtrol-ref:${deviceId}`).digest("hex")}`;
 const D1 = dev(1);
-const U1 = rcId(D1);
+const R1 = refOf(D1);
+const iso = (secs: number) => new Date(secs * 1000).toISOString();
 
 let kv: MemoryKV;
 let env: any;
 let fetchMock: ReturnType<typeof vi.fn>;
-let revenuecat: ReturnType<typeof vi.fn>;
+let paddle: ReturnType<typeof vi.fn>;
 let resend: ReturnType<typeof vi.fn>;
 let emails: { to: string[]; subject: string; text: string }[];
-let rcSubs: Record<string, any[]>;
+let customers: Map<string, string>;
+let transactions: Map<string, any>;
+let subscriptions: Map<string, any>;
+let paddleCalls: { method: string; path: string; body: any; headers: Record<string, string> }[];
+let txnCounter: number;
+let transactionResponse: (() => Response) | null;
 
 function setTime(t: number) {
   vi.setSystemTime(t * 1000);
 }
+const nowSecs = () => Math.floor(Date.now() / 1000);
 
 function call(path: string, init?: RequestInit & { ip?: string; host?: string }): Promise<Response> {
   const headers = new Headers(init?.headers);
@@ -61,65 +73,79 @@ function post(path: string, body: unknown, opts: { ip?: string; host?: string } 
   return call(path, { method: "POST", body: JSON.stringify(body), ...opts });
 }
 
-function send(event: Record<string, unknown>, auth: string | null = AUTH) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (auth !== null) headers.Authorization = auth;
-  return call("/webhook/revenuecat", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ api_version: "1.0", event }),
+const sign = (raw: string, ts = nowSecs(), secret = SECRET) =>
+  `ts=${ts};h1=${createHmac("sha256", secret).update(`${ts}:${raw}`).digest("hex")}`;
+
+let eventSeq = 0;
+function rawEvent(type: string, data: unknown, at = nowSecs(), id = `evt_${++eventSeq}`) {
+  return JSON.stringify({
+    event_id: id,
+    event_type: type,
+    occurred_at: iso(at),
+    notification_id: `ntf_${eventSeq}`,
+    data,
   });
 }
 
-function rcEvent(type: string, at = NOW, overrides: Record<string, unknown> = {}) {
+function sendRaw(raw: string, signature: string | null = sign(raw)) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (signature !== null) headers["Paddle-Signature"] = signature;
+  return call("/webhook/paddle", { method: "POST", headers, body: raw });
+}
+
+const send = (type: string, data: unknown, at = nowSecs(), id?: string) => sendRaw(rawEvent(type, data, at, id));
+
+function sub(overrides: Record<string, unknown> = {}, opts: { plan?: "monthly" | "yearly"; ref?: string | null } = {}) {
+  const yearly = opts.plan === "yearly";
+  const ref = opts.ref === undefined ? R1 : opts.ref;
   return {
-    type,
-    id: `evt_${type}_${at}`,
-    app_user_id: U1,
-    original_app_user_id: U1,
-    aliases: [U1],
-    environment: "PRODUCTION",
-    store: "RC_BILLING",
-    product_id: "pawtrol_monthly",
-    entitlement_ids: ["pawtrol"],
-    event_timestamp_ms: at * 1000,
-    expiration_at_ms: (NOW + 30 * DAY) * 1000,
-    subscriber_attributes: {},
+    id: SUB1,
+    status: "active",
+    customer_id: CUS1,
+    custom_data: ref ? { kyra_ref: ref } : null,
+    billing_cycle: { interval: yearly ? "year" : "month", frequency: 1 },
+    current_billing_period: { starts_at: iso(NOW), ends_at: iso(NOW + (yearly ? 365 : 30) * DAY) },
+    scheduled_change: null,
+    items: [{ status: "active", quantity: 1, price: { id: yearly ? PRICE_Y : PRICE_M } }],
     ...overrides,
   };
 }
 
-const event = (type: string, at = NOW, overrides: Record<string, unknown> = {}) =>
-  send(rcEvent(type, at, overrides));
+function txn(overrides: Record<string, unknown> = {}, opts: { plan?: "monthly" | "yearly"; ref?: string | null } = {}) {
+  const yearly = opts.plan === "yearly";
+  const ref = opts.ref === undefined ? R1 : opts.ref;
+  return {
+    id: "txn_01hv8wptq8987qeep44cyrewp9",
+    status: "completed",
+    origin: "api",
+    customer_id: CUS1,
+    subscription_id: SUB1,
+    custom_data: ref ? { kyra_ref: ref } : null,
+    billing_period: { starts_at: iso(NOW), ends_at: iso(NOW + (yearly ? 365 : 30) * DAY) },
+    items: [{ quantity: 1, price: { id: yearly ? PRICE_Y : PRICE_M } }],
+    ...overrides,
+  };
+}
 
 async function license(deviceId: string) {
   return (await call(`/license?device_id=${deviceId}`)).json();
 }
 
-async function purchase(at = NOW, overrides: Record<string, unknown> = {}) {
-  expect((await post("/checkout/create", { device_id: D1, email: EMAIL })).status).toBe(200);
-  return event("INITIAL_PURCHASE", at, overrides);
+async function checkout(deviceId = D1, email = EMAIL, plan?: string) {
+  const res = await post("/checkout/create", { device_id: deviceId, email, ...(plan && { plan }) });
+  expect(res.status).toBe(200);
+  return res.json();
+}
+
+async function purchase(at = NOW, plan: "monthly" | "yearly" = "monthly") {
+  await checkout(D1, EMAIL, plan);
+  const completed = await send("transaction.completed", txn({}, { plan }), at);
+  await send("subscription.activated", sub({}, { plan }), at);
+  return completed;
 }
 
 function lastCode(): string {
   return /(\d{6})/.exec(emails.at(-1)!.subject)![1];
-}
-
-function rcSub(overrides: Record<string, unknown> = {}) {
-  return {
-    object: "subscription",
-    id: "sub1",
-    environment: "production",
-    store: "rc_billing",
-    status: "active",
-    gives_access: true,
-    auto_renewal_status: "will_renew",
-    current_period_ends_at: (NOW + 30 * DAY) * 1000,
-    ends_at: (NOW + 30 * DAY) * 1000,
-    management_url: "https://billing.revenuecat.com/manage/app1",
-    entitlements: { object: "list", items: [{ object: "entitlement", id: "entl1", lookup_key: "pawtrol" }] },
-    ...overrides,
-  };
 }
 
 beforeEach(() => {
@@ -130,33 +156,108 @@ beforeEach(() => {
     LICENSES: kv,
     JEV_API_KEY: "jev-key",
     JEV_API_URL: "https://jev.upstream/score",
-    REVENUECAT_SECRET_API_KEY: "sk_test_key",
-    REVENUECAT_PROJECT_ID: "proj_test",
-    REVENUECAT_WEBHOOK_AUTH: AUTH,
-    REVENUECAT_WEB_PURCHASE_LINK: LINK,
+    PADDLE_ENV: "sandbox",
+    PADDLE_API_KEY: "pdl_sdbx_apikey_testkey",
+    PADDLE_WEBHOOK_SECRET: SECRET,
+    PADDLE_PRICE_ID_MONTHLY: PRICE_M,
+    PADDLE_PRICE_ID_YEARLY: PRICE_Y,
+    PADDLE_CLIENT_TOKEN: "test_clienttoken123",
     RESEND_API_KEY: "re_test",
     MAIL_FROM: "Kyra <hello@kyra.test>",
   };
   emails = [];
-  rcSubs = {};
-  revenuecat = vi.fn(async (url: string) => {
-    const subs = /\/customers\/([^/]+)\/subscriptions$/.exec(url);
-    if (subs) {
-      const items = rcSubs[decodeURIComponent(subs[1])];
-      if (!items) return Response.json({ type: "resource_missing" }, { status: 404 });
-      return Response.json({ object: "list", items, next_page: null });
+  customers = new Map();
+  transactions = new Map();
+  subscriptions = new Map();
+  paddleCalls = [];
+  txnCounter = 0;
+  transactionResponse = null;
+  paddle = vi.fn(async (url: string, init: RequestInit) => {
+    const u = new URL(url);
+    const method = init?.method ?? "GET";
+    const body = init?.body ? JSON.parse(init.body as string) : undefined;
+
+    if (method === "POST" && u.pathname === "/customers") {
+      const existing = customers.get(body.email);
+      if (existing) {
+        return Response.json(
+          {
+            error: {
+              type: "request_error",
+              code: "customer_already_exists",
+              detail: `customer email conflicts with customer of id ${existing}`,
+            },
+          },
+          { status: 409 }
+        );
+      }
+      const id = `ctm_${String(customers.size + 1).padStart(26, "0")}`;
+      customers.set(body.email, id);
+      return Response.json({ data: { id, email: body.email, status: "active" } }, { status: 201 });
     }
-    if (url.endsWith("/authenticated_management_url")) {
-      return Response.json({ object: "authenticated_management_url", management_url: PORTAL });
+    if (method === "GET" && u.pathname === "/customers") {
+      const email = u.searchParams.get("email")!;
+      const id = customers.get(email);
+      return Response.json({ data: id ? [{ id, email }] : [] });
     }
-    throw new Error(`unexpected RevenueCat call ${url}`);
+    if (method === "POST" && u.pathname === "/transactions") {
+      if (transactionResponse) return transactionResponse();
+      const id = `txn_${String(++txnCounter).padStart(26, "0")}`;
+      const t = {
+        id,
+        status: "draft",
+        customer_id: body.customer_id,
+        custom_data: body.custom_data,
+        subscription_id: null,
+        checkout: { url: `${body.checkout.url}?_ptxn=${id}` },
+      };
+      transactions.set(id, t);
+      return Response.json({ data: t }, { status: 201 });
+    }
+    let m = /^\/transactions\/([^/]+)$/.exec(u.pathname);
+    if (method === "GET" && m) {
+      const t = transactions.get(m[1]);
+      return t ? Response.json({ data: t }) : Response.json({ error: { code: "not_found" } }, { status: 404 });
+    }
+    m = /^\/subscriptions\/([^/]+)$/.exec(u.pathname);
+    if (method === "GET" && m) {
+      const s = subscriptions.get(m[1]);
+      return s ? Response.json({ data: s }) : Response.json({ error: { code: "not_found" } }, { status: 404 });
+    }
+    m = /^\/customers\/([^/]+)\/portal-sessions$/.exec(u.pathname);
+    if (method === "POST" && m) {
+      return Response.json(
+        {
+          data: {
+            id: "cpls_1",
+            customer_id: m[1],
+            urls: {
+              general: { overview: PORTAL_OVERVIEW },
+              subscriptions: (body.subscription_ids ?? []).map((id: string) => ({
+                id,
+                view_subscription: PORTAL_SUB,
+                cancel_subscription: `${PORTAL_SUB}&c`,
+                update_subscription_payment_method: `${PORTAL_SUB}&u`,
+              })),
+            },
+          },
+        },
+        { status: 201 }
+      );
+    }
+    throw new Error(`unexpected Paddle call ${method} ${url}`);
   });
   resend = vi.fn(async (_url: string, init: RequestInit) => {
     emails.push(JSON.parse(init.body as string));
     return Response.json({ id: "email_1" });
   });
   fetchMock = vi.fn(async (url: string, init: RequestInit) => {
-    if (url.startsWith("https://api.revenuecat.com/")) return revenuecat(url, init);
+    if (url.startsWith(SANDBOX_API) || url.startsWith("https://api.paddle.com")) {
+      const u = new URL(url);
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      paddleCalls.push({ method: init?.method ?? "GET", path: u.pathname + u.search, body, headers: init.headers as Record<string, string> });
+      return paddle(url, init);
+    }
     if (url.startsWith("https://api.resend.com/")) return resend(url, init);
     throw new Error(`unexpected fetch ${url}`);
   });
@@ -171,19 +272,79 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// Binds a device directly, for accounts whose subscription has lapsed (restore needs an active one).
+function bindViaAccount(deviceId: string) {
+  const account = kv.json(`account:${EMAIL}`);
+  account.devices.push({ device_id: deviceId, bound_at: NOW });
+  kv.store.set(`account:${EMAIL}`, { value: JSON.stringify(account) });
+  kv.store.set(`device:${deviceId}`, { value: EMAIL });
+}
+
+async function bindViaRestore(deviceId: string) {
+  expect((await post("/restore/start", { email: EMAIL })).status).toBe(200);
+  const res = await post("/restore/verify", { email: EMAIL, code: lastCode(), device_id: deviceId });
+  expect(res.status).toBe(200);
+  // Keep bound_at ordering deterministic and stay under the per-email send limit.
+  setTime(nowSecs() + 3601);
+}
+
 describe("POST /checkout/create", () => {
-  it("returns the Web Purchase Link for a derived app_user_id with the email preset", async () => {
+  it("creates a Paddle customer and transaction and returns its checkout link", async () => {
     const res = await post("/checkout/create", { device_id: D1, email: "  Jane+kyra@Gmail.com " });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
-      short_url: `${LINK}/${U1}?email=jane%2Bkyra%40gmail.com`,
-      app_user_id: U1,
+      short_url: "https://worker.test/pay?_ptxn=txn_00000000000000000000000001",
+      app_user_id: R1,
     });
     expect(body.short_url).not.toContain(D1);
-    expect(kv.json(`pending:${U1}`)).toEqual({ device_id: D1, email: "jane+kyra@gmail.com" });
-    expect(kv.store.get(`pending:${U1}`)!.ttl).toBe(7 * DAY);
+
+    expect(paddleCalls.map((c) => `${c.method} ${c.path}`)).toEqual(["POST /customers", "POST /transactions"]);
+    expect(paddleCalls[0].body).toEqual({ email: "jane+kyra@gmail.com" });
+    expect(paddleCalls[1].body).toEqual({
+      items: [{ price_id: PRICE_M, quantity: 1 }],
+      customer_id: "ctm_00000000000000000000000001",
+      custom_data: { kyra_ref: R1 },
+      collection_mode: "automatic",
+      checkout: { url: "https://worker.test/pay" },
+    });
+    expect(JSON.stringify(paddleCalls[1].body)).not.toContain(D1);
+    const headers = paddleCalls[1].headers;
+    expect(headers.Authorization).toBe("Bearer pdl_sdbx_apikey_testkey");
+    expect(headers["Paddle-Version"]).toBe("1");
+    expect(fetchMock.mock.calls[0][0]).toBe(`${SANDBOX_API}/customers`);
+
+    expect(kv.json(`pending:${R1}`)).toEqual({
+      device_id: D1,
+      email: "jane+kyra@gmail.com",
+      customer_id: "ctm_00000000000000000000000001",
+      transaction_id: "txn_00000000000000000000000001",
+      plan: "monthly",
+    });
+    expect(kv.store.get(`pending:${R1}`)!.ttl).toBe(7 * DAY);
+  });
+
+  it("uses the yearly price for plan yearly and monthly when asked explicitly", async () => {
+    await checkout(D1, EMAIL, "yearly");
+    expect(paddleCalls[1].body.items).toEqual([{ price_id: PRICE_Y, quantity: 1 }]);
+    expect(kv.json(`pending:${R1}`).plan).toBe("yearly");
+
+    await checkout(D1, EMAIL, "monthly");
+    expect(paddleCalls.at(-1)!.body.items).toEqual([{ price_id: PRICE_M, quantity: 1 }]);
+    expect(kv.json(`pending:${R1}`).plan).toBe("monthly");
+  });
+
+  it.each([["weekly"], ["Yearly"], [""], [12], [true], [{}]])("rejects plan %j with 400 invalid_plan", async (plan) => {
+    const res = await post("/checkout/create", { device_id: D1, email: EMAIL, plan });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("invalid_plan");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("treats a null plan as monthly", async () => {
+    await checkout(D1, EMAIL);
+    expect((await post("/checkout/create", { device_id: D1, email: EMAIL, plan: null })).status).toBe(200);
+    expect(paddleCalls.at(-1)!.body.items[0].price_id).toBe(PRICE_M);
   });
 
   it.each([
@@ -204,27 +365,80 @@ describe("POST /checkout/create", () => {
     expect(await res.json()).toEqual({ error: "Invalid JSON body", code: "invalid_json" });
   });
 
-  it("is a 502 without a configured https purchase link", async () => {
-    for (const link of ["", "http://pay.rev.cat/tok"]) {
-      env.REVENUECAT_WEB_PURCHASE_LINK = link;
-      const res = await post("/checkout/create", { device_id: D1, email: EMAIL });
-      expect(res.status).toBe(502);
-      expect((await res.json()).code).toBe("payment_provider_error");
-    }
+  it("reuses an existing Paddle customer named in the 409 conflict", async () => {
+    customers.set(EMAIL, CUS1);
+    await checkout();
+    expect(paddleCalls.map((c) => `${c.method} ${c.path}`)).toEqual(["POST /customers", "POST /transactions"]);
+    expect(paddleCalls[1].body.customer_id).toBe(CUS1);
+    expect(kv.json(`pending:${R1}`).customer_id).toBe(CUS1);
+  });
+
+  it("looks the customer up by email when the conflict does not name it", async () => {
+    customers.set(EMAIL, CUS1);
+    paddle.mockResolvedValueOnce(
+      Response.json({ error: { code: "customer_already_exists", detail: "conflict" } }, { status: 409 })
+    );
+    await checkout();
+    expect(paddleCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "POST /customers",
+      `GET /customers?email=${encodeURIComponent(EMAIL)}`,
+      "POST /transactions",
+    ]);
+    expect(paddleCalls[2].body.customer_id).toBe(CUS1);
+  });
+
+  it("uses PADDLE_CHECKOUT_URL as the checkout page when set", async () => {
+    env.PADDLE_CHECKOUT_URL = "https://kyra.app/pay";
+    const { short_url } = await checkout();
+    expect(paddleCalls[1].body.checkout).toEqual({ url: "https://kyra.app/pay" });
+    expect(short_url).toBe("https://kyra.app/pay?_ptxn=txn_00000000000000000000000001");
+  });
+
+  it("talks to the production API when PADDLE_ENV is production", async () => {
+    env.PADDLE_ENV = "production";
+    await checkout();
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      "https://api.paddle.com/customers",
+      "https://api.paddle.com/transactions",
+    ]);
+  });
+
+  it.each([
+    ["no price id", () => (env.PADDLE_PRICE_ID_MONTHLY = "")],
+    ["no API key", () => (env.PADDLE_API_KEY = "")],
+    ["an http checkout page", () => (env.PADDLE_CHECKOUT_URL = "http://kyra.app/pay")],
+    ["a customer error", () => paddle.mockResolvedValueOnce(Response.json({ error: { code: "forbidden", detail: "pdl_sdbx_apikey_testkey" } }, { status: 403 }))],
+    ["a customer conflict of another kind", () => paddle.mockResolvedValueOnce(Response.json({ error: { code: "conflict", detail: CUS1 } }, { status: 409 }))],
+    ["a transaction error", () => (transactionResponse = () => Response.json({ error: { detail: "pdl_sdbx_apikey_testkey" } }, { status: 500 }))],
+    ["a network failure", () => paddle.mockRejectedValueOnce(new TypeError("fetch failed"))],
+    ["a transaction without checkout URL", () => (transactionResponse = () => Response.json({ data: { id: "txn_x", checkout: null } }, { status: 201 }))],
+    ["a transaction with an http checkout URL", () => (transactionResponse = () => Response.json({ data: { id: "txn_x", checkout: { url: "http://evil.test/pay?_ptxn=txn_x" } } }, { status: 201 }))],
+    ["invalid JSON from Paddle", () => (transactionResponse = () => new Response("<html>", { status: 200 }))],
+  ])("is a 502 with %s, without leaking provider details", async (_name, arrange) => {
+    arrange();
+    const res = await post("/checkout/create", { device_id: D1, email: EMAIL });
+    expect(res.status).toBe(502);
+    const body = JSON.stringify(await res.json());
+    expect(body).toContain("payment_provider_error");
+    expect(body).not.toContain("pdl_");
     expect([...kv.store.keys()].some((k) => k.startsWith("pending:"))).toBe(false);
   });
 
-  it("refuses a Mac that is already subscribed and reuses the customer for a lapsed one", async () => {
+  it("refuses a Mac that is already subscribed and reuses the account for a lapsed one", async () => {
     await purchase();
     const again = await post("/checkout/create", { device_id: D1, email: EMAIL });
     expect(again.status).toBe(409);
     expect((await again.json()).code).toBe("already_active");
 
-    await event("EXPIRATION", NOW + 100);
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 100);
     const D2 = dev(2);
-    await bindViaAccount(D2);
-    const res = await post("/checkout/create", { device_id: D2, email: EMAIL });
-    expect((await res.json()).app_user_id).toBe(U1);
+    bindViaAccount(D2);
+    paddleCalls = [];
+    const body = await checkout(D2);
+    expect(body.app_user_id).toBe(R1);
+    // The account's customer is reused without another lookup.
+    expect(paddleCalls.map((c) => c.path)).toEqual(["/transactions"]);
+    expect(paddleCalls[0].body.customer_id).toBe(CUS1);
   });
 
   it("rate limits checkout creation per IP", async () => {
@@ -236,31 +450,77 @@ describe("POST /checkout/create", () => {
   });
 });
 
-// Binds a device directly, for accounts whose subscription has lapsed (restore needs an active one).
-async function bindViaAccount(deviceId: string) {
-  const account = kv.json(`account:${EMAIL}`);
-  account.devices.push({ device_id: deviceId, bound_at: NOW });
-  kv.store.set(`account:${EMAIL}`, { value: JSON.stringify(account) });
-  kv.store.set(`device:${deviceId}`, { value: EMAIL });
-}
+describe("webhook signature", () => {
+  const body = () => rawEvent("transaction.completed", txn());
 
-async function bindViaRestore(deviceId: string) {
-  expect((await post("/restore/start", { email: EMAIL })).status).toBe(200);
-  const res = await post("/restore/verify", { email: EMAIL, code: lastCode(), device_id: deviceId });
-  expect(res.status).toBe(200);
-  // Keep bound_at ordering deterministic and stay under the per-email send limit.
-  setTime(Math.floor(Date.now() / 1000) + 3601);
-}
+  it("accepts a valid signature", async () => {
+    await checkout();
+    const raw = body();
+    const res = await sendRaw(raw, sign(raw));
+    expect(res.status).toBe(200);
+    expect((await res.json()).action).toBe("activated");
+  });
+
+  it.each([
+    ["missing", () => null],
+    ["wrong secret", (raw: string) => sign(raw, nowSecs(), "pdl_ntfset_other")],
+    ["tampered body", (raw: string) => sign(raw.replace("completed", "Completed"))],
+    ["stale timestamp", (raw: string) => sign(raw, nowSecs() - 301)],
+    ["future timestamp", (raw: string) => sign(raw, nowSecs() + 301)],
+    ["timestamp swapped", (raw: string) => sign(raw).replace(/^ts=\d+/, `ts=${nowSecs() - 1}`)],
+    ["no h1", () => `ts=${nowSecs()}`],
+    ["no ts", (raw: string) => sign(raw).replace(/^ts=\d+;/, "")],
+    ["garbage", () => "nonsense"],
+    ["truncated h1", (raw: string) => sign(raw).slice(0, -2)],
+  ])("rejects a %s signature without writing", async (_name, signer) => {
+    await checkout();
+    const before = new Map(kv.store);
+    const raw = body();
+    const res = await sendRaw(raw, signer(raw));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Unauthorized" });
+    expect(kv.store).toEqual(before);
+  });
+
+  it("accepts a timestamp within five minutes", async () => {
+    await checkout();
+    const raw = body();
+    expect((await sendRaw(raw, sign(raw, nowSecs() - 299))).status).toBe(200);
+  });
+
+  it("accepts any matching h1 while a secret rotates", async () => {
+    await checkout();
+    const raw = body();
+    const ts = nowSecs();
+    const old = createHmac("sha256", "pdl_ntfset_old").update(`${ts}:${raw}`).digest("hex");
+    const res = await sendRaw(raw, `ts=${ts};h1=${old};${sign(raw, ts).split(";")[1]}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects everything when no webhook secret is configured", async () => {
+    env.PADDLE_WEBHOOK_SECRET = "";
+    const raw = body();
+    expect((await sendRaw(raw, sign(raw, nowSecs(), ""))).status).toBe(401);
+  });
+
+  it("answers 400 for a signed malformed body and skips bodies without data", async () => {
+    expect((await sendRaw("{nope")).status).toBe(400);
+    expect(await (await sendRaw("{}")).json()).toEqual({ ok: true, message: "No event, skipped" });
+  });
+});
 
 describe("webhook lifecycle", () => {
-  it("INITIAL_PURCHASE writes the license, the account and both indexes", async () => {
+  it("transaction.completed writes the license, the account and all indexes", async () => {
     const res = await purchase();
     expect(await res.json()).toEqual({ ok: true, action: "activated", expires: NOW + 30 * DAY });
     expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
-    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, app_user_id: U1 });
+    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, ref: R1 });
     expect(kv.json(`account:${EMAIL}`)).toEqual({
       email: EMAIL,
-      app_user_id: U1,
+      ref: R1,
+      customer_id: CUS1,
+      subscription_id: SUB1,
+      plan: "monthly",
       status: "active",
       current_end: NOW + 30 * DAY,
       grace_end: null,
@@ -270,263 +530,333 @@ describe("webhook lifecycle", () => {
       last_event_at: NOW * 1000,
     });
     expect(await kv.get(`device:${D1}`)).toBe(EMAIL);
-    expect(await kv.get(`rcuser:${U1}`)).toBe(EMAIL);
+    expect(await kv.get(`pdlref:${R1}`)).toBe(EMAIL);
+    expect(await kv.get(`pdlsub:${SUB1}`)).toBe(EMAIL);
+    expect(await kv.get(`pdlcus:${CUS1}`)).toBe(EMAIL);
   });
 
-  it("falls back to the $email attribute when there is no pending checkout", async () => {
-    await event("INITIAL_PURCHASE", NOW, {
-      app_user_id: "kyra-other",
-      subscriber_attributes: { $email: { value: " Jane@Gmail.com ", updated_at_ms: 1 } },
-    });
-    const account = kv.json(`account:${EMAIL}`);
-    expect(account.app_user_id).toBe("kyra-other");
-    expect(account.devices).toEqual([]);
+  it("binds the purchasing Mac when subscription.created arrives first", async () => {
+    await checkout();
+    const res = await send("subscription.created", sub());
+    expect(await res.json()).toEqual({ ok: true, action: "activated", expires: NOW + 30 * DAY });
+    await send("transaction.completed", txn());
+    expect(kv.json(`account:${EMAIL}`).devices).toEqual([{ device_id: D1, bound_at: NOW }]);
+    expect((await license(D1)).active).toBe(true);
   });
 
-  it("skips customers it cannot tie to an email", async () => {
-    const res = await event("INITIAL_PURCHASE");
-    expect(await res.json()).toEqual({ ok: true, message: "Unknown customer, skipped" });
-    expect(kv.store.size).toBe(0);
+  it("a yearly purchase grants about a year and records the plan", async () => {
+    const res = await purchase(NOW, "yearly");
+    expect(await res.json()).toEqual({ ok: true, action: "activated", expires: NOW + 365 * DAY });
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 365 * DAY });
+    expect(kv.store.get(`license:${D1}`)!.ttl).toBeGreaterThanOrEqual(365 * DAY);
+    expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
+    expect((await (await call(`/account?device_id=${D1}`)).json()).plan).toBe("yearly");
   });
 
-  it("RENEWAL extends every bound device", async () => {
+  it("derives the plan from the billing interval when the price id is unknown", async () => {
+    await checkout();
+    await send("subscription.created", sub({ items: [{ price: { id: "pri_legacy", billing_cycle: { interval: "year", frequency: 1 } } }], billing_cycle: { interval: "year", frequency: 1 } }));
+    expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
+  });
+
+  it("skips subscriptions it cannot tie to a checkout", async () => {
+    const res = await send("transaction.completed", txn());
+    expect(await res.json()).toEqual({ ok: true, message: "Unknown subscription, skipped" });
+    await send("subscription.created", sub({}, { ref: null }));
+    expect(kv.store.size).toBe(2); // only the two seen event ids
+    expect([...kv.store.keys()].every((k) => k.startsWith("pdlevt:"))).toBe(true);
+  });
+
+  it("renewal through subscription.updated extends every bound device", async () => {
     await purchase();
     const D2 = dev(2);
     await bindViaRestore(D2);
-    await event("RENEWAL", NOW + 30 * DAY, { expiration_at_ms: (NOW + 60 * DAY) * 1000 });
+    const next = { starts_at: iso(NOW + 30 * DAY), ends_at: iso(NOW + 60 * DAY) };
+    await send("transaction.completed", txn({ origin: "subscription_recurring", billing_period: next }), NOW + 30 * DAY);
+    await send("subscription.updated", sub({ current_billing_period: next }), NOW + 30 * DAY);
     for (const d of [D1, D2]) expect(kv.json(`license:${d}`).expires).toBe(NOW + 60 * DAY);
     expect(kv.json(`account:${EMAIL}`).current_end).toBe(NOW + 60 * DAY);
   });
 
-  it("CANCELLATION keeps the license until expiry, UNCANCELLATION resumes renewal", async () => {
+  it("a scheduled cancel keeps access until the period ends, removing it resumes renewal", async () => {
     await purchase();
-    const res = await event("CANCELLATION", NOW + 10, { cancel_reason: "UNSUBSCRIBE" });
-    expect(await res.json()).toEqual({ ok: true, action: "active_until_period_end", expires: NOW + 30 * DAY });
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+    const end = NOW + 30 * DAY;
+    const cancel = sub({ scheduled_change: { action: "cancel", effective_at: iso(end), resume_at: null } });
+    const res = await send("subscription.updated", cancel, NOW + 10);
+    expect(await res.json()).toEqual({ ok: true, action: "active_until_period_end", expires: end });
+    expect(await license(D1)).toEqual({ active: true, expires: end });
     expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "cancelled", cancel_at_period_end: true });
 
-    await event("UNCANCELLATION", NOW + 20);
+    await send("subscription.updated", sub(), NOW + 20);
     expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "active", cancel_at_period_end: false });
 
-    await event("CANCELLATION", NOW + 30, { cancel_reason: "UNSUBSCRIBE" });
-    setTime(NOW + 30 * DAY + 1);
-    expect(await license(D1)).toEqual({ active: false, expires: NOW + 30 * DAY });
+    await send("subscription.updated", cancel, NOW + 30);
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), end);
+    setTime(end + 1);
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "expired", cancel_at_period_end: false });
   });
 
-  it("EXPIRATION deactivates", async () => {
+  it("subscription.canceled deactivates", async () => {
     await purchase();
-    const res = await event("EXPIRATION", NOW + 30 * DAY, { expiration_reason: "UNSUBSCRIBE" });
+    const res = await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 100);
     expect(await res.json()).toEqual({ ok: true, action: "deactivated" });
     expect(await license(D1)).toEqual({ active: false, expires: null });
     expect(kv.json(`account:${EMAIL}`).status).toBe("expired");
   });
 
-  it("a refund ends access immediately", async () => {
+  it("past_due keeps access for a bounded grace period that repeats cannot extend", async () => {
     await purchase();
-    await event("CANCELLATION", NOW + 10, { cancel_reason: "CUSTOMER_SUPPORT" });
+    const end = NOW + 30 * DAY;
+    const unpaid = { starts_at: iso(end), ends_at: iso(end + 30 * DAY) };
+    setTime(end + 60);
+    const res = await send("subscription.past_due", sub({ status: "past_due", current_billing_period: unpaid }));
+    expect(await res.json()).toEqual({ ok: true, action: "grace", expires: end + 7 * DAY });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "billing_issue", current_end: end, grace_end: end + 7 * DAY });
+
+    setTime(end + 3 * DAY);
+    await send("subscription.updated", sub({ status: "past_due", current_billing_period: unpaid }));
+    expect(kv.json(`account:${EMAIL}`).grace_end).toBe(end + 7 * DAY);
+    expect((await license(D1)).active).toBe(true);
+
+    // Recovery: the retried payment completes.
+    await send("transaction.completed", txn({ origin: "subscription_recurring", billing_period: unpaid }));
+    await send("subscription.updated", sub({ current_billing_period: unpaid }));
+    expect(await license(D1)).toEqual({ active: true, expires: end + 30 * DAY });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "active", grace_end: null });
+  });
+
+  it("past_due without recovery ends with the grace period and then the cancellation", async () => {
+    await purchase();
+    const end = NOW + 30 * DAY;
+    setTime(end);
+    await send("subscription.past_due", sub({ status: "past_due", current_billing_period: { starts_at: iso(end), ends_at: iso(end + 30 * DAY) } }));
+    setTime(end + 7 * DAY + 1);
+    expect((await license(D1)).active).toBe(false);
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }));
+    expect(kv.json(`account:${EMAIL}`).status).toBe("expired");
+  });
+
+  it("paused deactivates, a scheduled pause keeps the paid period, resumed reactivates", async () => {
+    await purchase();
+    const end = NOW + 30 * DAY;
+    await send("subscription.updated", sub({ scheduled_change: { action: "pause", effective_at: iso(end), resume_at: null } }), NOW + 10);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "cancelled", current_end: end });
+    expect((await license(D1)).active).toBe(true);
+
+    await send("subscription.paused", sub({ status: "paused", current_billing_period: null }), end);
     expect(await license(D1)).toEqual({ active: false, expires: null });
+
+    const back = { starts_at: iso(end + 5 * DAY), ends_at: iso(end + 35 * DAY) };
+    setTime(end + 5 * DAY);
+    const res = await send("subscription.resumed", sub({ current_billing_period: back }));
+    expect(await res.json()).toEqual({ ok: true, action: "activated", expires: end + 35 * DAY });
+  });
+
+  it("trialing counts as active", async () => {
+    await checkout();
+    await send("subscription.trialing", sub({ status: "trialing" }));
+    expect(kv.json(`account:${EMAIL}`).status).toBe("active");
+  });
+
+  it("an approved full refund ends access immediately and survives the cancellation", async () => {
+    await purchase();
+    const adj = { id: "adj_1", action: "refund", type: "full", status: "pending_approval", customer_id: CUS1, subscription_id: SUB1, transaction_id: "txn_1" };
+    expect(await (await send("adjustment.created", adj, NOW + 10)).json()).toEqual({ ok: true, message: "Adjustment ignored" });
+    expect((await license(D1)).active).toBe(true);
+
+    const res = await send("adjustment.updated", { ...adj, status: "approved" }, NOW + 20);
+    expect(await res.json()).toEqual({ ok: true, action: "deactivated" });
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+    expect(kv.json(`account:${EMAIL}`).status).toBe("refunded");
+
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 30);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("refunded");
+    expect((await (await call(`/account?device_id=${D1}`)).json()).status).toBe("refunded");
+  });
+
+  it("ignores partial and rejected refunds and refunds for other subscriptions; chargebacks end access", async () => {
+    await purchase();
+    const base = { id: "adj_1", action: "refund", type: "full", status: "approved", customer_id: CUS1, subscription_id: SUB1 };
+    for (const adj of [{ ...base, type: "partial" }, { ...base, status: "rejected" }, { ...base, action: "credit" }]) {
+      expect(await (await send("adjustment.updated", adj, NOW + 10)).json()).toEqual({ ok: true, message: "Adjustment ignored" });
+    }
+    expect(await (await send("adjustment.updated", { ...base, subscription_id: SUB2 }, NOW + 10)).json()).toEqual({
+      ok: true,
+      message: "Unknown subscription, skipped",
+    });
+    expect((await license(D1)).active).toBe(true);
+    await send("adjustment.created", { ...base, action: "chargeback" }, NOW + 20);
     expect(kv.json(`account:${EMAIL}`).status).toBe("refunded");
   });
 
-  it("a billing issue keeps access through the grace period", async () => {
+  it("a new payment after a refund reactivates", async () => {
     await purchase();
-    const end = NOW + 30 * DAY;
-    const grace = end + 7 * DAY;
-    setTime(end);
-    const issue = await event("BILLING_ISSUE", end, { grace_period_expiration_at_ms: grace * 1000 });
-    expect(await issue.json()).toEqual({ ok: true, action: "grace", expires: grace });
-    // The paired CANCELLATION with BILLING_ERROR is a retry, not a user cancellation.
-    await event("CANCELLATION", end, { cancel_reason: "BILLING_ERROR" });
-    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "billing_issue", cancel_at_period_end: false, grace_end: grace });
-
-    setTime(end + 3 * DAY);
-    expect((await license(D1)).active).toBe(true);
-    await event("RENEWAL", end + 3 * DAY, { expiration_at_ms: (end + 30 * DAY) * 1000 });
-    expect(await license(D1)).toEqual({ active: true, expires: end + 30 * DAY });
-    expect(kv.json(`account:${EMAIL}`).grace_end).toBeNull();
-  });
-
-  it("a billing issue without recovery expires", async () => {
-    await purchase();
-    const end = NOW + 30 * DAY;
-    await event("BILLING_ISSUE", end, { grace_period_expiration_at_ms: (end + 3 * DAY) * 1000 });
-    await event("EXPIRATION", end + 3 * DAY, { expiration_reason: "BILLING_ERROR" });
-    expect(await license(D1)).toEqual({ active: false, expires: null });
-  });
-
-  it("PRODUCT_CHANGE keeps access with the new expiry", async () => {
-    await purchase();
-    await event("PRODUCT_CHANGE", NOW + 100, { expiration_at_ms: (NOW + 365 * DAY) * 1000 });
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + 365 * DAY });
-    expect(kv.store.get(`license:${D1}`)!.ttl).toBeGreaterThanOrEqual(365 * DAY);
-  });
-
-  it("TRANSFER moves the account to the new customer", async () => {
-    await purchase();
-    const res = await event("TRANSFER", NOW + 100, {
-      app_user_id: undefined,
-      transferred_from: [U1],
-      transferred_to: ["kyra-new"],
-    });
-    expect(await res.json()).toEqual({ ok: true, action: "transferred", accounts: 1 });
-    expect(kv.json(`account:${EMAIL}`).app_user_id).toBe("kyra-new");
-    expect(await kv.get("rcuser:kyra-new")).toBe(EMAIL);
-
-    await event("RENEWAL", NOW + 200, { app_user_id: "kyra-new", expiration_at_ms: (NOW + 60 * DAY) * 1000 });
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + 60 * DAY });
-    // The old customer no longer owns the account.
-    const late = await event("EXPIRATION", NOW + 300);
-    expect(await late.json()).toEqual({ ok: true, message: "Superseded customer ignored" });
-    expect((await license(D1)).active).toBe(true);
+    await send("adjustment.updated", { action: "refund", type: "full", status: "approved", subscription_id: SUB1 }, NOW + 10);
+    await send("subscription.updated", sub(), NOW + 20);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("refunded");
+    await send("transaction.completed", txn({ origin: "subscription_recurring" }), NOW + 30);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("active");
   });
 
   it("ignores stale and out-of-order events", async () => {
     await purchase(NOW + 100);
-    await event("EXPIRATION", NOW + 300);
-    const stale = await event("RENEWAL", NOW + 200, { expiration_at_ms: (NOW + 60 * DAY) * 1000 });
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 300);
+    const stale = await send("subscription.updated", sub(), NOW + 200);
     expect(await stale.json()).toEqual({ ok: true, message: "Stale event ignored" });
     expect(kv.json(`account:${EMAIL}`).status).toBe("expired");
     expect((await license(D1)).active).toBe(false);
   });
 
-  it("is idempotent for redelivered events", async () => {
+  it("ignores redelivered event ids", async () => {
+    await purchase();
+    await send("subscription.updated", sub({ scheduled_change: { action: "cancel", effective_at: iso(NOW + 30 * DAY) } }), NOW + 10, "evt_dup");
+    const before = kv.json(`account:${EMAIL}`);
+    const again = await send("subscription.updated", sub(), NOW + 20, "evt_dup");
+    expect(await again.json()).toEqual({ ok: true, message: "Duplicate event ignored" });
+    expect(kv.json(`account:${EMAIL}`)).toEqual(before);
+    expect(kv.store.get("pdlevt:evt_dup")!.ttl).toBe(7 * DAY);
+  });
+
+  it("is idempotent for repeated snapshots with new event ids", async () => {
     await purchase();
     const before = kv.json(`account:${EMAIL}`);
-    await event("INITIAL_PURCHASE");
+    await send("transaction.completed", txn());
+    await send("subscription.activated", sub());
     expect(kv.json(`account:${EMAIL}`)).toEqual(before);
+  });
+
+  it("ignores unrelated events, non-subscription transactions and one-off charges", async () => {
+    await purchase();
+    for (const type of ["transaction.created", "transaction.paid", "customer.created", "subscription.imported"]) {
+      expect(await (await send(type, sub())).json()).toEqual({ ok: true, message: "Event ignored" });
+    }
+    for (const t of [txn({ subscription_id: null }), txn({ billing_period: null }), txn({ origin: "subscription_charge", billing_period: { starts_at: iso(NOW), ends_at: iso(NOW + 400 * DAY) } })]) {
+      expect(await (await send("transaction.completed", t)).json()).toEqual({ ok: true, message: "Not a subscription event, skipped" });
+    }
+    expect(kv.json(`account:${EMAIL}`).current_end).toBe(NOW + 30 * DAY);
   });
 
   it("does not re-bind an evicted purchase device on renewal", async () => {
     await purchase();
     for (const n of [2, 3, 4]) await bindViaRestore(dev(n));
     expect(kv.json(`account:${EMAIL}`).devices.map((d: any) => d.device_id)).not.toContain(D1);
-    await event("RENEWAL", NOW + 30 * DAY, { expiration_at_ms: (NOW + 60 * DAY) * 1000 });
+    const next = { starts_at: iso(NOW + 30 * DAY), ends_at: iso(NOW + 60 * DAY) };
+    await send("transaction.completed", txn({ origin: "subscription_recurring", billing_period: next }));
+    await send("subscription.updated", sub({ current_billing_period: next }));
     expect(kv.json(`account:${EMAIL}`).devices).toHaveLength(3);
     expect(await license(D1)).toEqual({ active: false, expires: null });
   });
 
   it("a purchase from another Mac with the same email takes over the account", async () => {
     await purchase();
-    await event("EXPIRATION", NOW + 100);
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 100);
     const D2 = dev(2);
-    const U2 = rcId(D2);
-    await post("/checkout/create", { device_id: D2, email: EMAIL });
-    await event("INITIAL_PURCHASE", NOW + 200, { app_user_id: U2, expiration_at_ms: (NOW + 40 * DAY) * 1000 });
+    const R2 = refOf(D2);
+    await checkout(D2);
+    const period = { starts_at: iso(NOW + 200), ends_at: iso(NOW + 40 * DAY) };
+    await send("transaction.completed", txn({ subscription_id: SUB2, billing_period: period }, { ref: R2 }), NOW + 200);
     const account = kv.json(`account:${EMAIL}`);
-    expect(account.app_user_id).toBe(U2);
+    expect(account).toMatchObject({ ref: R2, subscription_id: SUB2, status: "active", current_end: NOW + 40 * DAY });
     expect(account.devices.map((d: any) => d.device_id)).toEqual([D1, D2]);
     expect((await license(D1)).active).toBe(true);
-    const late = await event("CANCELLATION", NOW + 300, { cancel_reason: "UNSUBSCRIBE" });
-    expect(await late.json()).toEqual({ ok: true, message: "Superseded customer ignored" });
-  });
+    expect(await kv.get(`pdlsub:${SUB2}`)).toBe(EMAIL);
 
-  it.each([
-    ["missing", null],
-    ["wrong", "Bearer nope"],
-    ["prefix", AUTH.slice(0, -1)],
-    ["suffix", `${AUTH}x`],
-    ["bare secret", "whk_test_secret"],
-  ])("rejects a %s Authorization header without writing", async (_name, auth) => {
-    await post("/checkout/create", { device_id: D1, email: EMAIL });
-    const before = new Map(kv.store);
-    const res = await send(rcEvent("INITIAL_PURCHASE"), auth);
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "Unauthorized" });
-    expect(kv.store).toEqual(before);
-  });
-
-  it("rejects everything when no webhook secret is configured", async () => {
-    env.REVENUECAT_WEBHOOK_AUTH = "";
-    expect((await send(rcEvent("INITIAL_PURCHASE"), "")).status).toBe(401);
-  });
-
-  it("ignores unrelated and sandbox events", async () => {
-    await post("/checkout/create", { device_id: D1, email: EMAIL });
-    for (const type of ["TEST", "NON_RENEWING_PURCHASE", "SUBSCRIBER_ALIAS"]) {
-      expect(await (await event(type)).json()).toEqual({ ok: true, message: "Event ignored" });
-    }
-    const sandbox = await event("INITIAL_PURCHASE", NOW, { environment: "SANDBOX" });
-    expect(await sandbox.json()).toEqual({ ok: true, message: "Sandbox event ignored" });
-    expect(kv.store.has(`account:${EMAIL}`)).toBe(false);
-
-    env.REVENUECAT_ALLOW_SANDBOX = "1";
-    await event("INITIAL_PURCHASE", NOW, { environment: "SANDBOX" });
-    expect((await license(D1)).active).toBe(true);
-  });
-
-  it("answers 400 for malformed JSON and skips bodies without an event", async () => {
-    const bad = await call("/webhook/revenuecat", { method: "POST", headers: { Authorization: AUTH }, body: "{nope" });
-    expect(bad.status).toBe(400);
-    const empty = await call("/webhook/revenuecat", { method: "POST", headers: { Authorization: AUTH }, body: "{}" });
-    expect(await empty.json()).toEqual({ ok: true, message: "No event, skipped" });
+    // Late events for the old subscription are ignored while the new one is live.
+    const late = await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 300);
+    expect(await late.json()).toEqual({ ok: true, message: "Superseded subscription ignored" });
+    expect((await license(D2)).active).toBe(true);
   });
 });
 
-describe("GET /license RevenueCat fallback", () => {
-  it("asks RevenueCat when KV has no license, then caches for 10 minutes", async () => {
-    rcSubs[U1] = [rcSub()];
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
-
-    const [url, init] = revenuecat.mock.calls[0];
-    expect(url).toBe(`${RC_API}/customers/${U1}/subscriptions`);
-    expect(init.headers.Authorization).toBe("Bearer sk_test_key");
-    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 30 * DAY, app_user_id: U1 });
+describe("GET /license Paddle fallback", () => {
+  it("refreshes an expired KV license for a bound device, then caches for 10 minutes", async () => {
+    await purchase();
+    const later = { starts_at: iso(NOW + 30 * DAY), ends_at: iso(NOW + 60 * DAY) };
+    subscriptions.set(SUB1, sub({ current_billing_period: later }));
+    setTime(NOW + 30 * DAY + 5);
+    paddleCalls = [];
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 60 * DAY });
+    expect(paddleCalls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET /subscriptions/${SUB1}`]);
+    expect(kv.json(`license:${D1}`)).toEqual({ active: true, expires: NOW + 60 * DAY, ref: R1 });
 
     kv.store.delete(`license:${D1}`);
     expect(await license(D1)).toEqual({ active: false, expires: null });
-    expect(revenuecat).toHaveBeenCalledTimes(1);
-    setTime(NOW + 601);
-    kv.store.delete(`rcsync:${D1}`);
+    expect(paddleCalls).toHaveLength(1);
+    setTime(NOW + 30 * DAY + 606);
+    kv.store.delete(`pdlsync:${D1}`);
     expect((await license(D1)).active).toBe(true);
-    expect(revenuecat).toHaveBeenCalledTimes(2);
+    expect(paddleCalls).toHaveLength(2);
   });
 
-  it("does not call RevenueCat while the KV license is valid", async () => {
+  it("does not call Paddle while the KV license is valid", async () => {
     await purchase();
+    paddleCalls = [];
     expect((await license(D1)).active).toBe(true);
-    expect(revenuecat).not.toHaveBeenCalled();
+    expect(paddleCalls).toEqual([]);
   });
 
-  it("refreshes an expired KV license for a bound device", async () => {
-    await purchase();
-    rcSubs[U1] = [rcSub({ ends_at: (NOW + 90 * DAY) * 1000 })];
-    setTime(NOW + 31 * DAY);
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + 90 * DAY });
-    expect(kv.json(`account:${EMAIL}`).management_url).toBe("https://billing.revenuecat.com/manage/app1");
+  it("covers a late webhook right after checkout using the pending transaction", async () => {
+    const { short_url } = await checkout();
+    const txnId = new URL(short_url).searchParams.get("_ptxn")!;
+    expect(await license(D1)).toEqual({ active: false, expires: null }); // not paid yet
+
+    transactions.get(txnId)!.status = "completed";
+    transactions.get(txnId)!.subscription_id = SUB1;
+    subscriptions.set(SUB1, sub());
+    kv.store.delete(`pdlsync:${D1}`);
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+    expect(paddleCalls.slice(-2).map((c) => c.path)).toEqual([`/transactions/${txnId}`, `/subscriptions/${SUB1}`]);
   });
 
-  it("reports inactive when RevenueCat has no access or fails", async () => {
-    expect(await license(D1)).toEqual({ active: false, expires: null });
-    kv.store.delete(`rcsync:${D1}`);
-    rcSubs[U1] = [rcSub({ gives_access: false, status: "expired" })];
-    expect(await license(D1)).toEqual({ active: false, expires: null });
-    kv.store.delete(`rcsync:${D1}`);
-    revenuecat.mockResolvedValueOnce(new Response("down", { status: 503 }));
-    expect(await license(D1)).toEqual({ active: false, expires: null });
-    kv.store.delete(`rcsync:${D1}`);
-    revenuecat.mockRejectedValueOnce(new TypeError("fetch failed"));
-    expect(await license(D1)).toEqual({ active: false, expires: null });
-  });
-
-  it("ignores other entitlements and sandbox subscriptions", async () => {
-    rcSubs[U1] = [
-      rcSub({ entitlements: { items: [{ lookup_key: "other" }] } }),
-      rcSub({ id: "sub2", environment: "sandbox" }),
-    ];
+  it("ignores a pending transaction that does not carry this device's ref", async () => {
+    const { short_url } = await checkout();
+    const t = transactions.get(new URL(short_url).searchParams.get("_ptxn")!)!;
+    Object.assign(t, { status: "completed", subscription_id: SUB1, custom_data: { kyra_ref: refOf(dev(7)) } });
+    subscriptions.set(SUB1, sub());
     expect((await license(D1)).active).toBe(false);
   });
 
-  it("grants a one-day lease during a grace period", async () => {
-    rcSubs[U1] = [rcSub({ status: "in_grace_period", ends_at: (NOW - DAY) * 1000 })];
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + DAY });
+  it("reports inactive when Paddle shows no access or fails", async () => {
+    await purchase();
+    setTime(NOW + 31 * DAY);
+    subscriptions.set(SUB1, sub({ status: "canceled", current_billing_period: null }));
+    expect(await license(D1)).toEqual({ active: false, expires: NOW + 30 * DAY });
+    for (const failure of [
+      () => paddle.mockResolvedValueOnce(new Response("down", { status: 503 })),
+      () => paddle.mockRejectedValueOnce(new TypeError("fetch failed")),
+      () => subscriptions.delete(SUB1),
+    ]) {
+      kv.store.delete(`pdlsync:${D1}`);
+      failure();
+      expect((await license(D1)).active).toBe(false);
+    }
   });
 
-  it("never revives a device evicted from a known customer", async () => {
+  it("grants the remaining grace period while past due", async () => {
+    await purchase();
+    const end = NOW + 30 * DAY;
+    subscriptions.set(SUB1, sub({ status: "past_due", current_billing_period: { starts_at: iso(end), ends_at: iso(end + 30 * DAY) } }));
+    setTime(end + DAY);
+    expect(await license(D1)).toEqual({ active: true, expires: end + 7 * DAY });
+    setTime(end + 8 * DAY);
+    kv.store.delete(`pdlsync:${D1}`);
+    kv.store.delete(`license:${D1}`);
+    expect((await license(D1)).active).toBe(false);
+  });
+
+  it("never revives a device evicted from a known account", async () => {
     await purchase();
     for (const n of [2, 3, 4]) await bindViaRestore(dev(n));
-    rcSubs[U1] = [rcSub()];
+    subscriptions.set(SUB1, sub({ current_billing_period: { starts_at: iso(NOW), ends_at: iso(NOW + 90 * DAY) } }));
+    paddleCalls = [];
     expect((await license(D1)).active).toBe(false);
-    expect(revenuecat).not.toHaveBeenCalled();
+    expect(paddleCalls).toEqual([]);
+  });
+
+  it("does nothing for unknown devices without a checkout", async () => {
+    expect(await license(dev(9))).toEqual({ active: false, expires: null });
+    expect(paddleCalls).toEqual([]);
   });
 });
 
@@ -560,7 +890,7 @@ describe("POST /restore/start", () => {
 
   it("does not send to lapsed accounts", async () => {
     await purchase();
-    await event("EXPIRATION", NOW + 1);
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 1);
     expect((await post("/restore/start", { email: EMAIL })).status).toBe(200);
     expect(resend).not.toHaveBeenCalled();
   });
@@ -602,10 +932,10 @@ describe("POST /restore/verify", () => {
     post("/restore/verify", { email, code, device_id: deviceId });
   const wrong = () => (lastCode() === "000000" ? "111111" : "000000");
 
-  it("binds the device, writes its license and returns the customer id", async () => {
+  it("binds the device, writes its license and returns the customer reference", async () => {
     const res = await verify(lastCode());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ active: true, expires: NOW + 30 * DAY, app_user_id: U1 });
+    expect(await res.json()).toEqual({ active: true, expires: NOW + 30 * DAY, app_user_id: R1 });
     expect(await license(D2)).toEqual({ active: true, expires: NOW + 30 * DAY });
     expect(await kv.get(`device:${D2}`)).toBe(EMAIL);
     expect(kv.json(`account:${EMAIL}`).devices.map((d: any) => d.device_id)).toEqual([D1, D2]);
@@ -634,7 +964,7 @@ describe("POST /restore/verify", () => {
   });
 
   it("refuses when the subscription lapsed after the code was sent", async () => {
-    await event("EXPIRATION", NOW + 1);
+    await send("subscription.canceled", sub({ status: "canceled", current_billing_period: null }), NOW + 1);
     const res = await verify(lastCode());
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe("subscription_inactive");
@@ -662,6 +992,7 @@ describe("GET /account", () => {
     expect(await res.json()).toEqual({
       email: "j***@gmail.com",
       status: "active",
+      plan: "monthly",
       current_end: NOW + 30 * DAY,
       cancel_at_period_end: false,
       devices_count: 1,
@@ -676,36 +1007,49 @@ describe("GET /account", () => {
 });
 
 describe("POST /account/manage", () => {
-  it("returns a single-use portal link and remembers the stable URL", async () => {
+  it("returns an authenticated portal link for the subscription", async () => {
     await purchase();
-    rcSubs[U1] = [rcSub()];
+    paddleCalls = [];
     const res = await post("/account/manage", { device_id: D1 });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ url: PORTAL });
-    expect(revenuecat.mock.calls.map((c) => c[0])).toEqual([
-      `${RC_API}/customers/${U1}/subscriptions`,
-      `${RC_API}/subscriptions/sub1/authenticated_management_url`,
-    ]);
-    expect((await (await call(`/account?device_id=${D1}`)).json()).management_url).toBe(
-      "https://billing.revenuecat.com/manage/app1"
-    );
+    expect(await res.json()).toEqual({ url: PORTAL_SUB });
+    expect(paddleCalls.map((c) => `${c.method} ${c.path}`)).toEqual([`POST /customers/${CUS1}/portal-sessions`]);
+    expect(paddleCalls[0].body).toEqual({ subscription_ids: [SUB1] });
+    // Portal links are short-lived, so nothing is stored.
+    expect((await (await call(`/account?device_id=${D1}`)).json()).management_url).toBeNull();
   });
 
-  it("needs a bound device and a subscription", async () => {
+  it("falls back to the portal overview", async () => {
+    await purchase();
+    paddle.mockResolvedValueOnce(
+      Response.json({ data: { urls: { general: { overview: PORTAL_OVERVIEW }, subscriptions: [] } } }, { status: 201 })
+    );
+    expect(await (await post("/account/manage", { device_id: D1 })).json()).toEqual({ url: PORTAL_OVERVIEW });
+  });
+
+  it("needs a bound device with a Paddle customer", async () => {
     await purchase();
     expect((await post("/account/manage", { device_id: dev(9) })).status).toBe(404);
     expect((await post("/account/manage", { device_id: "x" })).status).toBe(400);
+    const account = kv.json(`account:${EMAIL}`);
+    kv.store.set(`account:${EMAIL}`, { value: JSON.stringify({ ...account, customer_id: null }) });
     const none = await post("/account/manage", { device_id: D1 });
     expect(none.status).toBe(409);
     expect((await none.json()).code).toBe("no_active_subscription");
   });
 
-  it("maps RevenueCat failures to 502", async () => {
+  it("maps Paddle failures to 502 without echoing them", async () => {
     await purchase();
-    revenuecat.mockResolvedValueOnce(new Response("nope", { status: 401 }));
+    paddle.mockResolvedValueOnce(Response.json({ error: { detail: "pdl_sdbx_apikey_testkey invalid" } }, { status: 403 }));
     const res = await post("/account/manage", { device_id: D1 });
     expect(res.status).toBe(502);
-    expect(JSON.stringify(await res.json())).not.toContain("sk_test");
+    expect(JSON.stringify(await res.json())).not.toContain("pdl_");
+  });
+
+  it("rate limits per IP", async () => {
+    await purchase();
+    for (let i = 0; i < 20; i++) expect((await post("/account/manage", { device_id: D1 })).status).toBe(200);
+    expect((await post("/account/manage", { device_id: D1 })).status).toBe(429);
   });
 });
 
@@ -719,21 +1063,78 @@ describe("POST /subscription/cancel", () => {
   });
 });
 
+describe("GET /pay", () => {
+  it("serves the Paddle.js page for the sandbox with a nonce-locked CSP", async () => {
+    const res = await call("/pay?_ptxn=txn_01hv8wptq8987qeep44cyrewp9");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const csp = res.headers.get("Content-Security-Policy")!;
+    const nonce = /'nonce-([0-9a-f]{32})'/.exec(csp)![1];
+    expect(csp).toContain("frame-src https://buy.paddle.com https://sandbox-buy.paddle.com");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("unsafe-eval");
+
+    const html = await res.text();
+    expect(html).toContain('<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>');
+    expect(html).toContain(`<script nonce="${nonce}">`);
+    expect(html).toContain('{"token":"test_clienttoken123","environment":"sandbox"}');
+    expect(html).toContain('Paddle.Environment.set("sandbox")');
+    expect(html).toContain("checkout.completed");
+    expect(html).toContain("Payment complete \\u2014 you can return to Kyra.");
+    // The transaction id is read by Paddle.js from the URL, never echoed by the worker.
+    expect(html).not.toContain("txn_01hv8wptq8987qeep44cyrewp9");
+  });
+
+  it("uses a fresh nonce per response and the production environment when configured", async () => {
+    env.PADDLE_ENV = "production";
+    const a = (await call("/pay")).headers.get("Content-Security-Policy");
+    const res = await call("/pay");
+    expect(res.headers.get("Content-Security-Policy")).not.toBe(a);
+    expect(await res.text()).toContain('"environment":"production"');
+  });
+
+  it("escapes what it interpolates", async () => {
+    env.PADDLE_CLIENT_TOKEN = `</script><script>alert("x")</script>&\u2028x`;
+    const html = await (await call("/pay")).text();
+    expect(html).not.toContain("</script><script>alert");
+    expect(html).toContain('"token":"\\u003c/script\\u003e\\u003cscript\\u003ealert(\\"x\\")\\u003c/script\\u003e\\u0026\\u2028x"');
+  });
+
+  it("is 503 without a client-side token", async () => {
+    env.PADDLE_CLIENT_TOKEN = "";
+    const res = await call("/pay");
+    expect(res.status).toBe(503);
+    expect(await res.text()).not.toContain("paddle.js");
+  });
+});
+
 describe("mock mode", () => {
   beforeEach(() => {
-    env.DEV_MOCK_REVENUECAT = "1";
+    env.DEV_MOCK_PADDLE = "1";
   });
 
   const local = { host: "http://127.0.0.1:8787" };
-  const open = (url: string) => call(new URL(url).pathname + new URL(url).search, local);
+  const localLicense = async (deviceId: string) => (await call(`/license?device_id=${deviceId}`, local)).json();
+  const open = (url: string) => {
+    const u = new URL(url, local.host);
+    return call(u.pathname + u.search, local);
+  };
 
   it("runs checkout, payment, restore and management locally without external calls", async () => {
-    const checkout = await post("/checkout/create", { device_id: D1, email: EMAIL }, local);
-    const { short_url } = await checkout.json();
-    expect(short_url).toBe(`http://127.0.0.1:8787/dev/mock-pay?app_user_id=${U1}`);
+    const checkoutRes = await post("/checkout/create", { device_id: D1, email: EMAIL }, local);
+    const { short_url, app_user_id } = await checkoutRes.json();
+    expect(short_url).toBe(`http://127.0.0.1:8787/dev/mock-pay?ref=${R1}&plan=monthly`);
+    expect(app_user_id).toBe(R1);
 
-    expect((await open(short_url)).status).toBe(200);
-    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+    const paid = await open(short_url);
+    expect(paid.status).toBe(200);
+    const paidHtml = await paid.text();
+    expect(paidHtml).toContain("transaction.completed: 200");
+    expect(paidHtml).toContain("subscription.activated: 200");
+    expect(await localLicense(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ plan: "monthly", status: "active" });
 
     await post("/restore/start", { email: EMAIL }, local);
     const logged = (console.log as any).mock.calls.map((c: any[]) => c[0]).join("\n");
@@ -741,25 +1142,53 @@ describe("mock mode", () => {
     expect((await post("/restore/verify", { email: EMAIL, code, device_id: dev(2) }, local)).status).toBe(200);
 
     const { url } = await (await post("/account/manage", { device_id: D1 }, local)).json();
-    expect(url).toBe(`http://127.0.0.1:8787/dev/mock-manage?app_user_id=${U1}`);
-    expect(await (await open(url)).text()).toContain("type=CANCELLATION");
+    expect(url).toBe(`http://127.0.0.1:8787/dev/mock-manage?ref=${R1}`);
+    const manage = await (await open(url)).text();
+    for (const type of ["cancel", "resume", "renew", "past_due", "canceled", "refund"]) expect(manage).toContain(`type=${type}`);
+
     setTime(NOW + 10);
-    await open(`${url.replace("mock-manage", "mock-pay")}&type=CANCELLATION`);
-    expect(kv.json(`account:${EMAIL}`).cancel_at_period_end).toBe(true);
-    expect((await license(D1)).active).toBe(true);
+    await open(`/dev/mock-pay?ref=${R1}&type=cancel`);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "cancelled", cancel_at_period_end: true });
+    expect((await localLicense(D1)).active).toBe(true);
+    setTime(NOW + 20);
+    await open(`/dev/mock-pay?ref=${R1}&type=resume`);
+    expect(kv.json(`account:${EMAIL}`)).toMatchObject({ status: "active", cancel_at_period_end: false });
+    setTime(NOW + 30);
+    await open(`/dev/mock-pay?ref=${R1}&type=past_due`);
+    expect(kv.json(`account:${EMAIL}`).status).toBe("billing_issue");
+    setTime(NOW + 40);
+    await open(`/dev/mock-pay?ref=${R1}&type=canceled`);
+    expect((await localLicense(D1)).active).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("mock yearly checkout grants a year", async () => {
+    const { short_url } = await (await post("/checkout/create", { device_id: D1, email: EMAIL, plan: "yearly" }, local)).json();
+    expect(short_url).toContain("plan=yearly");
+    await open(short_url);
+    expect(await localLicense(D1)).toEqual({ active: true, expires: NOW + 365 * DAY });
+    expect(kv.json(`account:${EMAIL}`).plan).toBe("yearly");
+  });
+
+  it("refuses unknown customers and actions", async () => {
+    expect((await call(`/dev/mock-pay?ref=${R1}`, local)).status).toBe(404);
+    await post("/checkout/create", { device_id: D1, email: EMAIL }, local);
+    expect((await call(`/dev/mock-pay?ref=${R1}&type=nope`, local)).status).toBe(400);
+    expect((await call(`/dev/mock-pay?ref=${R1}&type=cancel`, local)).status).toBe(409);
   });
 
   it("stays off for non-local hosts even with the flag set", async () => {
     const res = await post("/checkout/create", { device_id: D1, email: EMAIL });
-    expect((await res.json()).short_url.startsWith(LINK)).toBe(true);
-    expect((await call(`/dev/mock-pay?app_user_id=${U1}`)).status).toBe(404);
+    expect((await res.json()).short_url).toMatch(/^https:\/\/worker\.test\/pay\?_ptxn=txn_/);
+    expect((await call(`/dev/mock-pay?ref=${R1}`)).status).toBe(404);
+    expect((await call(`/dev/mock-manage?ref=${R1}`)).status).toBe(404);
   });
 
   it("is off without the flag", async () => {
-    delete env.DEV_MOCK_REVENUECAT;
+    delete env.DEV_MOCK_PADDLE;
     const res = await post("/checkout/create", { device_id: D1, email: EMAIL }, local);
-    expect((await res.json()).short_url.startsWith(LINK)).toBe(true);
-    expect((await call(`/dev/mock-pay?app_user_id=${U1}`, local)).status).toBe(404);
+    // Real sandbox checkout against `wrangler dev`: the worker's own /pay page on loopback.
+    expect((await res.json()).short_url).toMatch(/^http:\/\/127\.0\.0\.1:8787\/pay\?_ptxn=txn_/);
+    expect((await call(`/dev/mock-pay?ref=${R1}`, local)).status).toBe(404);
   });
 });

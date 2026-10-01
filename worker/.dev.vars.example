@@ -1,12 +1,12 @@
 # Local-only overrides for `wrangler dev`. Copy to .dev.vars (gitignored); never deployed.
 JEV_API_URL=http://127.0.0.1:8788/score
 JEV_API_KEY=local-dev-key
-REVENUECAT_SECRET_API_KEY=sk_dummy
-REVENUECAT_PROJECT_ID=proj_dummy
-REVENUECAT_WEBHOOK_AUTH=Bearer local-dev-webhook-secret
-REVENUECAT_WEB_PURCHASE_LINK=https://pay.rev.cat/dummy
+PADDLE_API_KEY=pdl_sdbx_apikey_dummy
+# Mock webhooks are signed with this, so any value works locally.
+PADDLE_WEBHOOK_SECRET=local-dev-webhook-secret
+PADDLE_CLIENT_TOKEN=test_dummy
 RESEND_API_KEY=re_dummy
 MAIL_FROM=Kyra <hello@example.com>
-# Fakes checkout, payment webhooks, the management page and the restore email. Only honoured
+# Fakes checkout, payment webhooks, the customer portal and the restore email. Only honoured
 # for requests to 127.0.0.1/localhost; never put it in wrangler.toml.
-DEV_MOCK_REVENUECAT=1
+DEV_MOCK_PADDLE=1

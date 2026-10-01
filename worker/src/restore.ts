@@ -103,6 +103,6 @@ export async function handleRestoreVerify(request: Request, env: Env): Promise<R
   await bindDevice(env, account, deviceId, now);
   await putAccount(env, account);
   const expires = entitlementExpiry(account)!;
-  await writeLicense(env, deviceId, expires, account.app_user_id);
-  return json({ active: true, expires, app_user_id: account.app_user_id });
+  await writeLicense(env, deviceId, expires, account.ref);
+  return json({ active: true, expires, app_user_id: account.ref });
 }

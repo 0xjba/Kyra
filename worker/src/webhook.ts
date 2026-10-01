@@ -1,84 +1,82 @@
 import {
   type Account,
+  type SubStatus,
   accountForCustomer,
+  accountForRef,
+  accountForSubscription,
   bindDevice,
   getAccount,
   isEntitled,
   putAccount,
   syncLicenses,
 } from "./account";
-import { secretsEqual } from "./crypto";
 import type { Env } from "./env";
 import { legacyError, legacyJson } from "./http";
-import { getJson, nowSecs } from "./kv";
-import { sandboxAllowed } from "./revenuecat";
-import { normalizeEmail } from "./validate";
-
-export interface RcEvent {
-  type?: string;
-  id?: string;
-  app_user_id?: string;
-  environment?: string;
-  event_timestamp_ms?: number;
-  expiration_at_ms?: number | null;
-  grace_period_expiration_at_ms?: number | null;
-  cancel_reason?: string;
-  subscriber_attributes?: Record<string, { value?: unknown } | undefined>;
-  transferred_from?: unknown;
-  transferred_to?: unknown;
-}
+import { DAY, getJson, nowSecs, putJson } from "./kv";
+import {
+  type PaddleAdjustment,
+  type PaddleSubscription,
+  type PaddleTransaction,
+  type Plan,
+  epochSecs,
+  planFrom,
+  refFrom,
+  subscriptionState,
+  verifySignature,
+} from "./paddle";
 
 export interface PendingCheckout {
   device_id: string;
   email: string;
+  customer_id: string | null;
+  transaction_id: string | null;
+  plan: Plan;
 }
 
-export const pendingKey = (appUserId: string) => `pending:${appUserId}`;
+export interface PaddleEvent {
+  event_id?: string;
+  event_type?: string;
+  occurred_at?: string;
+  notification_id?: string;
+  data?: unknown;
+}
 
-const GRANTING = new Set(["INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "PRODUCT_CHANGE"]);
-const HANDLED = new Set([...GRANTING, "CANCELLATION", "EXPIRATION", "BILLING_ISSUE", "TRANSFER"]);
+export const pendingKey = (ref: string) => `pending:${ref}`;
+const eventKey = (eventId: string) => `pdlevt:${eventId}`;
+const EVENT_SEEN_TTL_SECONDS = 7 * DAY;
+
+const SUBSCRIPTION_EVENTS = new Set([
+  "subscription.created",
+  "subscription.activated",
+  "subscription.updated",
+  "subscription.canceled",
+  "subscription.past_due",
+  "subscription.paused",
+  "subscription.resumed",
+  "subscription.trialing",
+]);
+const ADJUSTMENT_EVENTS = new Set(["adjustment.created", "adjustment.updated"]);
+// Money taken back in full: an approved full refund, or a chargeback (Paddle refunds the amount).
+const REFUND_ACTIONS = new Set(["refund", "chargeback", "chargeback_warning"]);
+// One-off charges and payment-method updates do not say anything about the paid period.
+const IGNORED_TXN_ORIGINS = new Set(["subscription_charge", "subscription_payment_method_change"]);
 
 const ok = (body: Record<string, unknown>) => legacyJson({ ok: true, ...body });
-const secs = (ms: unknown) => (typeof ms === "number" ? Math.floor(ms / 1000) : null);
 const isStale = (account: Account, ts: number | null) =>
   ts != null && account.last_event_at != null && ts < account.last_event_at;
 
-function applyEvent(account: Account, event: RcEvent, type: string): void {
-  const expires = secs(event.expiration_at_ms);
-  if (GRANTING.has(type)) {
-    account.status = "active";
-    account.current_end = expires ?? account.current_end;
-    account.grace_end = null;
-    account.cancel_at_period_end = false;
-    return;
-  }
-  switch (type) {
-    case "CANCELLATION":
-      if (event.cancel_reason === "CUSTOMER_SUPPORT") {
-        // A refund ends access immediately.
-        account.status = "refunded";
-        account.cancel_at_period_end = false;
-      } else if (event.cancel_reason === "BILLING_ERROR") {
-        // Sent alongside BILLING_ISSUE; the subscription is still being retried, not cancelled.
-        account.status = "billing_issue";
-        account.current_end = expires ?? account.current_end;
-      } else {
-        account.status = "cancelled";
-        account.cancel_at_period_end = true;
-        account.current_end = expires ?? account.current_end;
-      }
-      return;
-    case "BILLING_ISSUE":
-      account.status = "billing_issue";
-      account.grace_end = secs(event.grace_period_expiration_at_ms);
-      account.current_end = expires ?? account.current_end;
-      return;
-    case "EXPIRATION":
-      account.status = "expired";
-      account.grace_end = null;
-      account.cancel_at_period_end = false;
-      return;
-  }
+interface Update {
+  subscription_id: string;
+  customer_id: string | null;
+  ref: string | null;
+  status: SubStatus;
+  current_end: number | null;
+  grace_end: number | null;
+  /** undefined keeps the account's current value. */
+  cancel_at_period_end?: boolean;
+  plan: Plan | null;
+  /** A completed payment; only a payment lifts a refund on the same subscription. */
+  payment: boolean;
 }
 
 function outcome(account: Account, expires: number | null): Response {
@@ -88,67 +86,57 @@ function outcome(account: Account, expires: number | null): Response {
   return ok({ action: "activated", expires });
 }
 
-const strings = (v: unknown): string[] =>
-  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
-
-// The webhook carries no app_user_id for TRANSFER; the purchases move from the
-// `transferred_from` customers to the first `transferred_to` one, and so does the account.
-async function handleTransfer(env: Env, event: RcEvent, ts: number | null): Promise<Response> {
-  const to = strings(event.transferred_to)[0];
-  if (!to) return ok({ message: "Transfer without destination, skipped" });
-  let moved = 0;
-  for (const from of strings(event.transferred_from)) {
-    const account = await accountForCustomer(env, from);
-    if (!account || isStale(account, ts)) continue;
-    account.app_user_id = to;
-    if (ts != null) account.last_event_at = ts;
-    await putAccount(env, account);
-    await syncLicenses(env, account);
-    moved++;
-  }
-  return ok({ action: "transferred", accounts: moved });
+function fromSubscription(env: Env, sub: PaddleSubscription): Update | null {
+  if (typeof sub.id !== "string" || !sub.id) return null;
+  return {
+    subscription_id: sub.id,
+    customer_id: typeof sub.customer_id === "string" ? sub.customer_id : null,
+    ref: refFrom(sub.custom_data),
+    ...subscriptionState(env, sub),
+    payment: false,
+  };
 }
 
-export async function handleRevenueCatWebhook(request: Request, env: Env): Promise<Response> {
-  if (!(await secretsEqual(request.headers.get("Authorization") || "", env.REVENUECAT_WEBHOOK_AUTH))) {
-    return legacyError("Unauthorized", 401);
-  }
+function fromTransaction(env: Env, txn: PaddleTransaction): Update | null {
+  const end = epochSecs(txn.billing_period?.ends_at);
+  if (typeof txn.subscription_id !== "string" || !txn.subscription_id || end == null) return null;
+  if (txn.origin && IGNORED_TXN_ORIGINS.has(txn.origin)) return null;
+  return {
+    subscription_id: txn.subscription_id,
+    customer_id: typeof txn.customer_id === "string" ? txn.customer_id : null,
+    ref: refFrom(txn.custom_data),
+    status: "active",
+    current_end: end,
+    grace_end: null,
+    plan: planFrom(env, txn.items),
+    payment: true,
+  };
+}
 
-  let event: RcEvent;
-  try {
-    event = ((await request.json()) as { event?: RcEvent })?.event as RcEvent;
-  } catch {
-    return legacyError("Invalid JSON body", 400);
-  }
-  if (!event || typeof event !== "object") return ok({ message: "No event, skipped" });
-
-  const type = typeof event.type === "string" ? event.type : "";
-  if (!HANDLED.has(type)) return ok({ message: "Event ignored" });
-  if (event.environment === "SANDBOX" && !sandboxAllowed(env)) return ok({ message: "Sandbox event ignored" });
-
-  // Retries reuse event_timestamp_ms, so ordering on it makes redelivery harmless.
-  const ts = typeof event.event_timestamp_ms === "number" ? event.event_timestamp_ms : null;
-  if (type === "TRANSFER") return handleTransfer(env, event, ts);
-
-  const appUserId = typeof event.app_user_id === "string" && event.app_user_id ? event.app_user_id : null;
-  if (!appUserId) return ok({ message: "No app_user_id, skipped" });
-
+async function applyUpdate(env: Env, u: Update, ts: number | null): Promise<Response> {
   const now = nowSecs();
-  const known = await accountForCustomer(env, appUserId);
-  const pending = await getJson<PendingCheckout>(env.LICENSES, pendingKey(appUserId));
-  const email =
-    known?.email ?? pending?.email ?? normalizeEmail(event.subscriber_attributes?.["$email"]?.value);
-  if (!email) return ok({ message: "Unknown customer, skipped" });
+  const pending = u.ref ? await getJson<PendingCheckout>(env.LICENSES, pendingKey(u.ref)) : null;
 
-  let account = known ?? (await getAccount(env, email));
+  let account = await accountForSubscription(env, u.subscription_id);
+  // Only purchases started by our checkout (tagged with a ref) may create or switch accounts.
+  if (!account && u.ref) {
+    account =
+      (await accountForRef(env, u.ref)) ??
+      (pending ? await getAccount(env, pending.email) : null) ??
+      (u.customer_id ? await accountForCustomer(env, u.customer_id) : null);
+  }
+  const email = account?.email ?? pending?.email;
+  if (!email) return ok({ message: "Unknown subscription, skipped" });
+
   let firstSighting = false;
-
-  if (account && account.app_user_id !== appUserId) {
-    // Late events for a previous customer id must not override a newer live subscription.
-    if (isEntitled(account, now) && !GRANTING.has(type)) {
-      return ok({ message: "Superseded customer ignored" });
+  if (account && account.subscription_id !== u.subscription_id) {
+    // Late events for a previous subscription must not override a newer live one.
+    if (isEntitled(account, now) && u.status !== "active") {
+      return ok({ message: "Superseded subscription ignored" });
     }
-    account.app_user_id = appUserId;
+    account.subscription_id = u.subscription_id;
+    if (u.ref) account.ref = u.ref;
+    account.status = "expired";
     account.current_end = null;
     account.grace_end = null;
     account.cancel_at_period_end = false;
@@ -162,7 +150,10 @@ export async function handleRevenueCatWebhook(request: Request, env: Env): Promi
   if (!account) {
     account = {
       email,
-      app_user_id: appUserId,
+      ref: u.ref!,
+      customer_id: null,
+      subscription_id: u.subscription_id,
+      plan: null,
       status: "expired",
       current_end: null,
       grace_end: null,
@@ -174,11 +165,84 @@ export async function handleRevenueCatWebhook(request: Request, env: Env): Promi
     firstSighting = true;
   }
 
-  applyEvent(account, event, type);
+  const cancelAtPeriodEnd = u.cancel_at_period_end ?? account.cancel_at_period_end;
+  if (account.status === "refunded" && !u.payment) {
+    // A refunded subscription stays refunded (e.g. through the cancellation that follows) until paid again.
+  } else {
+    account.status = u.status === "active" && cancelAtPeriodEnd ? "cancelled" : u.status;
+    account.current_end = u.current_end ?? account.current_end;
+    account.grace_end = u.grace_end;
+    account.cancel_at_period_end = u.status === "expired" ? false : cancelAtPeriodEnd;
+  }
+  if (u.customer_id) account.customer_id = u.customer_id;
+  if (u.plan) account.plan = u.plan;
   if (ts != null) account.last_event_at = Math.max(ts, account.last_event_at ?? 0);
   // Bind the purchasing Mac only once, so a device evicted later is not re-added on renewal.
   if (firstSighting && pending?.device_id) await bindDevice(env, account, pending.device_id, now);
 
   await putAccount(env, account);
   return outcome(account, await syncLicenses(env, account));
+}
+
+async function applyAdjustment(env: Env, adj: PaddleAdjustment, ts: number | null): Promise<Response> {
+  if (!REFUND_ACTIONS.has(adj.action ?? "") || adj.type !== "full" || adj.status !== "approved") {
+    return ok({ message: "Adjustment ignored" });
+  }
+  if (typeof adj.subscription_id !== "string" || !adj.subscription_id) {
+    return ok({ message: "Adjustment without subscription, skipped" });
+  }
+  const account = await accountForSubscription(env, adj.subscription_id);
+  if (!account) return ok({ message: "Unknown subscription, skipped" });
+  if (isStale(account, ts)) return ok({ message: "Stale event ignored" });
+
+  // A full refund ends access immediately.
+  account.status = "refunded";
+  account.grace_end = null;
+  account.cancel_at_period_end = false;
+  if (ts != null) account.last_event_at = Math.max(ts, account.last_event_at ?? 0);
+  await putAccount(env, account);
+  return outcome(account, await syncLicenses(env, account));
+}
+
+export async function handlePaddleWebhook(request: Request, env: Env): Promise<Response> {
+  // The signature covers the exact bytes, so read the raw body before parsing anything.
+  const raw = await request.text();
+  if (!(await verifySignature(request.headers.get("Paddle-Signature"), raw, env.PADDLE_WEBHOOK_SECRET, nowSecs()))) {
+    return legacyError("Unauthorized", 401);
+  }
+
+  let event: PaddleEvent;
+  try {
+    event = JSON.parse(raw) as PaddleEvent;
+  } catch {
+    return legacyError("Invalid JSON body", 400);
+  }
+  if (!event || typeof event !== "object" || !event.data || typeof event.data !== "object") {
+    return ok({ message: "No event, skipped" });
+  }
+
+  const type = typeof event.event_type === "string" ? event.event_type : "";
+  const handled = SUBSCRIPTION_EVENTS.has(type) || ADJUSTMENT_EVENTS.has(type) || type === "transaction.completed";
+  if (!handled) return ok({ message: "Event ignored" });
+
+  const eventId = typeof event.event_id === "string" && event.event_id ? event.event_id : null;
+  if (eventId && (await env.LICENSES.get(eventKey(eventId)))) return ok({ message: "Duplicate event ignored" });
+
+  // Deliveries can arrive out of order; occurred_at orders them (epoch ms).
+  const occurred = typeof event.occurred_at === "string" ? Date.parse(event.occurred_at) : NaN;
+  const ts = Number.isFinite(occurred) ? occurred : null;
+
+  let response: Response;
+  if (ADJUSTMENT_EVENTS.has(type)) {
+    response = await applyAdjustment(env, event.data as PaddleAdjustment, ts);
+  } else {
+    const update =
+      type === "transaction.completed"
+        ? fromTransaction(env, event.data as PaddleTransaction)
+        : fromSubscription(env, event.data as PaddleSubscription);
+    response = update ? await applyUpdate(env, update, ts) : ok({ message: "Not a subscription event, skipped" });
+  }
+
+  if (eventId) await putJson(env.LICENSES, eventKey(eventId), 1, EVENT_SEEN_TTL_SECONDS);
+  return response;
 }

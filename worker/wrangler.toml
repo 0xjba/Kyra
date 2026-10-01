@@ -4,9 +4,16 @@ compatibility_date = "2024-01-01"
 
 [vars]
 JEV_API_URL = "https://api.typesafe.ai/v1/score"
+# "sandbox" or "production". The price ids below belong to the same Paddle environment:
+# replace them with the live account's price ids when switching to production (see README).
+PADDLE_ENV = "sandbox"
+PADDLE_PRICE_ID_MONTHLY = "pri_01m3vkwxv1sbaj3dxv691s6dr9"
+PADDLE_PRICE_ID_YEARLY = "pri_01m3vkxpfbmb521vtade5s20rv"
+# Optional: a page with Paddle.js on an approved domain to use as the checkout link instead of /pay.
+# PADDLE_CHECKOUT_URL = "https://kyra.app/pay"
 
 [[kv_namespaces]]
 binding = "LICENSES"
 id = "b8f22213e10147128dd0f71548cb98ca"
 
-# Secrets are set with `wrangler secret put` (see README). DEV_MOCK_REVENUECAT belongs only in .dev.vars.
+# Secrets are set with `wrangler secret put` (see README). DEV_MOCK_PADDLE belongs only in .dev.vars.
