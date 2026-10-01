@@ -286,7 +286,7 @@ export default function Onboarding() {
             <span className="onboarding-pro-price">from $0.99/mo</span>
           </div>
           <div className="onboarding-pro-pitch">
-            Patrols your {macModel} daily and clears what's safe on its own.
+            Watches over your {macModel} daily and clears what's safe on its own.
           </div>
           <div className="onboarding-pro-perks">
             {PERKS.map((p) => (

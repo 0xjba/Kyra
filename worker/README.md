@@ -326,7 +326,7 @@ Paddle sandbox and live are separate accounts, each with its own key and prices.
       `https://pay.rev.cat/<token>`.
 - [ ] Integrations > Webhooks: URL
       `https://kyra-guardian.flashbacks.workers.dev/webhook/revenuecat`, Authorization header
-      value `Bearer <long random string>`, all events; production, plus sandbox while
+      value: a long random string (the same value goes into REVENUECAT_WEBHOOK_AUTH), all events; production, plus sandbox while
       testing.
 - [ ] Project settings > API keys: create a **v2 secret key** with
       `customer_information:subscriptions:read` (reads customers and subscriptions; it is
@@ -350,7 +350,7 @@ Copy each value, then pipe it in so it never lands in shell history:
 ```sh
 pbpaste | npx wrangler secret put REVENUECAT_SECRET_API_KEY      # sk_… (v2)
 pbpaste | npx wrangler secret put REVENUECAT_PROJECT_ID          # proj…
-pbpaste | npx wrangler secret put REVENUECAT_WEBHOOK_AUTH        # exact header value, e.g. "Bearer …"
+pbpaste | npx wrangler secret put REVENUECAT_WEBHOOK_AUTH        # exactly the value pasted into RevenueCat's Authorization field
 pbpaste | npx wrangler secret put REVENUECAT_WEB_PURCHASE_LINK   # https://pay.rev.cat/<token> (sandbox URL while testing)
 pbpaste | npx wrangler secret put REVENUECAT_ALLOW_SANDBOX       # 1, testing only (see below)
 pbpaste | npx wrangler secret put RESEND_API_KEY
