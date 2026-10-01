@@ -1008,3 +1008,34 @@ describe("POST /account/manage with Paddle subscriptions", () => {
     expect((await none.json()).code).toBe("no_active_subscription");
   });
 });
+
+describe("REVENUECAT_ENTITLEMENT", () => {
+  const kyraSub = (overrides: Record<string, unknown> = {}) =>
+    rcSub({ entitlements: { items: [{ lookup_key: "Kyra_pawtrol" }] }, ...overrides });
+
+  it("uses the configured entitlement for the license fallback and Manage", async () => {
+    env.REVENUECAT_ENTITLEMENT = "Kyra_pawtrol";
+    rcSubs[U1] = [rcSub({ id: "sub_default" }), kyraSub({ id: "sub_kyra" })];
+    expect(await license(D1)).toEqual({ active: true, expires: NOW + 30 * DAY });
+
+    kv.store.delete(`license:${D1}`);
+    await purchase();
+    expect((await post("/account/manage", { device_id: D1 })).status).toBe(200);
+    expect(revenuecat.mock.calls.at(-1)![0]).toBe(`${RC_API}/subscriptions/sub_kyra/authenticated_management_url`);
+  });
+
+  it("does not count the default entitlement when another one is configured", async () => {
+    env.REVENUECAT_ENTITLEMENT = "Kyra_pawtrol";
+    rcSubs[U1] = [rcSub()];
+    expect(await license(D1)).toEqual({ active: false, expires: null });
+  });
+
+  it("falls back to pawtrol when unset or blank", async () => {
+    env.REVENUECAT_ENTITLEMENT = "  ";
+    rcSubs[U1] = [kyraSub()];
+    expect((await license(D1)).active).toBe(false);
+    kv.store.delete(`rcsync:${D1}`);
+    rcSubs[U1] = [rcSub()];
+    expect((await license(D1)).active).toBe(true);
+  });
+});

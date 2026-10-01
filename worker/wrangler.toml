@@ -4,6 +4,8 @@ compatibility_date = "2024-01-01"
 
 [vars]
 JEV_API_URL = "https://api.typesafe.ai/v1/score"
+# Must match the entitlement identifier in RevenueCat (Product catalog > Entitlements).
+REVENUECAT_ENTITLEMENT = "Kyra_pawtrol"
 
 [[kv_namespaces]]
 binding = "LICENSES"

@@ -4,7 +4,12 @@ import type { Env } from "./env";
 import { DAY, nowSecs } from "./kv";
 
 const API = "https://api.revenuecat.com/v2";
-export const ENTITLEMENT = "pawtrol";
+export const DEFAULT_ENTITLEMENT = "pawtrol";
+
+// The entitlement identifier (lookup_key) in RevenueCat that unlocks Pawtrol.
+export function entitlementId(env: Env): string {
+  return (env.REVENUECAT_ENTITLEMENT || "").trim() || DEFAULT_ENTITLEMENT;
+}
 
 export class ProviderError extends Error {}
 
@@ -107,6 +112,7 @@ async function call(env: Env, path: string): Promise<unknown | null> {
 }
 
 async function pawtrolSubscription(env: Env, appUserId: string): Promise<RcSubscription | null> {
+  const entitlement = entitlementId(env);
   const data = (await call(env, `/customers/${encodeURIComponent(appUserId)}/subscriptions`)) as
     | { items?: RcSubscription[] }
     | null;
@@ -114,7 +120,7 @@ async function pawtrolSubscription(env: Env, appUserId: string): Promise<RcSubsc
     (s) =>
       typeof s?.id === "string" &&
       environmentAccepted(env, s.environment) &&
-      (s.entitlements?.items ?? []).some((e) => e?.lookup_key === ENTITLEMENT)
+      (s.entitlements?.items ?? []).some((e) => e?.lookup_key === entitlement)
   );
   const end = (s: RcSubscription) => s.ends_at ?? s.current_period_ends_at ?? 0;
   subs.sort((a, b) => Number(!!b.gives_access) - Number(!!a.gives_access) || end(b) - end(a));
