@@ -66,21 +66,16 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Kyra v__VERSION__"
           releaseBody: |
-            Nine lives for your storage.
+            Public beta. Pre-release builds are not offered to v0.4 installs through auto-update.
 
-            **What's included:**
-            - **Clean** — 270+ apps and services, 16 browsers supported
-            - **Prune** — 56 developer artifact types across 15+ languages
-            - **Installers** — Find leftover .dmg, .pkg, and .iso files
-            - **Uninstall** — Remove apps with all hidden support files
-            - **Optimize** — 24 system maintenance tasks in one click
-            - **Analyze** — Treemap disk visualizer and large file finder
-            - **Status** — Real-time CPU, memory, disk, and network monitoring
-            - **Ask AI** — Get advice from ChatGPT on what's safe to delete
+            **What's new:**
+            - **Pawtrol** — an autonomous storage agent that keeps your Mac clean on its own. Subscriptions are powered by RevenueCat and Paddle, from $0.99/month or $9.99/year. Billing runs in test mode during the beta: pay with card 4242 4242 4242 4242, any future expiry date, CVC 100.
+            - **Data safety** — every delete passes a guard that protects your personal files, browser profiles and app data that outlives its app, backed by regression tests against a simulated home folder.
+            - **Liquid Glass redesign** — a new look across the whole app.
 
             **Requirements:** macOS 11+ · Apple Silicon (M1/M2/M3/M4/M5)
-          releaseDraft: true
-          prerelease: false
+          releaseDraft: false
+          prerelease: true
           args: --target aarch64-apple-darwin
 
       - name: Cleanup keychain
