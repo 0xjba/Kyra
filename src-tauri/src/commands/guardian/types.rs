@@ -99,6 +99,9 @@ pub struct Account {
     pub devices_count: u32,
     #[serde(default)]
     pub management_url: Option<String>,
+    /// "monthly" or "yearly" when the worker knows the billing period.
+    #[serde(default)]
+    pub plan: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

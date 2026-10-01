@@ -559,8 +559,10 @@ export interface Account {
   current_end: number | null;
   cancel_at_period_end: boolean;
   devices_count: number;
-  /** RevenueCat's long-lived management URL, when known. Prefer guardianManageSubscription. */
+  /** The subscription's management URL, when known. Prefer guardianManageSubscription. */
   management_url?: string | null;
+  /** Billing period, when the worker knows it. */
+  plan?: "monthly" | "yearly" | null;
 }
 
 export interface ManageLink {

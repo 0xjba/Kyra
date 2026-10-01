@@ -19,11 +19,24 @@ export function formatPlanDate(secs: number): string {
   return new Date(secs * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+export const PAWTROL_PRICES = "$0.99/month or $9.99/year";
+
+export function planLabel(plan: Account["plan"]): string | null {
+  if (plan === "yearly") return "Yearly plan";
+  if (plan === "monthly") return "Monthly plan";
+  return null;
+}
+
 export function planLine(account: Account | null, licenseExpires: number | null): string {
   const end = account?.current_end ?? licenseExpires;
   if (account?.status === "billing_issue") return "Payment failed · update your card under Manage";
-  if (account?.cancel_at_period_end) return end ? `Ends ${formatPlanDate(end)}` : "Ends at the end of this period";
-  return end ? `$0.99/month · renews ${formatPlanDate(end)}` : "$0.99/month";
+  const label = planLabel(account?.plan);
+  if (account?.cancel_at_period_end) {
+    const ends = end ? `ends ${formatPlanDate(end)}` : "ends at the end of this period";
+    return label ? `${label} · ${ends}` : ends.charAt(0).toUpperCase() + ends.slice(1);
+  }
+  const head = label ?? PAWTROL_PRICES;
+  return end ? `${head} · renews ${formatPlanDate(end)}` : head;
 }
 
 export function devicesLine(account: Account): string {

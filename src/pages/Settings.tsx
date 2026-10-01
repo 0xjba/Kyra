@@ -384,7 +384,7 @@ export default function Settings() {
                   name="Manage subscription"
                   desc={accountError
                     ? <span className="st-row-error">{accountError}</span>
-                    : "Change card or cancel on RevenueCat's secure page"}
+                    : "Change card or cancel on the secure billing page"}
                 >
                   <Pill onClick={handleManageSubscription} disabled={openingManage}>
                     {openingManage ? "Opening…" : "Manage"}
@@ -394,7 +394,7 @@ export default function Settings() {
             </>
           ) : (
             <>
-              <Row name="Subscription" desc={`Keeps your ${deviceName || "Mac"} clean on its own · $0.99/mo`}>
+              <Row name="Subscription" desc={`Keeps your ${deviceName || "Mac"} clean on its own · from $0.99/mo`}>
                 <Pill variant="primary" onClick={() => setSheet("subscribe")}>Subscribe</Pill>
               </Row>
               <Row name="Already subscribed?" desc="Restore Pawtrol with the email you subscribed with">

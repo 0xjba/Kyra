@@ -7,6 +7,7 @@ import { useGuardianStore } from "../stores/guardianStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatSize } from "../utils/format";
 import { patrolStatusLine } from "../utils/patrol";
+import { planLabel } from "../utils/pawtrolAccount";
 import SubscribeSheet from "./SubscribeSheet";
 import RestoreSheet from "./RestoreSheet";
 import "../styles/guardian.css";
@@ -69,6 +70,7 @@ export default function TitleBar() {
 
   const isPro = useGuardianStore((s) => s.license.active);
   const expires = useGuardianStore((s) => s.license.expires);
+  const plan = useGuardianStore((s) => s.account?.plan);
   const deviceName = useGuardianStore((s) => s.deviceName);
   const patrol = useGuardianStore((s) => s.patrolStatus);
   const checkLicense = useGuardianStore((s) => s.checkLicense);
@@ -123,7 +125,7 @@ export default function TitleBar() {
     ? new Date(expires * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;
   const popSub = isPro
-    ? renewDate ? `Renews ${renewDate} · $0.99/mo` : "Active · $0.99/mo"
+    ? [renewDate ? `Renews ${renewDate}` : "Active", planLabel(plan)].filter(Boolean).join(" · ")
     : `Keeps your ${deviceName || "Mac"} clean on its own`;
 
   const openPawtrol = () => {
@@ -301,6 +303,7 @@ export default function TitleBar() {
                 {/* Pricing + Subscribe */}
                 <div className="paw-pop-pricing">
                   <div style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)", marginRight: 2 }}>from</span>
                     <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.03em" }}>$0.99</span>
                     <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>/month</span>
                   </div>

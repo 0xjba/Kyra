@@ -96,10 +96,30 @@ describe("Pawtrol account", () => {
     renderSettings();
     await act(flush);
     expect(rowDesc("Account")).toBe("j***@gmail.com");
-    expect(rowDesc("Plan")).toBe("$0.99/month · renews Oct 29, 2026");
+    expect(rowDesc("Plan")).toBe("$0.99/month or $9.99/year · renews Oct 29, 2026");
     expect(rowDesc("Devices")).toBe("2 of 3 Macs");
-    expect(rowDesc("Manage subscription")).toBe("Change card or cancel on RevenueCat's secure page");
+    expect(rowDesc("Manage subscription")).toBe("Change card or cancel on the secure billing page");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  it.each([
+    ["yearly", "Yearly plan · renews Oct 29, 2026"],
+    ["monthly", "Monthly plan · renews Oct 29, 2026"],
+  ])("shows the %s plan", async (plan, want) => {
+    onInvoke("guardian_account", () => ({ ...ACCOUNT, plan }));
+    renderSettings();
+    await act(flush);
+    expect(rowDesc("Plan")).toBe(want);
+  });
+
+  it("opens a Paddle customer portal link from Manage", async () => {
+    const portal = "https://sandbox-customer-portal.paddle.com/cpl_01abc?action=overview&token=pga_x";
+    onInvoke("guardian_manage_subscription", () => ({ url: portal }));
+    renderSettings();
+    await act(flush);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    await act(flush);
+    expect(openUrl).toHaveBeenCalledWith(portal);
   });
 
   it("opens the subscription portal from Manage", async () => {

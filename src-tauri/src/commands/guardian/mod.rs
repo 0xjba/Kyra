@@ -83,7 +83,9 @@ pub fn guardian_get_device_id() -> String {
 pub async fn guardian_checkout_create(email: String) -> Result<CheckoutSession, String> {
     let device_id = license::get_or_create_device_id();
     let base = worker_url();
-    let mut session = account::checkout_create_with(http(), &base, &device_id, &email).await?;
+    let mac_licensed = license::cached_license_active();
+    let mut session =
+        account::checkout_create_with(http(), &base, &device_id, &email, mac_licensed).await?;
     session.opened_by_app = open_local_dev_page(&base, &session.short_url)?;
     Ok(session)
 }

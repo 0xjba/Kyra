@@ -127,7 +127,7 @@ function SubscribeFlow({ onClose }: { onClose: () => void }) {
             Cancel
           </button>
           <button type="submit" className="paw-sheet-btn paw-sheet-btn-primary" disabled={busy}>
-            {busy ? "Opening checkout…" : "Continue · $0.99/mo"}
+            {busy ? "Opening checkout…" : "Continue · from $0.99/mo"}
           </button>
         </div>
       </form>

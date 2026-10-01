@@ -25,6 +25,8 @@ const BAD_EMAIL: &str = "Enter a valid email address.";
 const BAD_CODE: &str = "That code didn't work. Check it and try again.";
 const EXPIRED_CODE: &str = "That code expired. Send a new one.";
 const CODE_FORMAT: &str = "Enter the 6-digit code from your email.";
+const ACTIVE_HERE: &str = "Pawtrol is already active on this Mac.";
+const EMAIL_HAS_PAWTROL: &str = "This email already has Pawtrol. Use Restore to add this Mac.";
 
 fn normalize_email(email: &str) -> Result<String, String> {
     let email = email.trim().to_lowercase();
@@ -55,6 +57,14 @@ fn normalize_code(code: &str) -> Result<String, String> {
     }
 }
 
+fn worker_code(body: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get("code")?
+        .as_str()
+        .map(str::to_owned)
+}
+
 fn worker_message(body: &str) -> String {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
@@ -72,7 +82,7 @@ fn friendly_error(call: Call, status: u16, body: &str) -> String {
         (Call::RestoreVerify, 400 | 401 | 403 | 404) => BAD_CODE,
         (Call::RestoreVerify, 410) => EXPIRED_CODE,
         (Call::Checkout | Call::RestoreStart, 400 | 422) => BAD_EMAIL,
-        (Call::Checkout, 409) => "Pawtrol is already active on this Mac.",
+        (Call::Checkout, 409) => ACTIVE_HERE,
         (Call::Manage, 404) => "No subscription found for this Mac.",
         (Call::Manage, 409) => "There's no subscription to manage yet.",
         (_, s) if s >= 500 => SERVER_DOWN,
@@ -104,11 +114,14 @@ fn parse<T: DeserializeOwned>(call: Call, status: u16, body: &str) -> Result<T, 
     serde_json::from_str(body).map_err(|_| BAD_REPLY.to_string())
 }
 
+/// `mac_licensed` is this Mac's own license state: the worker answers 409 `already_active`
+/// both when this Mac is subscribed and when the email already pays on another Mac.
 pub(crate) async fn checkout_create_with(
     client: &reqwest::Client,
     base_url: &str,
     device_id: &str,
     email: &str,
+    mac_licensed: bool,
 ) -> Result<CheckoutSession, String> {
     let email = normalize_email(email)?;
     let (status, body) = send(
@@ -117,6 +130,9 @@ pub(crate) async fn checkout_create_with(
             .json(&json!({ "device_id": device_id, "email": email })),
     )
     .await?;
+    if status == 409 && !mac_licensed && worker_code(&body).as_deref() == Some("already_active") {
+        return Err(EMAIL_HAS_PAWTROL.into());
+    }
     let session: CheckoutSession = parse(Call::Checkout, status, &body)?;
     ensure_openable(base_url, &session.short_url)?;
     Ok(session)
@@ -228,7 +244,7 @@ mod tests {
         serde_json::from_str(&req.body).unwrap()
     }
 
-    const ACCOUNT: &str = r#"{"email":"j***@gmail.com","status":"active","current_end":1932854400,"cancel_at_period_end":false,"devices_count":2,"management_url":"https://billing.revenuecat.com/m/app1"}"#;
+    const ACCOUNT: &str = r#"{"email":"j***@gmail.com","status":"active","current_end":1932854400,"cancel_at_period_end":false,"devices_count":2,"management_url":"https://sandbox-customer-portal.paddle.com/cpl_01abc","plan":"yearly"}"#;
 
     #[test]
     fn checkout_posts_device_and_normalized_email() {
@@ -237,7 +253,7 @@ mod tests {
             r#"{"short_url":"https://pay.rev.cat/tok/kyra-abc?email=me%40example.com","app_user_id":"kyra-abc"}"#,
         );
         let session =
-            block_on(checkout_create_with(&client(), &base, "dev-1", "  Me@Example.COM ")).unwrap();
+            block_on(checkout_create_with(&client(), &base, "dev-1", "  Me@Example.COM ", false)).unwrap();
         let req = server.join().unwrap();
 
         assert_eq!(session.short_url, "https://pay.rev.cat/tok/kyra-abc?email=me%40example.com");
@@ -252,7 +268,7 @@ mod tests {
     #[test]
     fn checkout_rejects_invalid_email_without_a_request() {
         for email in ["", "me", "me@", "@x.com", "me@x", "me@@x.com", "m e@x.com", "me@x."] {
-            let err = block_on(checkout_create_with(&client(), &dead_url(), "d", email)).unwrap_err();
+            let err = block_on(checkout_create_with(&client(), &dead_url(), "d", email, false)).unwrap_err();
             assert_eq!(err, BAD_EMAIL, "{email}");
         }
     }
@@ -260,7 +276,7 @@ mod tests {
     #[test]
     fn checkout_refuses_non_https_urls() {
         let (base, server) = serve_once(200, r#"{"short_url":"file:///etc/passwd"}"#);
-        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co")).unwrap_err();
+        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", false)).unwrap_err();
         server.join().unwrap();
         assert_eq!(err, BAD_REPLY);
     }
@@ -275,15 +291,33 @@ mod tests {
         ];
         for (status, body, want) in cases {
             let (base, server) = serve_once(status, body);
-            let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co")).unwrap_err();
+            let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", false)).unwrap_err();
             server.join().unwrap();
             assert_eq!(err, want, "{status}");
         }
     }
 
     #[test]
+    fn checkout_already_active_depends_on_this_macs_license() {
+        let email_pays = r#"{"error":"This email already has an active Pawtrol subscription","code":"already_active"}"#;
+        let cases = [
+            (email_pays, false, EMAIL_HAS_PAWTROL),
+            (email_pays, true, ACTIVE_HERE),
+            (r#"{"error":"Pawtrol is already active on this Mac","code":"already_active"}"#, true, ACTIVE_HERE),
+            (r#"{"error":"Conflict"}"#, false, ACTIVE_HERE),
+        ];
+        for (body, mac_licensed, want) in cases {
+            let (base, server) = serve_once(409, body);
+            let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", mac_licensed))
+                .unwrap_err();
+            server.join().unwrap();
+            assert_eq!(err, want, "{body} licensed={mac_licensed}");
+        }
+    }
+
+    #[test]
     fn unreachable_worker_is_a_connection_message() {
-        let err = block_on(checkout_create_with(&client(), &dead_url(), "d", "a@b.co")).unwrap_err();
+        let err = block_on(checkout_create_with(&client(), &dead_url(), "d", "a@b.co", false)).unwrap_err();
         assert_eq!(err, UNREACHABLE);
         let err = block_on(account_with(&client(), &dead_url(), "d")).unwrap_err();
         assert_eq!(err, UNREACHABLE);
@@ -292,7 +326,7 @@ mod tests {
     #[test]
     fn malformed_success_body_is_an_unexpected_reply() {
         let (base, server) = serve_once(200, "<html>");
-        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co")).unwrap_err();
+        let err = block_on(checkout_create_with(&client(), &base, "d", "a@b.co", false)).unwrap_err();
         server.join().unwrap();
         assert_eq!(err, BAD_REPLY);
     }
@@ -407,7 +441,8 @@ mod tests {
                 current_end: Some(1_932_854_400),
                 cancel_at_period_end: false,
                 devices_count: 2,
-                management_url: Some("https://billing.revenuecat.com/m/app1".into()),
+                management_url: Some("https://sandbox-customer-portal.paddle.com/cpl_01abc".into()),
+                plan: Some("yearly".into()),
             }
         );
     }
@@ -432,6 +467,7 @@ mod tests {
         assert!(!account.cancel_at_period_end);
         assert_eq!(account.devices_count, 0);
         assert_eq!(account.management_url, None);
+        assert_eq!(account.plan, None);
     }
 
     #[test]

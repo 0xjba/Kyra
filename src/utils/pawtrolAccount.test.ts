@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { devicesLine, isValidEmail, planLine, sanitizeCode } from "./pawtrolAccount";
+import { devicesLine, isValidEmail, planLabel, planLine, sanitizeCode } from "./pawtrolAccount";
 import type { Account } from "../lib/tauri";
 
 const OCT_29_2026 = Date.UTC(2026, 9, 29, 12) / 1000;
@@ -33,9 +33,22 @@ describe("sanitizeCode", () => {
 });
 
 describe("planLine", () => {
-  it("shows price and renewal, or the end date once cancelled", () => {
-    expect(planLine(account(), null)).toBe("$0.99/month · renews Oct 29, 2026");
+  it("shows the prices and renewal without a known plan, or the end date once cancelled", () => {
+    expect(planLine(account(), null)).toBe("$0.99/month or $9.99/year · renews Oct 29, 2026");
     expect(planLine(account({ cancel_at_period_end: true }), null)).toBe("Ends Oct 29, 2026");
+    expect(planLine(account({ cancel_at_period_end: true, current_end: null }), null)).toBe(
+      "Ends at the end of this period",
+    );
+  });
+
+  it("names the plan when the account has one", () => {
+    expect(planLine(account({ plan: "yearly" }), null)).toBe("Yearly plan · renews Oct 29, 2026");
+    expect(planLine(account({ plan: "monthly" }), null)).toBe("Monthly plan · renews Oct 29, 2026");
+    expect(planLine(account({ plan: "yearly", cancel_at_period_end: true }), null)).toBe(
+      "Yearly plan · ends Oct 29, 2026",
+    );
+    expect(planLine(account({ plan: "monthly", current_end: null }), null)).toBe("Monthly plan");
+    expect(planLabel(null)).toBeNull();
   });
 
   it("asks for a new card after a failed renewal", () => {
@@ -45,8 +58,8 @@ describe("planLine", () => {
   });
 
   it("falls back to the license expiry without an account", () => {
-    expect(planLine(null, OCT_29_2026)).toBe("$0.99/month · renews Oct 29, 2026");
-    expect(planLine(null, null)).toBe("$0.99/month");
+    expect(planLine(null, OCT_29_2026)).toBe("$0.99/month or $9.99/year · renews Oct 29, 2026");
+    expect(planLine(null, null)).toBe("$0.99/month or $9.99/year");
   });
 
   it("counts devices against the limit", () => {

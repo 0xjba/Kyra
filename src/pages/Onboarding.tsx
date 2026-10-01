@@ -283,7 +283,7 @@ export default function Onboarding() {
           <div className="onboarding-pro-title">
             <span className="onboarding-pro-name">Pawtrol</span>
             <span className="onboarding-pro-badge">PRO</span>
-            <span className="onboarding-pro-price">$0.99/mo</span>
+            <span className="onboarding-pro-price">from $0.99/mo</span>
           </div>
           <div className="onboarding-pro-pitch">
             Patrols your {macModel} daily and clears what's safe on its own.

@@ -24,6 +24,8 @@
         { "url": "https://kyra.app/*" },
         { "url": "https://pay.rev.cat/*" },
         { "url": "https://billing.revenuecat.com/*" },
+        { "url": "https://customer-portal.paddle.com/*" },
+        { "url": "https://sandbox-customer-portal.paddle.com/*" },
         { "url": "https://github.com/*" },
         { "url": "https://chat.openai.com/*" },
         { "url": "https://chatgpt.com/*" }
