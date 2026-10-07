@@ -782,6 +782,7 @@ fn local_day(ms: u64) -> i64 {
 pub(crate) enum Busy {
     Patrol,
     ReviewClean,
+    ManualClean,
 }
 
 pub(crate) struct BusyLock(Mutex<Option<Busy>>);
@@ -798,6 +799,7 @@ impl BusyLock {
         match *slot {
             Some(Busy::Patrol) => Err("Pawtrol is already running".into()),
             Some(Busy::ReviewClean) => Err("Pawtrol is busy cleaning".into()),
+            Some(Busy::ManualClean) => Err("A clean is already running".into()),
             None => {
                 *slot = Some(kind);
                 Ok(BusyGuard(self))
@@ -817,6 +819,19 @@ impl Drop for BusyGuard<'_> {
 }
 
 static BUSY: BusyLock = BusyLock::new();
+
+/// Holds the shared busy lock for a manual Clean, so Pawtrol can't start
+/// deleting until it ends (and a running Pawtrol blocks the Clean).
+pub(crate) fn begin_manual_clean() -> Result<BusyGuard<'static>, String> {
+    manual_clean_on(&BUSY)
+}
+
+fn manual_clean_on(lock: &BusyLock) -> Result<BusyGuard<'_>, String> {
+    lock.try_acquire(Busy::ManualClean).map_err(|e| match lock.current() {
+        Some(Busy::ManualClean) | None => e,
+        Some(_) => "Pawtrol is cleaning right now. Try again when it finishes.".into(),
+    })
+}
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -2124,6 +2139,31 @@ mod tests {
             lock.try_acquire(Busy::Patrol).err().as_deref(),
             Some("Pawtrol is busy cleaning")
         );
+    }
+
+    #[test]
+    fn manual_clean_and_pawtrol_never_delete_at_the_same_time() {
+        let lock = BusyLock::new();
+
+        let manual = manual_clean_on(&lock).unwrap();
+        assert_eq!(lock.current(), Some(Busy::ManualClean));
+        assert_eq!(
+            lock.try_acquire(Busy::Patrol).err().as_deref(),
+            Some("A clean is already running")
+        );
+        assert!(lock.try_acquire(Busy::ReviewClean).is_err());
+        assert_eq!(manual_clean_on(&lock).err().as_deref(), Some("A clean is already running"));
+        drop(manual);
+        assert_eq!(lock.current(), None);
+
+        for kind in [Busy::Patrol, Busy::ReviewClean] {
+            let pawtrol = lock.try_acquire(kind).unwrap();
+            let err = manual_clean_on(&lock).err().unwrap();
+            assert!(err.contains("Pawtrol is cleaning"), "{err}");
+            assert_eq!(lock.current(), Some(kind), "a refused clean must not release Pawtrol's hold");
+            drop(pawtrol);
+        }
+        assert!(manual_clean_on(&lock).is_ok());
     }
 
     #[test]

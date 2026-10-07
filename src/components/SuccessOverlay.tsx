@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Siren } from "lucide-react";
+import { ChevronDown, Siren } from "lucide-react";
 import { useGuardianStore } from "../stores/guardianStore";
 import cat1 from "../assets/cat-tail/cat1.png";
 import cat2 from "../assets/cat-tail/cat2.png";
@@ -9,11 +9,94 @@ import cat4 from "../assets/cat-tail/cat4.png";
 import cat5 from "../assets/cat-tail/cat5.png";
 import cat6 from "../assets/cat-tail/cat6.png";
 import cat7 from "../assets/cat-tail/cat7.png";
+import { formatSize } from "../utils/format";
 import "../styles/success-overlay.css";
 
 export interface SuccessChip {
   v: string;
   k: string;
+}
+
+export type SuccessIssueReason = "in_use" | "no_permission" | "already_gone" | "protected" | "other";
+
+/** Something selected that wasn't freed. */
+export interface SuccessIssue {
+  label: string;
+  path: string;
+  /** Bytes left behind (ignored for "already_gone"). */
+  size: number;
+  reason: SuccessIssueReason;
+}
+
+const REASON_TEXT: Record<SuccessIssueReason, string> = {
+  in_use: "In use",
+  no_permission: "No permission",
+  already_gone: "Already gone",
+  protected: "Protected",
+  other: "Couldn't remove",
+};
+
+interface IssueRow {
+  label: string;
+  reason: SuccessIssueReason;
+  size: number;
+  paths: string[];
+}
+
+/** One row per item and reason, failures first and largest first. */
+function groupIssues(issues: SuccessIssue[]): IssueRow[] {
+  const rows = new Map<string, IssueRow>();
+  for (const i of issues) {
+    const key = `${i.reason}\u0000${i.label}`;
+    const row = rows.get(key) ?? { label: i.label, reason: i.reason, size: 0, paths: [] };
+    row.size += i.size;
+    row.paths.push(i.path);
+    rows.set(key, row);
+  }
+  const gone = (r: IssueRow) => (r.reason === "already_gone" ? 1 : 0);
+  return [...rows.values()].sort((a, b) => gone(a) - gone(b) || b.size - a.size);
+}
+
+function IssuesSummary({ failedBytes, issues }: { failedBytes: number; issues: SuccessIssue[] }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  if (issues.length === 0) return null;
+  const failedCount = issues.filter((i) => i.reason !== "already_gone").length;
+  const goneCount = issues.length - failedCount;
+  const summary =
+    failedCount > 0
+      ? `${formatSize(failedBytes)} couldn't be removed`
+      : `${goneCount} ${goneCount === 1 ? "item was" : "items were"} already gone`;
+  const rows = groupIssues(issues);
+
+  return (
+    <div className="ks-issues ks-fade">
+      <button
+        type="button"
+        className="ks-issues-toggle"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={failedCount > 0 ? "ks-issues-failed" : undefined}>{summary}</span>
+        <ChevronDown size={13} strokeWidth={2.2} className={`ks-issues-chevron${open ? " ks-open" : ""}`} />
+      </button>
+      {open && (
+        <ul id={listId} className="ks-issues-list">
+          {rows.map((r) => (
+            <li key={`${r.reason}-${r.label}`} className="ks-issue" title={r.paths.join("\n")}>
+              <span className="ks-issue-name">
+                {r.label}
+                {r.paths.length > 1 && <span className="ks-issue-count"> · {r.paths.length}</span>}
+              </span>
+              <span className="ks-issue-size">{r.reason === "already_gone" ? "" : formatSize(r.size)}</span>
+              <span className="ks-issue-reason">{REASON_TEXT[r.reason]}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 interface SuccessOverlayProps {
@@ -26,6 +109,10 @@ interface SuccessOverlayProps {
   storageUsedGB?: number;
   storageTotalGB?: number;
   showPawtrolUpsell?: boolean;
+  /** Bytes that were selected but couldn't be removed. */
+  failedBytes?: number;
+  /** What wasn't freed and why, shown behind an expandable line. */
+  issues?: SuccessIssue[];
   chips?: SuccessChip[];
   upHead?: string;
   isPro?: boolean;
@@ -69,6 +156,8 @@ export default function SuccessOverlay({
   storageUsedGB,
   storageTotalGB,
   showPawtrolUpsell = false,
+  failedBytes = 0,
+  issues,
   chips,
   upHead = "Next time, you could skip this.",
   isPro,
@@ -283,6 +372,8 @@ export default function SuccessOverlay({
             ))}
           </div>
         )}
+
+        {issues && issues.length > 0 && <IssuesSummary failedBytes={failedBytes} issues={issues} />}
 
         {!showUpsell && (
           <button type="button" className="ks-done-primary" onClick={onDone}>

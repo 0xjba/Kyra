@@ -1953,7 +1953,9 @@ pub(super) fn collect_rule_paths_in(rule: &CleanRule, whitelist: &[String], home
                 }
             } else {
                 // Standard scanning: include the entire path
-                let size = if expanded.is_dir() {
+                let size = if expanded.is_dir() && super::executor::is_container_dir(&expanded_str) {
+                    container_deletable_size(&expanded)
+                } else if expanded.is_dir() {
                     deletable_dir_size(&expanded)
                 } else {
                     expanded.metadata().map(|m| m.len()).unwrap_or(0)
@@ -2012,6 +2014,53 @@ pub(super) fn drop_guard_refused_paths(items: Vec<ScanItem>) -> Vec<ScanItem> {
                     }
                 }
             });
+            if item.paths.len() != before {
+                item.total_size = item.paths.iter().map(|p| p.size).sum();
+            }
+            (!item.paths.is_empty()).then_some(item)
+        })
+        .collect()
+}
+
+/// Size of what clearing a container folder (~/Library/Caches, …) removes:
+/// the executor empties it entry by entry and skips symlinks, protected
+/// user-data folders and anything the data guard refuses, so those are
+/// not counted either.
+fn container_deletable_size(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| !p.is_symlink())
+        .filter(|p| {
+            !p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(crate::commands::utils::is_protected_user_data_component)
+        })
+        .filter(|p| crate::commands::data_guard::check_general(p).is_ok())
+        .map(|p| {
+            if p.is_dir() {
+                deletable_dir_size(&p)
+            } else {
+                p.metadata().map(|m| m.len()).unwrap_or(0)
+            }
+        })
+        .sum()
+}
+
+/// Keeps each path in the first item that lists it. Several rules can find
+/// the same folder (a sandbox cache under its own rule and the dynamic
+/// container scan, a log folder under its tool's rule and User Logs);
+/// listing it twice counted its bytes twice. Items left empty are dropped.
+pub fn drop_duplicate_paths(items: Vec<ScanItem>) -> Vec<ScanItem> {
+    let mut seen: HashSet<String> = HashSet::new();
+    items
+        .into_iter()
+        .filter_map(|mut item| {
+            let before = item.paths.len();
+            item.paths.retain(|p| seen.insert(p.path.clone()));
             if item.paths.len() != before {
                 item.total_size = item.paths.iter().map(|p| p.size).sum();
             }
@@ -3232,5 +3281,37 @@ mod tests {
         assert!(!is_protected_container_stub(&c));
         write_file(&c.join(".com.apple.containermanagerd.metadata.plist"), 1);
         assert!(is_protected_container_stub(&c));
+    }
+
+    #[test]
+    fn a_path_found_by_two_rules_is_listed_once() {
+        let items = vec![
+            item_with("user_logs", &[("/h/Library/Logs/CoreSimulator".into(), 300), ("/h/Library/Logs/.DS_Store".into(), 6)]),
+            item_with("dev_xcode_sim_logs", &[("/h/Library/Logs/CoreSimulator".into(), 300), ("/h/Library/Developer/CoreSimulator/Caches".into(), 50)]),
+            item_with("ds_store", &[("/h/Library/Logs/.DS_Store".into(), 6)]),
+            item_with("sys_coredevice_cache", &[("/h/C/Data/Library/Caches".into(), 70)]),
+            item_with("dynamic_container_caches", &[("/h/C/Data/Library/Caches".into(), 70), ("/h/D/Data/tmp".into(), 9)]),
+        ];
+        let out = drop_duplicate_paths(items);
+        let ids: Vec<&str> = out.iter().map(|i| i.rule_id.as_str()).collect();
+        assert_eq!(ids, ["user_logs", "dev_xcode_sim_logs", "sys_coredevice_cache", "dynamic_container_caches"]);
+        assert_eq!(out[1].total_size, 50);
+        assert_eq!(out[3].total_size, 9);
+        assert_eq!(out.iter().map(|i| i.total_size).sum::<u64>(), 300 + 6 + 50 + 70 + 9);
+    }
+
+    #[test]
+    fn container_size_leaves_out_what_clearing_it_skips() {
+        let dir = workspace_tempdir();
+        let caches = canon(&dir).join("Caches");
+        write_file(&caches.join("com.example.app/blob.bin"), 40_000);
+        write_file(&caches.join("loose.bin"), 1_000);
+        write_file(&caches.join("IndexedDB/keep.bin"), 90_000);
+        let outside = workspace_tempdir();
+        write_file(&canon(&outside).join("big.bin"), 200_000);
+        symlink(canon(&outside), caches.join("link")).unwrap();
+
+        let size = container_deletable_size(&caches);
+        assert_eq!(size, deletable_dir_size(&caches.join("com.example.app")) + 1_000);
     }
 }

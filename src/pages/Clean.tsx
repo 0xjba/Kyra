@@ -760,6 +760,7 @@ function CleanDoneView() {
   }, []);
 
   const bytesFreed = result?.bytes_freed ?? 0;
+  const issues = [...(result?.failed ?? []), ...(result?.already_gone ?? [])];
   const itemCount = result?.items_cleaned ?? 0;
   const cleanedIds = new Set(result?.cleaned_ids ?? []);
   const categoryCount = new Set(
@@ -777,6 +778,8 @@ function CleanDoneView() {
       storageUsedGB={(diskTotal - diskFree) / GB}
       storageTotalGB={diskTotal / GB}
       showPawtrolUpsell={true}
+      failedBytes={result?.bytes_failed ?? 0}
+      issues={issues}
       onDone={dismissDone}
     />
   );

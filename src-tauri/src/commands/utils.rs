@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 /// Uses `st_blocks * 512` so that sparse files (APFS clones, disk images,
 /// VM storage) report their true on-disk footprint rather than the
 /// logical length, matching `du` and Finder's "Size on disk".
-fn physical_size(meta: &fs::Metadata) -> u64 {
+pub(crate) fn physical_size(meta: &fs::Metadata) -> u64 {
     meta.blocks().saturating_mul(512)
 }
 
@@ -66,6 +66,9 @@ pub fn is_protected_user_data_component(name: &str) -> bool {
 /// subdirectory whose name is a protected user-data component (see
 /// `PROTECTED_USER_DATA_COMPONENTS`). This matches the behavior of the
 /// cleaner executor, so scan sizes reflect what will actually be freed.
+/// A read-only directory the user owns counts: the cleaner adds the owner
+/// write bit to clear it. One owned by another user (e.g. root, left by
+/// `sudo npm`) does not.
 pub fn deletable_dir_size(path: &Path) -> u64 {
     let uid = unsafe { libc::getuid() };
     let mut total: u64 = 0;
@@ -73,15 +76,7 @@ pub fn deletable_dir_size(path: &Path) -> u64 {
     while let Some(dir) = stack.pop() {
         // Check if we can write to the parent directory (needed to delete entries)
         let dir_writable = fs::metadata(&dir)
-            .map(|m| {
-                let mode = m.permissions().mode();
-                let owner = m.uid();
-                if owner == uid {
-                    mode & 0o200 != 0 // owner write
-                } else {
-                    mode & 0o002 != 0 // other write
-                }
-            })
+            .map(|m| m.uid() == uid || m.permissions().mode() & 0o002 != 0)
             .unwrap_or(false);
 
         if !dir_writable {
@@ -306,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn deletable_dir_size_skips_read_only_dirs() {
+    fn deletable_dir_size_counts_read_only_dirs_the_user_owns() {
         let dir = tempfile::tempdir().unwrap();
         let locked = dir.path().join("locked");
         write_file(&locked.join("x.bin"), 500_000);
@@ -314,8 +309,17 @@ mod tests {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
         let size = deletable_dir_size(dir.path());
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(size >= 1_000);
-        assert!(size < 500_000, "unwritable dir counted: {size}");
+        assert!(size >= 501_000, "owned read-only dir is cleanable: {size}");
+    }
+
+    #[test]
+    fn deletable_dir_size_skips_dirs_owned_by_someone_else() {
+        // /var/root is root-owned and unreadable to a normal user; /usr/bin
+        // is root-owned and not world-writable.
+        if unsafe { libc::getuid() } == 0 {
+            return;
+        }
+        assert_eq!(deletable_dir_size(Path::new("/usr/bin")), 0);
     }
 
     #[test]

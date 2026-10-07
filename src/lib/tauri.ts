@@ -100,11 +100,28 @@ export interface CleanProgress {
   bytes_freed: number;
 }
 
+export type CleanIssueReason = "in_use" | "no_permission" | "already_gone" | "protected" | "other";
+
+export interface CleanIssue {
+  rule_id: string;
+  label: string;
+  path: string;
+  /** Bytes still on disk, or the scanned size for an already-gone path. */
+  size: number;
+  reason: CleanIssueReason;
+}
+
 export interface CleanResult {
   items_cleaned: number;
+  /** Bytes actually removed. */
   bytes_freed: number;
   errors: string[];
   cleaned_ids: string[];
+  /** Bytes left behind by `failed`, each counted once. */
+  bytes_failed: number;
+  failed: CleanIssue[];
+  /** Gone before the clean reached them: neither freed nor failed. */
+  already_gone: CleanIssue[];
 }
 
 // ── Clean Module Commands ───────────────────────────────

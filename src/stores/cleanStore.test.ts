@@ -8,6 +8,7 @@ const initialClean = useCleanStore.getState();
 const initialSettings = useSettingsStore.getState();
 
 const items = [scanItem("chrome", 100), scanItem("slack", 50), scanItem("xcode", 0)];
+const noIssues = { bytes_failed: 0, failed: [], already_gone: [] };
 
 beforeEach(() => {
   useCleanStore.setState(initialClean, true);
@@ -75,7 +76,7 @@ describe("clean", () => {
     const progress = { current_item: "chrome", items_done: 1, items_total: 1, paths_done: 1, paths_total: 1, bytes_freed: 100 };
     onInvoke("execute_clean", () => {
       emit("clean-progress", progress);
-      return { items_cleaned: 1, bytes_freed: 100, errors: [], cleaned_ids: ["chrome"] };
+      return { items_cleaned: 1, bytes_freed: 100, errors: [], cleaned_ids: ["chrome"], ...noIssues };
     });
     onInvoke("add_bytes_freed", () => 100);
 
@@ -105,7 +106,7 @@ describe("dismissDone", () => {
     useCleanStore.setState({
       phase: "done",
       items,
-      result: { items_cleaned: 1, bytes_freed: 100, errors: [], cleaned_ids: ["chrome"] },
+      result: { items_cleaned: 1, bytes_freed: 100, errors: [], cleaned_ids: ["chrome"], ...noIssues },
     });
     useCleanStore.getState().dismissDone();
     const s = useCleanStore.getState();
@@ -119,9 +120,30 @@ describe("dismissDone", () => {
     useCleanStore.setState({
       phase: "done",
       items,
-      result: { items_cleaned: 2, bytes_freed: 150, errors: [], cleaned_ids: ["chrome", "slack"] },
+      result: { items_cleaned: 2, bytes_freed: 150, errors: [], cleaned_ids: ["chrome", "slack"], ...noIssues },
     });
     useCleanStore.getState().dismissDone();
     expect(useCleanStore.getState()).toMatchObject({ phase: "idle", items: [] });
+  });
+});
+
+describe("lifetime stats", () => {
+  beforeEach(() => useCleanStore.setState({ phase: "results", items, selectedIds: new Set(["chrome", "slack"]) }));
+
+  it("credits only the bytes actually freed, not what failed or was already gone", async () => {
+    const result = {
+      items_cleaned: 1,
+      bytes_freed: 100,
+      errors: ["x"],
+      cleaned_ids: ["chrome"],
+      bytes_failed: 50,
+      failed: [{ rule_id: "slack", label: "slack", path: "/tmp/slack", size: 50, reason: "in_use" }],
+      already_gone: [{ rule_id: "chrome", label: "chrome", path: "/tmp/chrome/x", size: 30, reason: "already_gone" }],
+    };
+    onInvoke("execute_clean", () => result);
+    onInvoke("add_bytes_freed", () => 100);
+    await useCleanStore.getState().clean();
+    expect(invokedWith("add_bytes_freed")).toEqual([{ bytes: 100 }]);
+    expect(useCleanStore.getState().result).toEqual(result);
   });
 });

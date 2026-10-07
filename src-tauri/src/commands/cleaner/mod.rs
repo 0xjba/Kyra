@@ -46,13 +46,55 @@ pub struct CleanProgress {
     pub bytes_freed: u64,
 }
 
+/// Why a selected path was not freed, in terms a user can act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueReason {
+    InUse,
+    NoPermission,
+    AlreadyGone,
+    Protected,
+    Other,
+}
+
+/// A selected path that was not (fully) removed.
+#[derive(Clone, Debug, Serialize)]
+pub struct CleanIssue {
+    pub rule_id: String,
+    pub label: String,
+    pub path: String,
+    /// Bytes still on disk for a failure, or the scanned size for an
+    /// already-gone path (which counts as neither freed nor failed).
+    pub size: u64,
+    pub reason: IssueReason,
+}
+
 /// Final result of a clean operation.
 #[derive(Clone, Serialize)]
 pub struct CleanResult {
     pub items_cleaned: usize,
+    /// Bytes actually removed, measured as files are unlinked.
     pub bytes_freed: u64,
     pub errors: Vec<String>,
     pub cleaned_ids: Vec<String>,
+    /// Bytes left on disk by `failed`, each counted once.
+    pub bytes_failed: u64,
+    pub failed: Vec<CleanIssue>,
+    pub already_gone: Vec<CleanIssue>,
+}
+
+impl CleanResult {
+    pub fn empty() -> Self {
+        CleanResult {
+            items_cleaned: 0,
+            bytes_freed: 0,
+            errors: vec![],
+            cleaned_ids: vec![],
+            bytes_failed: 0,
+            failed: vec![],
+            already_gone: vec![],
+        }
+    }
 }
 
 /// Paths that must never be deleted.
@@ -113,7 +155,7 @@ pub async fn scan_for_cleanables() -> Vec<ScanItem> {
     let rules = rules::all_rules();
     let mut results = scanner::scan_rules(&rules);
     results.extend(scanner::scan_orphaned_data());
-    results
+    scanner::drop_duplicate_paths(results)
 }
 
 #[tauri::command]
@@ -124,15 +166,13 @@ pub async fn execute_clean(
     permanent: bool,
 ) -> Result<CleanResult, String> {
     if items.is_empty() {
-        return Ok(CleanResult {
-            items_cleaned: 0,
-            bytes_freed: 0,
-            errors: vec![],
-            cleaned_ids: vec![],
-        });
+        return Ok(CleanResult::empty());
     }
 
+    // Pawtrol and a manual clean must never delete at the same time.
+    let busy = crate::commands::guardian::patrol::begin_manual_clean()?;
     let result = tokio::task::spawn_blocking(move || {
+        let _busy = busy;
         executor::execute_clean_items(&items, dry_run, permanent, |progress| {
             let _ = app.emit("clean-progress", progress);
         })
