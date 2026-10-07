@@ -70,6 +70,12 @@ pub fn is_protected_user_data_component(name: &str) -> bool {
 /// write bit to clear it. One owned by another user (e.g. root, left by
 /// `sudo npm`) does not.
 pub fn deletable_dir_size(path: &Path) -> u64 {
+    deletable_dir_size_except(path, &|_| false)
+}
+
+/// `deletable_dir_size`, also leaving out every entry `skip` matches and
+/// Kyra's own data, both of which the cleaner leaves in place.
+pub fn deletable_dir_size_except(path: &Path, skip: &dyn Fn(&Path) -> bool) -> u64 {
     let uid = unsafe { libc::getuid() };
     let mut total: u64 = 0;
     let mut stack = vec![path.to_path_buf()];
@@ -86,7 +92,7 @@ pub fn deletable_dir_size(path: &Path) -> u64 {
         if let Ok(entries) = fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_symlink() {
+                if p.is_symlink() || skip(&p) || crate::commands::data_guard::is_own_data(&p) {
                     continue;
                 }
                 if p.is_dir() {

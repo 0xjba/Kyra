@@ -75,11 +75,25 @@ fn with_owner_write<T>(dir: &Path, mut op: impl FnMut() -> io::Result<T>) -> io:
     }
 }
 
+/// What a delete leaves in place inside its target: whitelisted paths and
+/// Kyra's own data (its log, settings and caches).
+#[derive(Clone, Copy)]
+struct Keep<'a> {
+    whitelist: &'a HashSet<&'a str>,
+}
+
+impl Keep<'_> {
+    fn keeps(&self, path: &Path) -> bool {
+        data_guard::is_own_data(path) || path.to_str().is_some_and(|p| is_whitelisted(p, self.whitelist))
+    }
+}
+
 /// Removes everything inside `dir`, which must be the approved path or a
 /// real directory below it. Keeps going past failures so one stubborn
 /// entry can't leave the rest of the tree behind. Protected user-data
-/// subdirectories are kept. Returns true when `dir` ended up empty.
-fn clear_dir(dir: &Path, out: &mut Removal) -> bool {
+/// subdirectories and whatever `keep` names are left in place. Returns true
+/// when `dir` ended up empty.
+fn clear_dir(dir: &Path, keep: Keep, out: &mut Removal) -> bool {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -90,6 +104,10 @@ fn clear_dir(dir: &Path, out: &mut Removal) -> bool {
     let mut empty = true;
     for entry in entries.flatten() {
         let child = entry.path();
+        if keep.keeps(&child) {
+            empty = false;
+            continue;
+        }
         let meta = match fs::symlink_metadata(&child) {
             Ok(m) => m,
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
@@ -104,7 +122,7 @@ fn clear_dir(dir: &Path, out: &mut Removal) -> bool {
                 empty = false;
                 continue;
             }
-            if !clear_dir(&child, out) {
+            if !clear_dir(&child, keep, out) {
                 empty = false;
                 continue;
             }
@@ -135,8 +153,11 @@ fn clear_dir(dir: &Path, out: &mut Removal) -> bool {
 /// Permanently removes `path` (file, symlink or directory tree), keeping
 /// protected user-data subdirectories. The parent of `path` lies outside
 /// the approved path, so its permissions are never changed.
-fn remove_tree(path: &Path) -> Removal {
+fn remove_tree(path: &Path, keep: Keep) -> Removal {
     let mut out = Removal::default();
+    if keep.keeps(path) {
+        return out;
+    }
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         if is_protected_user_data_component(name) {
             return out;
@@ -161,11 +182,76 @@ fn remove_tree(path: &Path) -> Removal {
         }
         return out;
     }
-    if clear_dir(path, &mut out) && out.error.is_none() {
+    if clear_dir(path, keep, &mut out) && out.error.is_none() {
         match fs::remove_dir(path) {
             Ok(()) => out.removed = true,
             Err(e) => out.fail(e),
         }
+    }
+    out
+}
+
+/// Size of `path` as the scanner measures it, and whether anything inside
+/// must be kept. Never follows symlinks.
+fn measure_keeping(path: &Path, keep: Keep) -> (u64, bool) {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return (0, false);
+    };
+    if meta.file_type().is_symlink() {
+        return (0, false);
+    }
+    if !meta.file_type().is_dir() {
+        return (meta.len(), false);
+    }
+    let (mut size, mut holds_kept) = (0, false);
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if keep.keeps(&p) {
+                holds_kept = true;
+                continue;
+            }
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.file_type().is_dir() => stack.push(p),
+                Ok(m) if !m.file_type().is_symlink() => size += physical_size(&m),
+                _ => {}
+            }
+        }
+    }
+    (size, holds_kept)
+}
+
+/// Moves `path` to the Trash. When something inside must be kept, trashes
+/// around it instead of moving the whole folder.
+fn trash_tree(path: &Path, keep: Keep) -> Removal {
+    let mut out = Removal::default();
+    if keep.keeps(path) {
+        return out;
+    }
+    let (size, holds_kept) = measure_keeping(path, keep);
+    if !holds_kept {
+        match move_to_trash(path) {
+            Ok(()) => {
+                out.freed = size;
+                out.removed = true;
+            }
+            Err(e) => out.fail(e),
+        }
+        return out;
+    }
+    match fs::read_dir(path) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let r = trash_tree(&entry.path(), keep);
+                out.freed += r.freed;
+                if let Some(e) = r.error {
+                    out.fail(e);
+                }
+            }
+        }
+        Err(e) => out.fail(e),
     }
     out
 }
@@ -177,7 +263,7 @@ fn remove_tree(path: &Path) -> Removal {
 /// the root is removed. Returns `Ok(true)` if the root was removed,
 /// `Ok(false)` if protected content kept it alive.
 fn safe_remove_dir_all(path: &Path) -> io::Result<bool> {
-    let r = remove_tree(path);
+    let r = remove_tree(path, Keep { whitelist: &HashSet::new() });
     match r.error {
         Some(e) => Err(e),
         None => Ok(r.removed),
@@ -340,7 +426,7 @@ fn is_whitelisted(path: &str, whitelist: &HashSet<&str>) -> bool {
 
 /// Delete the contents of a directory without removing the directory itself.
 /// Returns the bytes freed and the entries that could not be removed.
-fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<(std::path::PathBuf, io::Error)>) {
+fn delete_dir_contents(dir: &Path, permanent: bool, keep: Keep) -> (u64, Vec<(std::path::PathBuf, io::Error)>) {
     let mut freed: u64 = 0;
     let mut errs = Vec::new();
 
@@ -365,26 +451,28 @@ fn delete_dir_contents(dir: &Path, permanent: bool) -> (u64, Vec<(std::path::Pat
                 continue;
             }
         }
+        if keep.keeps(&path) {
+            shared::log_operation("CLEAN", &path.to_string_lossy(), "skipped: on user whitelist or Kyra's own data");
+            continue;
+        }
         if let Err(refusal) = data_guard::check_general(&path) {
             shared::log_operation("CLEAN", &path.to_string_lossy(), &format!("skipped: {}", refusal));
             continue;
         }
 
         if permanent {
-            let r = remove_tree(&path);
+            let r = remove_tree(&path, keep);
             freed += r.freed;
             match r.error {
                 None => shared::log_operation("CLEAN", &path.to_string_lossy(), "DELETED"),
                 Some(e) => errs.push((path, e)),
             }
         } else {
-            let size = size_on_disk(&path);
-            match move_to_trash(&path) {
-                Ok(()) => {
-                    freed += size;
-                    shared::log_operation("CLEAN", &path.to_string_lossy(), "TRASHED");
-                }
-                Err(e) => errs.push((path, e)),
+            let r = trash_tree(&path, keep);
+            freed += r.freed;
+            match r.error {
+                None => shared::log_operation("CLEAN", &path.to_string_lossy(), "TRASHED"),
+                Some(e) => errs.push((path, e)),
             }
         }
     }
@@ -590,6 +678,7 @@ fn clean_path(
     rec: &mut Recorder,
 ) -> (u64, bool) {
     let path_info = task.info;
+    let keep = Keep { whitelist: whitelist_set };
 
     // Skip safe-path / whitelist checks for pseudo-URIs
     // because they are not real filesystem paths.
@@ -713,7 +802,7 @@ fn clean_path(
     // delete contents instead of the directory itself to avoid permission errors
     // from macOS locking the parent directory.
     if path_info.is_dir && is_container_dir(&path_info.path) {
-        let (freed, errs) = delete_dir_contents(path, permanent);
+        let (freed, errs) = delete_dir_contents(path, permanent, keep);
         for (child, e) in &errs {
             rec.io_issue(item, child, e, 0);
         }
@@ -726,20 +815,15 @@ fn clean_path(
             rec.io_issue(item, path, &e, path_info.size);
             return (0, false);
         }
-        let size = size_on_disk(path);
-        return match move_to_trash(path) {
-            Ok(()) => {
-                shared::log_operation("CLEAN", &path_info.path, "TRASHED");
-                (size, true)
-            }
-            Err(e) => {
-                rec.io_issue(item, path, &e, path_info.size);
-                (0, false)
-            }
-        };
+        let r = trash_tree(path, keep);
+        match &r.error {
+            None => shared::log_operation("CLEAN", &path_info.path, "TRASHED"),
+            Some(e) => rec.io_issue(item, path, e, path_info.size),
+        }
+        return (r.freed, r.error.is_none() || r.freed > 0);
     }
 
-    let r = remove_tree(path);
+    let r = remove_tree(path, keep);
     match &r.error {
         None => shared::log_operation("CLEAN", &path_info.path, "DELETED"),
         // Gone before we got to it: neither freed nor failed.
@@ -827,6 +911,10 @@ mod tests {
     }
 
     fn rule_items_for_home(home: &Path) -> Vec<ScanItem> {
+        rule_items_for_home_with(home, &[])
+    }
+
+    fn rule_items_for_home_with(home: &Path, whitelist: &[String]) -> Vec<ScanItem> {
         use crate::commands::cleaner::{rules, scanner};
         let items = rules::all_rules()
             .into_iter()
@@ -834,7 +922,7 @@ mod tests {
                 // Absolute rule paths point at the real system; only the
                 // home-relative ones can be aimed at the fake home.
                 rule.paths.retain(|p| p.starts_with("~/"));
-                scanner::collect_rule_paths_in(&rule, &[], Some(home))
+                scanner::collect_rule_paths_in(&rule, whitelist, Some(home))
             })
             .collect();
         scanner::drop_guard_refused_paths(items)
@@ -1223,7 +1311,7 @@ mod tests {
         write_file(&canon(&outside).join("keep.txt"), 1);
         symlink(canon(&outside), root.join("link")).unwrap();
 
-        let (freed, errs) = delete_dir_contents(&root, true);
+        let (freed, errs) = delete_dir_contents(&root, true, Keep { whitelist: &HashSet::new() });
 
         assert!(errs.is_empty(), "{errs:?}");
         assert!(freed > 0);
@@ -1559,5 +1647,121 @@ mod tests {
         assert!(!fx.path(".npm/_cacache").exists(), "{:?}", result.errors);
         assert!(!fx.path("Library/Caches/pip").exists(), "{:?}", result.errors);
         assert!(result.already_gone.is_empty(), "{:?}", result.already_gone);
+    }
+
+    #[test]
+    fn whitelisted_folders_inside_an_emptied_parent_survive_and_are_not_counted() {
+        use crate::commands::cleaner::rules;
+        let dir = workspace_tempdir();
+        let fx = data_fixtures::build(&canon(&dir).join("home"));
+        let caches = fx.path("Library/Caches");
+        write_file(&caches.join("foo/keep.bin"), 300_000);
+        write_file(&caches.join("bar/junk.bin"), 50_000);
+        write_file(&caches.join("baz/inner/keep.bin"), 200_000);
+        write_file(&caches.join("baz/junk.bin"), 20_000);
+        let whitelist = vec![s(&caches.join("foo")), s(&caches.join("baz/inner"))];
+
+        let user_caches = rules::all_rules().into_iter().find(|r| r.id == "user_caches").unwrap();
+        let unfiltered = crate::commands::cleaner::scanner::collect_rule_paths_in(&user_caches, &[], Some(&fx.home)).unwrap();
+        let items = vec![crate::commands::cleaner::scanner::collect_rule_paths_in(&user_caches, &whitelist, Some(&fx.home)).unwrap()];
+        let kept = dir_size(&caches.join("foo")) + dir_size(&caches.join("baz/inner"));
+        assert_eq!(items[0].total_size, unfiltered.total_size - kept, "whitelisted bytes are not offered");
+
+        let result = run(&items, false, &whitelist);
+
+        assert!(caches.join("foo/keep.bin").exists());
+        assert!(caches.join("baz/inner/keep.bin").exists());
+        assert!(!caches.join("bar").exists() && !caches.join("baz/junk.bin").exists());
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        assert_eq!(result.bytes_freed, items[0].total_size, "freed matches the offered size");
+        fx.assert_intact();
+    }
+
+    #[test]
+    fn emptying_a_container_skips_whitelisted_guarded_and_kyra_children() {
+        use crate::commands::cleaner::scanner;
+        let dir = workspace_tempdir();
+        let logs = canon(&dir).join("Library/Logs");
+        write_file(&logs.join("Kyra/operations.log"), 10_000);
+        write_file(&logs.join("keep_me/a.log"), 10_000);
+        write_file(&logs.join("project/.git/HEAD"), 10_000);
+        write_file(&logs.join("wallet.dat"), 10_000);
+        write_file(&logs.join("app/old.log"), 7_000);
+        write_file(&logs.join("loose.log"), 3_000);
+        let whitelist = vec![s(&logs.join("keep_me"))];
+        let wl: HashSet<&str> = whitelist.iter().map(|w| w.as_str()).collect();
+
+        let offered = scanner::container_size_for_tests(&logs, &whitelist);
+        assert_eq!(offered, dir_size(&logs.join("app")) + 3_000);
+
+        let (freed, errs) = delete_dir_contents(&logs, true, Keep { whitelist: &wl });
+
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(freed, offered);
+        for kept in ["Kyra/operations.log", "keep_me/a.log", "project/.git/HEAD", "wallet.dat"] {
+            assert!(logs.join(kept).exists(), "{kept} was removed");
+        }
+        assert!(!logs.join("app").exists() && !logs.join("loose.log").exists());
+    }
+
+    #[test]
+    fn kyra_never_cleans_its_own_log_settings_or_caches() {
+        use crate::commands::cleaner::scanner;
+        use crate::commands::test_support::set_age_days;
+        // A plain home, so rules that take a whole parent folder (User
+        // Caches, Saved Application State) are offered and have to step
+        // around Kyra's folders inside it.
+        let dir = workspace_tempdir();
+        let home = canon(&dir).join("home");
+        let path = |rel: &str| home.join(rel);
+        write_file(&path("Library/Caches/com.example.app/junk.bin"), 50_000);
+        write_file(&path("Library/Logs/com.example.app/old.log"), 5_000);
+        write_file(&path("Library/Saved Application State/com.example.app.savedState/w.plist"), 1_000);
+        set_age_days(&path("Library/Logs/com.example.app"), 400);
+        let own = [
+            "Library/Logs/Kyra/operations.log",
+            "Library/Application Support/com.kyra.app/settings.json",
+            "Library/Application Support/com.kyra.app/license.json",
+            "Library/Caches/com.kyra.app/analyzer/overview.json",
+            "Library/Caches/com.eleventribes.kyra/WebKit/blob",
+            "Library/WebKit/com.eleventribes.kyra/WebsiteData/x",
+            "Library/Saved Application State/com.eleventribes.kyra.savedState/windows.plist",
+            ".cache/kyra/brew_last_cleanup",
+        ];
+        for rel in own {
+            write_file(&path(rel), 4_096);
+        }
+        // Old enough for every age-filtered rule (User Logs: 7 days).
+        for rel in ["Library/Logs/Kyra", "Library/Caches/com.kyra.app", "Library/Saved Application State/com.eleventribes.kyra.savedState"] {
+            set_age_days(&path(rel), 400);
+        }
+
+        let mut items = rule_items_for_home(&home);
+        items.extend(scanner::scan_orphaned_data_in(&home, &HashSet::new(), &[], &|_| false));
+        for item in &items {
+            for p in &item.paths {
+                assert!(!data_guard::is_own_data(Path::new(&p.path)), "rule {} offers {}", item.rule_id, p.path);
+            }
+        }
+
+        let result = run(&items, false, &[]);
+        assert!(result.bytes_freed > 0);
+        for rel in own {
+            assert!(path(rel).exists(), "{rel} was removed");
+        }
+        assert!(!path("Library/Caches/com.example.app").exists(), "{:?}", result.errors);
+        let offered = |needle: &str| items.iter().flat_map(|i| &i.paths).any(|p| p.path.ends_with(needle));
+        assert!(offered("Library/Caches"), "the parent folder is offered whole");
+
+        // Handed directly, every one is refused.
+        let direct: Vec<(std::path::PathBuf, u64)> = own.iter().map(|rel| (path(rel), 1)).collect();
+        let refs: Vec<(&Path, u64)> = direct.iter().map(|(p, n)| (p.as_path(), *n)).collect();
+        let refused = run(&[item("hostile", &refs)], false, &[]);
+        assert_eq!(refused.bytes_freed, 0);
+        assert_eq!(refused.failed.len(), own.len());
+        assert!(refused.failed.iter().all(|f| f.reason == IssueReason::Protected));
+        for rel in own {
+            assert!(path(rel).exists(), "{rel} was removed");
+        }
     }
 }

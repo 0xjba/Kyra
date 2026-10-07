@@ -782,7 +782,39 @@ fn protected(category: Category, detail: &'static str, contains: bool) -> Verdic
     Verdict::Protected { category, detail, contains }
 }
 
+/// Length of the leading part of `comps` that is one of Kyra's own folders
+/// (settings and license, operations log, caches, WebKit data), if any.
+/// Path-only, so it is cheap enough to ask about every entry of a tree.
+fn own_root_len(comps: &[String]) -> Option<usize> {
+    (2..=comps.len()).find(|&n| {
+        let (name, parent) = (&comps[n - 1], &comps[n - 2]);
+        if eq(parent, ".cache") && eq(name, "kyra") {
+            return true;
+        }
+        if n < 3 || !eq(&comps[n - 3], "Library") {
+            return false;
+        }
+        (eq(parent, "Logs") && eq(name, "Kyra"))
+            || (eq(name, "com.kyra.app") && (eq(parent, "Application Support") || eq(parent, "Caches")))
+            || seg_matches(&Prefix(SELF_BUNDLE_ID), name)
+    })
+}
+
+/// Kyra's bundle id: WebKit, HTTP storage, saved state and preferences.
+const SELF_BUNDLE_ID: &str = "com.eleventribes.kyra";
+
+/// True for Kyra's own data and anything inside it. No cleaning rule may
+/// touch it: removing it mid-run would wipe the operations log, settings
+/// and license.
+pub fn is_own_data(path: &Path) -> bool {
+    components(path).is_some_and(|c| own_root_len(&c).is_some())
+}
+
 fn classify(comps: &[String], homes: &[usize]) -> Verdict {
+    if let Some(n) = own_root_len(comps) {
+        let detail = if n == comps.len() { "Kyra's own data" } else { "inside Kyra's own data" };
+        return protected(UserData, detail, false);
+    }
     // The outermost root decides which cache leaves are allowed.
     for i in 0..comps.len() {
         let mut hit = if i == 0 { first_hit(ABS_ROOTS, comps) } else { None };
@@ -1517,6 +1549,36 @@ mod icloud_tests {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn kyra_own_data_is_refused_everywhere_but_lookalikes_are_not() {
+        for p in [
+            "/Users/a/Library/Logs/Kyra",
+            "/Users/a/Library/Logs/Kyra/operations.log",
+            "/Users/a/Library/Application Support/com.kyra.app/settings.json",
+            "/Users/a/Library/Caches/com.kyra.app",
+            "/Users/a/Library/Caches/com.eleventribes.kyra/WebKit",
+            "/Users/a/Library/WebKit/com.eleventribes.kyra",
+            "/Users/a/Library/Saved Application State/com.eleventribes.kyra.savedState",
+            "/Users/a/.cache/kyra/brew_last_cleanup",
+        ] {
+            assert!(is_own_data(Path::new(p)), "{p}");
+            assert!(matches!(static_verdict(Path::new(p)), Verdict::Protected { contains: false, .. }), "{p}");
+        }
+        for p in [
+            "/Users/a/Library/Logs",
+            "/Users/a/Library/Caches",
+            "/Users/a/Library/Logs/KyraHelper",
+            "/Users/a/Library/Caches/com.kyra.appx",
+            "/Users/a/Library/Caches/com.example.kyra",
+            "/Users/a/Logs/Kyra",
+            "/Users/a/.cache/kyra-other",
+        ] {
+            assert!(!is_own_data(Path::new(p)), "{p}");
+        }
+        // Ancestors stay cleanable: rules that empty them step around Kyra's folders.
+        assert_eq!(static_verdict(Path::new("/Users/a/Library/Caches")), Verdict::NotProtected);
+    }
     use super::*;
     use crate::commands::test_support::{canon, s, workspace_tempdir, write_file};
 

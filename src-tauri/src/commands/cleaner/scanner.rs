@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use super::{is_safe_path, uses_pseudo_paths, CleanRule, PathInfo, ScanItem};
-use crate::commands::utils::{deletable_dir_size, dir_size};
+use crate::commands::utils::{deletable_dir_size, deletable_dir_size_except, dir_size};
 
 // ── Special Scan Functions ───────────────────────────────────────────
 
@@ -1307,7 +1307,9 @@ fn scan_external_volumes_metadata() -> Vec<ScanItem> {
 
 /// Scans a directory for entries older than `max_age_days` days.
 /// Returns individual PathInfo items for each old entry and their combined size.
-fn scan_with_age_filter(dir: &Path, max_age_days: u32) -> (Vec<PathInfo>, u64) {
+/// Whitelisted paths inside an entry are left out of its size (the cleaner
+/// leaves them in place).
+fn scan_with_age_filter(dir: &Path, max_age_days: u32, whitelist: &[String]) -> (Vec<PathInfo>, u64) {
     let cutoff = SystemTime::now() - Duration::from_secs(max_age_days as u64 * 86400);
     let mut paths = Vec::new();
     let mut total = 0u64;
@@ -1323,7 +1325,7 @@ fn scan_with_age_filter(dir: &Path, max_age_days: u32) -> (Vec<PathInfo>, u64) {
                 let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 if modified < cutoff {
                     let size = if path.is_dir() {
-                        deletable_dir_size(&path)
+                        size_keeping(&path, whitelist)
                     } else {
                         meta.len()
                     };
@@ -1934,7 +1936,7 @@ pub(super) fn collect_rule_paths_in(rule: &CleanRule, whitelist: &[String], home
             if let Some(max_age_days) = rule.max_age_days {
                 // Age-filtered scanning: only include files older than the threshold
                 if expanded.is_dir() {
-                    let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days);
+                    let (old_paths, _old_total) = scan_with_age_filter(&expanded, max_age_days, whitelist);
                     let before_count = found_paths.len();
                     for p in old_paths {
                         if !is_whitelisted(&p.path, whitelist) {
@@ -1954,9 +1956,9 @@ pub(super) fn collect_rule_paths_in(rule: &CleanRule, whitelist: &[String], home
             } else {
                 // Standard scanning: include the entire path
                 let size = if expanded.is_dir() && super::executor::is_container_dir(&expanded_str) {
-                    container_deletable_size(&expanded)
+                    container_deletable_size(&expanded, whitelist)
                 } else if expanded.is_dir() {
-                    deletable_dir_size(&expanded)
+                    size_keeping(&expanded, whitelist)
                 } else {
                     expanded.metadata().map(|m| m.len()).unwrap_or(0)
                 };
@@ -2022,11 +2024,20 @@ pub(super) fn drop_guard_refused_paths(items: Vec<ScanItem>) -> Vec<ScanItem> {
         .collect()
 }
 
+/// Deletable size of `dir`, leaving out whitelisted paths inside it: the
+/// cleaner keeps those, so they must not count towards the total.
+fn size_keeping(dir: &Path, whitelist: &[String]) -> u64 {
+    if whitelist.is_empty() {
+        return deletable_dir_size(dir);
+    }
+    deletable_dir_size_except(dir, &|p| is_whitelisted(&p.to_string_lossy(), whitelist))
+}
+
 /// Size of what clearing a container folder (~/Library/Caches, …) removes:
 /// the executor empties it entry by entry and skips symlinks, protected
-/// user-data folders and anything the data guard refuses, so those are
-/// not counted either.
-fn container_deletable_size(dir: &Path) -> u64 {
+/// user-data folders, whitelisted paths and anything the data guard refuses
+/// (which includes Kyra's own data), so those are not counted either.
+fn container_deletable_size(dir: &Path, whitelist: &[String]) -> u64 {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -2039,15 +2050,21 @@ fn container_deletable_size(dir: &Path) -> u64 {
                 .and_then(|n| n.to_str())
                 .is_some_and(crate::commands::utils::is_protected_user_data_component)
         })
+        .filter(|p| !is_whitelisted(&p.to_string_lossy(), whitelist))
         .filter(|p| crate::commands::data_guard::check_general(p).is_ok())
         .map(|p| {
             if p.is_dir() {
-                deletable_dir_size(&p)
+                size_keeping(&p, whitelist)
             } else {
                 p.metadata().map(|m| m.len()).unwrap_or(0)
             }
         })
         .sum()
+}
+
+#[cfg(test)]
+pub(super) fn container_size_for_tests(dir: &Path, whitelist: &[String]) -> u64 {
+    container_deletable_size(dir, whitelist)
 }
 
 /// Keeps each path in the first item that lists it. Several rules can find
@@ -3162,7 +3179,7 @@ mod tests {
         let got: Vec<&str> = item.paths.iter().map(|p| p.path.as_str()).collect();
         assert_eq!(got, vec![s(&root.join("old.log"))]);
 
-        let (all_old, _) = scan_with_age_filter(&root, 7);
+        let (all_old, _) = scan_with_age_filter(&root, 7, &[]);
         let mut names: Vec<String> = all_old.iter().map(|p| p.path.clone()).collect();
         names.sort();
         assert_eq!(names, vec![s(&root.join("old.log")), s(&root.join("olddir"))]);
@@ -3311,7 +3328,7 @@ mod tests {
         write_file(&canon(&outside).join("big.bin"), 200_000);
         symlink(canon(&outside), caches.join("link")).unwrap();
 
-        let size = container_deletable_size(&caches);
+        let size = container_deletable_size(&caches, &[]);
         assert_eq!(size, deletable_dir_size(&caches.join("com.example.app")) + 1_000);
     }
 }
